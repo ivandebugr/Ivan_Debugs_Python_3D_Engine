@@ -118,6 +118,31 @@ Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/e
 
 ## Changelog
 
+### v5 — Ursina 8.3.0 compatibility, anti-aliasing, crosshair polish
+
+#### Black screen fix (root cause)
+
+Ursina 8.3.0 changed `Entity.default_shader` from `None` to `unlit_with_fog_shader`, and `Sky()` hardcodes `shader=unlit_shader`. Both shaders use GLSL `#version 130` / `#version 140`, but macOS OpenGL 2.1 (the only context available on Apple Silicon via Panda3D's CocoaGraphicsPipe) supports GLSL 1.20 at most. Every shader compilation failed silently → all geometry rendered as opaque black.
+
+**Fix:** `_patch_shaders_to_glsl120()` in `main.py` rewrites both shader objects to GLSL 1.20 syntax (`attribute`/`varying`, `texture2D()`, `gl_FragColor`) before the first entity is created.
+
+Additional fixes applied alongside:
+- `window.color = color.rgb(50, 50, 60)` — Ursina 8.3.0 changed the default window background to black.
+- `Sky()` instead of `Sky(texture='sky_default')` — the `sky_default` texture asset was removed in 8.3.0.
+
+#### Anti-aliasing (MSAA 4×)
+
+- `loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')` called before `App()` so the OS-level MSAA framebuffer is requested before the window opens.
+- `render.setAntialias(AntialiasAttrib.MAuto)` + `render2d.setAntialias(AntialiasAttrib.MAuto)` enable AA on the 3D scene and all UI.
+
+#### Crosshair
+
+- Scale halved: `(0.02, 0.02)` → `(0.01, 0.01)`.
+- Hidden by default (`visible=False` on creation); shown only when gameplay starts.
+- Hidden when pause menu opens; restored immediately on resume.
+
+---
+
 ### v4 — dependency updates
 
 All Python dependencies bumped to their latest stable versions.
@@ -131,8 +156,6 @@ All Python dependencies bumped to their latest stable versions.
 | `pillow` | 11.1.0 | 12.2.0 |
 | `pygame` | 2.6.1 | 2.6.1 (already latest) |
 | `panda3d-gltf` | 1.3.0 | 1.3.0 (already latest) |
-
-**Known issue:** game currently shows a black screen on launch following the Ursina 8.3.0 upgrade. Under investigation — likely an API or scene initialisation change between 8.1.x and 8.3.0.
 
 ---
 

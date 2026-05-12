@@ -3,6 +3,14 @@
 ## Project
 Ursina Engine (Python) first-person shooter. Entry point: `main.py`.
 
+## Design Skills
+Before writing any code, read and apply these skills:
+
+1. **Senior Fullstack Skill:** `/Users/ivanrybak/driftfix/SKILL.md`
+2. **karpathy-coder Skill:** `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/claude-skills-main 2 copy/engineering/karpathy-coder/skills/karpathy-coder/SKILL.md`
+3. **senior-architect Skill:** `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/claude-skills-main 2 copy/engineering-team/senior-architect/SKILL.md`
+4. **code-reviewer Skill:**`/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/claude-skills-main 2 copy/engineering-team/code-reviewer/SKILL.md`
+
 ## Structure
 ```
 main.py                      # App init, global update loop, scene management
@@ -98,6 +106,26 @@ def shoot(self):
 ## Scene transitions
 Return-to-menu is handled by `PauseMenu.return_to_main_menu()` → `main_menu()`. HealthBar sub-entities must NOT use `eternal=True`.
 
+## Ursina 8.3.0 compatibility (macOS / OpenGL 2.1)
+
+**Root cause of black screen after upgrade:** Ursina 8.3.0 set `Entity.default_shader = unlit_with_fog_shader`, and `Sky()` hardcodes `shader=unlit_shader`. Both shaders use GLSL `#version 130` / `#version 140`. macOS OpenGL 2.1 (the only context Panda3D's `CocoaGraphicsPipe` provides on Apple Silicon) supports GLSL 1.20 at most → every shader fails to compile → geometry renders black.
+
+**Fix already applied in `main.py`:** `_patch_shaders_to_glsl120()` is called immediately after `Ursina()` and before any entity is created. It rewrites the `vertex` and `fragment` source strings on both shader objects and sets `compiled = False` so they recompile with the new source on first use.
+
+Key GLSL 1.20 differences:
+- `attribute` / `varying` instead of `in` / `out`
+- `texture2D()` instead of `texture()`
+- `gl_FragColor` instead of a named `out vec4`
+
+**Do not** upgrade these shaders back to `#version 130+` without verifying that `gl-version 3 2` creates a working Core Profile context on the target machine. On macOS, `gl-version 3 2` in `loadPrcFileData` causes Core Profile (which rejects `#version 130` compatibility shaders) without Panda3D generating `#version 150 core` replacements — net result is the same compilation failure.
+
+**Other Ursina 8.3.0 changes accounted for:**
+- `window.color` default changed to black → set explicitly to `color.rgb(50, 50, 60)` after `App()`.
+- `Sky(texture='sky_default')` → `Sky()` — the `sky_default` asset was removed.
+
+## Crosshair
+`self.crosshair` lives on the `Weapon` instance (`weapon.py`). Created with `visible=False`; shown in `start_game()` when gameplay begins. Hidden/restored in `main.py`'s `input()` escape handler. Access via `player.weapon.crosshair`.
+
 ## Known footguns
 - `time` in Ursina scope is panda3d's clock, not stdlib `time`. Use `time.dt` for frame delta; use `import time as _time; _time.time()` for wall-clock timestamps.
 - `Vec3 == tuple` is unreliable — use `distance(a, Vec3(*b)) < 0.01`.
@@ -106,14 +134,17 @@ Return-to-menu is handled by `PauseMenu.return_to_main_menu()` → `main_menu()`
 - `_swept_blocked` must use raw `raycast().hit`, not `can_hit` — walls are unregistered.
 - Pool bullets must not have `enabled` toggled — use position parking (`y = -10000`) instead.
 - `swept_cast` ignores unregistered entities (walls) by design — correct for bullets, wrong for player movement.
+- Ursina 8.3.0 shader patching (`_patch_shaders_to_glsl120`) must run before any `Entity` is created. If you move or defer it, the first entity to compile its shader will cache the broken `_shader` object and all subsequent entities of that type will also fail.
 
 ## Testing a fix
 ```bash
 python main.py          # launch game
+# Scene renders (no black screen) — sky, ground, and level blocks all visible
 # Shoot enemy → health bar decreases, enemy dies cleanly (no crash)
 # Walk into wall at any height (feet, waist, head) → player stops (no tunnelling)
 # Walk to wall and look down → wall stays visible (no clip-through)
 # Enemy shoots player → player takes damage once per bullet
 # Fire 30+ shots rapidly → no new Entity objects allocated after pool warms up
 # Return to menu and re-enter → no duplicate UI elements
+# Pause (Esc) → crosshair disappears; resume → crosshair reappears
 ```

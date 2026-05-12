@@ -213,8 +213,9 @@ class Weapon(Entity):
             model='quad',
             texture='circle',
             color=color.red,
-            scale=(0.02, 0.02),
-            z=-1
+            scale=(0.01, 0.01),  # FIX-3: smaller crosshair (halved from 0.02)
+            z=-1,
+            visible=False  # FIX-3: hidden until gameplay starts; shown in start_game()
         )
 
     def shoot(self):
