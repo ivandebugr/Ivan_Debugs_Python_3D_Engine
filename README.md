@@ -118,6 +118,24 @@ Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/e
 
 ## Changelog
 
+### v4 — dependency updates
+
+All Python dependencies bumped to their latest stable versions.
+
+| Package | Before | After |
+|---|---|---|
+| `ursina` | 8.1.1 | 8.3.0 |
+| `panda3d` | 1.10.15 | 1.10.16 |
+| `panda3d-simplepbr` | 0.12.0 | 0.13.1 |
+| `numpy` | 2.2.2 | 2.4.4 |
+| `pillow` | 11.1.0 | 12.2.0 |
+| `pygame` | 2.6.1 | 2.6.1 (already latest) |
+| `panda3d-gltf` | 1.3.0 | 1.3.0 (already latest) |
+
+**Known issue:** game currently shows a black screen on launch following the Ursina 8.3.0 upgrade. Under investigation — likely an API or scene initialisation change between 8.1.x and 8.3.0.
+
+---
+
 ### v3 — collision system redesign
 
 **Bitmask layer registry** — `collision_system.py` created with `Layers`, `COLLISION_MATRIX`, `register()`, `unregister()`, `can_hit()`. Replaces all `isinstance(x, Enemy)` hit checks in `weapon.py`.
