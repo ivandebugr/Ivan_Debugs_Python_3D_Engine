@@ -1,0 +1,40 @@
+Black Screen Diagnosis — Ursina 8.1.1 → 8.3.0
+================================================
+
+1. App() arguments
+   Ursina(title="Ivan's 3D Engine") — no vsync, no fullscreen, no color arg.
+
+2. window.color
+   NOT set anywhere in main.py, weapon.py, or player_controller.py.
+   Ursina 8.3.0 changed the default window background from color.gray to
+   transparent/black, so with no explicit window.color the window shows
+   whatever is "behind" it — usually solid black.
+
+3. Sky entity
+   main_menu() creates: Sky(texture='sky_default')
+   'sky_default' is an internal asset name that was renamed/removed in
+   Ursina 8.x. A failed texture lookup leaves the sky mesh invisible,
+   so the background stays black even after the sky entity is added.
+
+4. Shaders
+   None. No simplepbr.init(), no filterManager, no custom shaders.
+   Not a factor.
+
+5. Scene load order
+   main_menu() is called BEFORE app.run() (line 210 vs 270).
+   All entities — ground, sky, buttons — are created before the first
+   rendered frame. Load order is not the cause.
+
+Root cause (most likely — both factors combine):
+  a) window.color is unset; Ursina 8.3.0 default is now black/transparent.
+  b) Sky(texture='sky_default') silently fails — texture absent in 8.3.0.
+
+Fixes applied (in order):
+  FIX-1a  window.color = color.rgb(50, 50, 60) set immediately after App().
+          Gives a visible background even if the Sky entity fails.
+          *** This fix alone is sufficient if sky texture works. ***
+  FIX-1d  Sky(texture='sky_default') → Sky() to use the built-in default
+          gradient sky that ships with every Ursina version.
+
+Both fixes were applied together. Either alone should resolve the black
+screen; both together guarantee it.
