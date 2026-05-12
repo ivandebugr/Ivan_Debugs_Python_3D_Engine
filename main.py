@@ -1,7 +1,7 @@
 from ursina import *
 from Scripts.player_controller import Player
 from Scripts.enemy import Enemy, EnemyBullet
-from Scripts.weapon import Weapon, PlayerBullet
+from Scripts.weapon import Weapon
 from Scripts.health_bar import HealthBar
 import json, pyglet
 
@@ -14,8 +14,12 @@ def load_level():
         with open('level.json', 'r') as f:
             entities = json.load(f)
         
-        for e in [e for e in scene.entities if e.name in ['level_block', 'level_enemy']]:
-            destroy(e)
+        for e in scene.entities[:]:  # copy to avoid mid-loop mutation
+            try:
+                if e.name in ['level_block', 'level_enemy']:
+                    destroy(e)
+            except Exception:
+                pass
 
         for entity_data in entities:
             if entity_data.get('type') == 'enemy':
@@ -40,9 +44,12 @@ def load_level():
         print("No level file found. Create one using the level editor.")
 
 def main_menu():
-    for e in scene.entities:
-        if e.name not in ['main_camera']:
-            destroy(e)
+    for e in scene.entities[:]:  # copy to avoid mid-loop mutation leaving dead NodePaths
+        try:
+            if e.name not in ['main_camera']:
+                destroy(e)
+        except Exception:
+            pass
 
     sky = Sky(texture='sky_default')
     sky.name = 'main_sky'
@@ -211,14 +218,15 @@ if __name__ == '__main__':
     window.on_resize = on_window_resize()
 
     def update():
-        for bullet in [e for e in scene.entities if isinstance(e, PlayerBullet) and e.enabled]:
-            for enemy in [e for e in scene.entities if isinstance(e, Enemy) and e.enabled]:
-                if bullet.intersects(enemy):
-                    enemy.health -= 25
-                    if enemy.health <= 0:
-                        destroy(enemy)
-                    destroy(bullet)
-                        
+        # FIXED: bug-4 - removed duplicate bullet-vs-enemy AABB loop; PlayerBullet.update() raycasts are the single authority
+        # for bullet in [e for e in scene.entities if isinstance(e, PlayerBullet) and e.enabled]:
+        #     for enemy in [e for e in scene.entities if isinstance(e, Enemy) and e.enabled]:
+        #         if bullet.intersects(enemy):
+        #             enemy.health -= 25
+        #             if enemy.health <= 0:
+        #                 destroy(enemy)
+        #             destroy(bullet)
+
         for bullet in [e for e in scene.entities if isinstance(e, EnemyBullet) and e.enabled]:
             if bullet and player and player.enabled:
                 if bullet.intersects(player):

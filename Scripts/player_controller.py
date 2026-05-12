@@ -190,33 +190,7 @@ class Player(FirstPersonController):
                 self.vertical_speed = 0
                 self.y -= penetration 
 
-        move_dir = Vec3(
-            self.forward * (held_keys['w'] - held_keys['s']) +
-            self.right * (held_keys['d'] - held_keys['a'])
-        ).normalized()
-
-        self.position += move_dir * self.speed * time.dt
-
-        for local_pos, direction in zip(self.raycast_start_positions, self.raycast_directions):
-            world_pos = self.position + local_pos
-            
-            from Scripts.enemy import EnemyBullet
-            from Scripts.weapon import PlayerBullet
-            
-            hit = raycast(
-                world_pos,
-                direction,
-                distance=0.6,
-                ignore=[self, EnemyBullet, PlayerBullet], 
-                debug=False
-            )
-            if hit.hit:
-                penetration = 0.6 - hit.distance
-                if abs(hit.normal.y) < 0.7:
-                    horizontal_normal = Vec3(hit.normal.x, 0, hit.normal.z)
-                    if horizontal_normal.length() > 0:
-                        horizontal_normal = horizontal_normal.normalized()
-                        self.position += horizontal_normal * penetration
+        self.handle_horizontal_movement()  # FIXED: bug-2, bug-3 - use swept collision check
                     
         self.health_bar.value = self.health
         
@@ -246,3 +220,33 @@ class Player(FirstPersonController):
     def toggle_raycast_visualization(self):
         for ray in self.debug_rays:
             ray.enabled = self.show_colliders
+
+    def _ignored_entities(self):  # FIXED: bug-2 - pass instances not classes to raycast ignore
+        from Scripts.weapon import PlayerBullet
+        from Scripts.enemy import EnemyBullet
+        return [self] + [e for e in scene.entities if isinstance(e, (PlayerBullet, EnemyBullet))]
+
+    def _swept_blocked(self, origin, direction, distance):  # FIXED: bug-3 - pre-move sweep at multiple heights
+        ignore = self._ignored_entities()
+        for offset in [Vec3(0, 0.1, 0), Vec3(0, 1, 0), Vec3(0, 1.8, 0)]:
+            if raycast(origin + offset, direction, distance=distance + self.skin_width,
+                       ignore=ignore, debug=False).hit:
+                return True
+        return False
+
+    def handle_horizontal_movement(self):  # FIXED: bug-3 - check before move, axis separation on block
+        raw = Vec3(self.forward * (held_keys['w'] - held_keys['s']) +
+                   self.right * (held_keys['d'] - held_keys['a']))
+        if not raw.length_squared():
+            return
+        d = raw.normalized()
+        move = d * self.speed * time.dt
+        if not self._swept_blocked(self.position, d, move.length()):
+            self.position += move
+            return
+        x = Vec3(move.x, 0, 0)
+        z = Vec3(0, 0, move.z)
+        if x.length() and not self._swept_blocked(self.position, x.normalized(), abs(move.x)):
+            self.position += x
+        elif z.length() and not self._swept_blocked(self.position, z.normalized(), abs(move.z)):
+            self.position += z
