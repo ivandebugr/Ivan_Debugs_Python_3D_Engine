@@ -143,6 +143,17 @@ Additional fixes applied alongside:
 
 ---
 
+### v6 — Level editor Ursina 8.3.0 compatibility
+
+Applied the same fixes from `main.py` to `Scripts/level_editor.py` so it renders correctly when run standalone (`python Scripts/level_editor.py`).
+
+- **GLSL 1.20 shader patch** — `_patch_shaders_to_glsl120()` defined and called immediately after `Ursina()`, before any entity is created. Same fix as `main.py`: rewrites `unlit_shader` and `unlit_with_fog_shader` to use `attribute`/`varying`, `texture2D()`, and `gl_FragColor` instead of GLSL 1.30+ syntax. Root cause and mechanism identical to the v5 black screen fix.
+- **MSAA 4×** — `loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')` added before `Ursina()` + `render.setAntialias` / `render2d.setAntialias` after.
+- **Window background** — `window.color = color.rgb(50, 50, 60)` to match the game's grey instead of Ursina 8.3.0's black default.
+- **`AntialiasAttrib` import** — added to the existing `from panda3d.core import ...` line at the top of the file.
+
+---
+
 ### v4 — dependency updates
 
 All Python dependencies bumped to their latest stable versions.
