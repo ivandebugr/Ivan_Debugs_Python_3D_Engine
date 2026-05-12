@@ -1,192 +1,160 @@
-# Ivan_Debugs_Python_3D_Engine
+# Ivan's 3D Engine
 
-A first-person shooter **engine** built on top of [Ursina](https://www.ursinaengine.org/) — providing the systems, tooling, and runtime architecture that Ursina itself doesn't: swept collision, spatial-grid broad-phase, layered hit detection, a world-space UI framework, and an in-engine level editor. Build your FPS game on top of it; don't rewrite this stuff yourself.
-
----
-
-## What this is
-
-Ursina gives you a Python-friendly wrapper over Panda3D — entities, basic raycasting, a scene graph. What it *doesn't* give you is a production-ready FPS foundation. This engine fills that gap:
-
-| Layer | What it solves |
-|---|---|
-| **Swept collision** | Bullets and players that don't tunnel through walls at low FPS |
-| **Spatial broad-phase** | O(1) entity lookup per frame; scales to hundreds of entities |
-| **Collision layers** | Typed separation — bullets don't collide with bullets |
-| **Health & damage** | Entity health, damage routing, death callbacks — wired up, not bolted on |
-| **World-space UI** | Health bars and floating labels that track 3D entities |
-| **Level editor** | In-engine block + entity placer with JSON save/load |
-| **Scene lifecycle** | Menu → gameplay → pause → menu transitions without entity leaks |
+A first-person shooter built on [Ursina](https://www.ursinaengine.org/) with a bitmask collision registry, object-pooled bullets, a shared swept-raycast system, and an in-engine level editor.
 
 ---
 
-## Getting Started
+## Getting started
 
-**Requirements:** Python 3.10+
+**Requirements:** Python 3.10+, Ursina
 
 ```bash
-git clone <repo>
-cd <repo>
 pip install ursina
-python main.py          # launches the bundled demo game
+python main.py
 ```
 
-The demo game is the canonical usage example. Read `main.py` alongside the docs below.
+Controls: `WASD` move · `Space` jump · `LMB` shoot · `R` reset · `Esc` pause · `F` fullscreen · `C` toggle collider debug
 
 ---
 
 ## Architecture
 
 ```
-main.py                       Demo game — shows engine usage end-to-end
+main.py                      App init, scene management, pause menu
 Scripts/
-  collision_system.py         Core: CollisionManager, spatial grid, CollisionLayer enum
-  player_controller.py        First-person controller with swept-raycast movement
-  weapon.py                   Weapon system: Weapon, PlayerBullet, EnemyBullet
-  enemy.py                    Enemy base class with health and AI hooks
-  health_bar.py               World-space health bar — attaches to any Entity
-  level_editor.py             In-engine editor with JSON persistence
+  collision_system.py        Bitmask layer registry, AliveEntity mixin, CollisionManager
+  player_controller.py       First-person controller with swept-raycast wall collision
+  weapon.py                  Weapon, PlayerBullet, EnemyBullet, BulletPool
+  enemy.py                   Enemy entity
+  health_bar.py              World-space health bar (attaches to any entity)
+  level_editor.py            In-engine block/entity placer with JSON save/load
+level.json                   Saved level data
 ```
 
 ---
 
-## Core systems
+## Collision design
 
-### Collision (`collision_system.py`)
+Three authorities. Never add a fourth.
 
-The engine runs **three non-overlapping collision authorities**. Never add a fourth.
+| Authority | Where | What it covers |
+|---|---|---|
+| Swept projectile raycast | `PlayerBullet.update`, `EnemyBullet.update` in `weapon.py` | Bullet hits wall or character — single point where damage is applied |
+| Swept player movement | `Player._swept_blocked` in `player_controller.py` | Wall collision — 5 rays at different heights before moving, falls back to axis slide |
+| Ground / ceiling raycast | `Player.update` in `player_controller.py` | Gravity, landing, head bumps |
 
-**1. Swept projectile raycasts** — inside each bullet's `update()`. Cast from the bullet's previous position over the full frame displacement. Handles fast bullets at low FPS without tunnelling. The single point where bullet damage is applied.
+### Bitmask layer registry (`collision_system.py`)
 
-**2. Swept player movement** — multi-height raycasts cast *before* moving, along the intended move vector. Supports wall-slide via axis separation.
-
-**3. AABB spatial grid** — `CollisionManager` handles slow-moving overlap checks (pickups, triggers, zone entry). Spatial grid with O(1) per-entity cell lookup; cells update lazily only when an entity crosses a cell boundary.
+Entities declare what they are and what they hit. No `isinstance` needed outside `collision_system.py`.
 
 ```python
-from Scripts.collision_system import CollisionManager, CollisionLayer
+from Scripts.collision_system import Layers, register, can_hit
 
-manager = CollisionManager()
-manager.add_entity(my_entity, CollisionLayer.ENEMY)
-manager.add_entity(pickup, CollisionLayer.PICKUP)
+register(self, Layers.ENEMY)          # in Enemy.__init__
+register(self, Layers.PLAYER_BULLET)  # in PlayerBullet.__init__ (via pool)
+
+# In PlayerBullet.update — replaces isinstance(hit.entity, Enemy):
+if can_hit(self, hit.entity):
+    hit.entity.health -= self.damage
 ```
 
-`CollisionLayer` values: `PLAYER`, `ENEMY`, `PLAYER_BULLET`, `ENEMY_BULLET`, `WALL`, `PICKUP`
+`can_hit(a, b)` checks `a._collision_layer & b._collision_mask` against the `COLLISION_MATRIX` without importing any entity types.
+
+**Important:** wall entities are plain Ursina `Entity` objects and are **not** registered. `_swept_blocked` therefore does raw `raycast().hit` — it does **not** filter through `can_hit`. `swept_cast` (the version in `collision_system.py`) is for bullets only.
+
+### Player collider
+
+`BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))`
+
+- Bottom: `entity.y − 0.5` (feet). Ground snap uses `player_bottom = self.y − 0.5`.
+- Top: `entity.y + 2.0` (above camera, prevents clipping through head-height objects).
+- Wall sweep offsets (local Y): `−0.4, +0.3, +0.9, +1.5, +1.9` — five heights from feet to forehead.
 
 ---
 
-### Player controller (`player_controller.py`)
+## Entity lifecycle — `AliveEntity`
 
-Drop-in first-person controller. Extend or replace movement, look, and jump behaviour by subclassing.
-
-```python
-from Scripts.player_controller import PlayerController
-
-player = PlayerController(
-    position=(0, 1, 0),
-    speed=8,
-    jump_height=2,
-    skin_width=0.05,
-)
-```
-
-Key overridable methods: `handle_horizontal_movement`, `handle_jump`, `_swept_blocked`.
-
----
-
-### Weapon system (`weapon.py`)
-
-Attach a `Weapon` to any entity. Bullets are self-managing — they raycast, apply damage, and clean up without an external loop.
+All entities that can die mid-frame inherit `AliveEntity` from `collision_system.py`. Use `die()`, never `destroy()` directly.
 
 ```python
-from Scripts.weapon import Weapon
-
-player.weapon = Weapon(
-    parent=player,
-    fire_rate=0.15,
-    bullet_speed=50,
-    bullet_damage=25,
-    bullet_lifetime=2.0,
-)
-```
-
-To implement a new projectile type, subclass `PlayerBullet` or `EnemyBullet` and override `on_hit(entity)`.
-
----
-
-### Enemy base class (`enemy.py`)
-
-`Enemy` is a subclassable entity with built-in health, damage routing, and a death callback hook.
-
-```python
-from Scripts.enemy import Enemy
-
-class TankEnemy(Enemy):
+class MyEntity(AliveEntity):
     def __init__(self, **kwargs):
-        super().__init__(health=200, speed=2, **kwargs)
+        super().__init__(**kwargs)
+        register(self, Layers.ENEMY)
 
-    def on_death(self):
-        # drop loot, trigger animation, etc.
-        super().on_death()
+    def update(self):
+        if not self.alive:   # guard — update() fires after die() this frame
+            return
+        ...
+        if should_die:
+            self.die()
+
+    def on_die(self):
+        destroy(self.health_bar)   # sub-entities first; super().die() calls destroy(self)
 ```
+
+`die()` is idempotent — safe to call from multiple paths in the same frame.
 
 ---
 
-### World-space UI (`health_bar.py`)
+## Bullet pool
 
-`HealthBar` attaches to any 3D entity and tracks its world-space position. Supports custom colours, scale, and an optional label.
+`PlayerBullet` and `EnemyBullet` live in `weapon.py` and are rented from module-level pools. After the pool is warm, no new `Entity` objects are allocated per shot.
 
 ```python
-from Scripts.health_bar import HealthBar
+# Weapon.shoot():
+bullet = _player_bullet_pool.acquire(position=..., direction=..., speed=50, damage=25, player=self.player)
+if bullet is None:
+    return   # pool exhausted (>30 simultaneous player bullets)
 
-bar = HealthBar(parent=enemy, offset=(0, 2.2, 0), max_health=enemy.health)
-bar.set_health(enemy.health)
+# Enemy.shoot():
+from Scripts.weapon import get_enemy_bullet_pool
+get_enemy_bullet_pool().acquire(position=..., target=..., player=self.player, enemy=self, speed=10)
 ```
+
+Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/enabled-toggled — Panda3D's `unstash()` asserts on re-enable of a previously disabled `NodePath`.
 
 ---
 
-### Level editor (`level_editor.py`)
+## Changelog
 
-Press `E` in the demo to open the editor. Saves and loads levels as JSON.
+### v3 — collision system redesign
 
-```python
-from Scripts.level_editor import LevelEditor
+**Bitmask layer registry** — `collision_system.py` created with `Layers`, `COLLISION_MATRIX`, `register()`, `unregister()`, `can_hit()`. Replaces all `isinstance(x, Enemy)` hit checks in `weapon.py`.
 
-editor = LevelEditor()
-editor.load('levels/level_01.json')
-```
+**`AliveEntity` mixin** — single `die()` entry point replaces the `_destroyed` bool pattern. `Enemy`, `PlayerBullet`, `EnemyBullet` all inherit it. `update()` guards with `if not self.alive: return`.
 
-Level JSON schema:
+**Bullet object pool** — `BulletPool` in `weapon.py` recycles `PlayerBullet` (30 cap) and `EnemyBullet` (60 cap). Pool uses position-park (`y=−10000`) instead of `enabled` toggling to avoid a Panda3D `unstash()` assertion crash.
 
-```json
-{
-  "blocks":  [{ "position": [x, y, z], "texture": "brick" }],
-  "enemies": [{ "position": [x, y, z], "type": "basic" }]
-}
-```
+**`EnemyBullet` moved to `weapon.py`** — eliminates the `weapon.py ↔ enemy.py` circular import. `enemy.py` accesses the pool via a lazy call to `get_enemy_bullet_pool()`.
 
----
+**`CollisionManager`** — spatial grid with `query_layer()` and `query_near()`. `collision_manager.update()` runs every frame in `main.py` (no frame-skip throttle).
 
-## Authoring conventions
+**Player collider raised** — height 1 → 2.5, center shifted to `(0, 0.75, 0)`. Feet unchanged at `entity.y − 0.5`; top raised to `entity.y + 2.0`. Fixes camera clipping through head-height geometry.
 
-**No name-string type checks.** Use `isinstance` or class-level markers:
+**Wall sweep extended** — `_swept_blocked` offsets expanded from 3 heights (`−0.4, 0, +0.4`) to 5 (`−0.4, +0.3, +0.9, +1.5, +1.9`), covering the full collider height.
 
-```python
-class MyProjectile(Entity):
-    is_projectile = True   # filter: if getattr(e, 'is_projectile', False)
-```
+**Camera near clip** — `camera.clip_plane_near = 0.01` (was ~0.1). Fixes see-through-wall artifact when looking down at close geometry.
 
-**Register with the collision manager in `__init__`:**
-```python
-collision_manager.add_entity(self, CollisionLayer.PLAYER_BULLET)
-```
+**Wall-clip regression introduced and fixed** — `swept_cast` was incorrectly used in `_swept_blocked`, which filtered wall hits through `can_hit`. Walls are unregistered so `can_hit` always returned `False` → player walked through walls. Fixed: `_swept_blocked` uses raw `raycast().hit` with layer-based ignore list.
 
-**Use `_cleanup_and_destroy()` not bare `destroy()`** on managed entities — it removes the entity from the spatial grid first.
+### v2 — collision audit + fixes
 
-**Break circular imports with lazy method-level imports:**
-```python
-def update(self):
-    from Scripts.enemy import Enemy   # safe — Python caches after first load
-```
+**Enemy death crash** — `_destroyed` guard added to `Enemy.update()`.
+
+**EnemyBullet double damage** — AABB loop in `main.py` removed; raycast is single authority.
+
+**EnemyBullet double destroy** — `_destroy()` helper with guard on `EnemyBullet`.
+
+**EnemyBullet expiry** — distance check replaced with `MAX_LIFETIME` + `spawn_time`.
+
+**Wall collision at foot level** — `_swept_blocked` offsets made symmetric around entity center.
+
+**Player height** — `BoxCollider` reduced from height 2 to height 1.
+
+**Bullet hit condition** — `entity.name == 'enemy'` → `isinstance(hit.entity, Enemy)`.
+
+**Raycast ignore list** — bare class references → live instance list from `scene.entities`.
 
 ---
 
@@ -195,8 +163,10 @@ def update(self):
 | System | Status |
 |---|---|
 | Swept player collision | Stable |
-| Spatial broad-phase | Stable |
-| Weapon / bullet system | Stable |
+| Bullet pool (PlayerBullet / EnemyBullet) | Stable |
+| Bitmask layer registry | Stable |
+| `AliveEntity` lifecycle | Stable |
+| `CollisionManager` spatial grid | Stable |
 | Enemy base class | Stable |
 | World-space health bar | Stable |
 | Level editor | Usable — schema expanding |
@@ -205,34 +175,16 @@ def update(self):
 
 ---
 
-## Fixed in v2
-
-**Bullet damage not applying** ✓ — replaced `entity.name == 'enemy'` with `isinstance(hit.entity, Enemy)`; damage now applied inside the swept-raycast path; duplicate AABB loop removed from `main.py`.
-
-**Player sticks near projectiles** ✓ — `_ignored_entities()` builds a live instance list from `scene.entities` at call time instead of passing bare classes to `raycast(ignore=...)`.
-
-**Player tunnels at low FPS** ✓ — `_swept_blocked()` casts three-height rays from the current position before any move; `handle_horizontal_movement()` falls back to axis-separated sliding on block.
-
-**Double-destroy on bullet expiry** ✓ — `MAX_LIFETIME = 2.0` class constant checked once against `spawn_time`; all destroy paths go through `_destroy()` helper.
-
-**Startup / transition crash (`AssertionError: !is_empty()`)** ✓ — `main_menu()` and `load_level()` now iterate `scene.entities[:]` (a copy) with a `try/except` guard, preventing dead Panda3D NodePaths from crashing `.name` access after mid-loop destroys.
-
-Full diagnosis: [`docs/collision_diagnosis.md`](./docs/collision_diagnosis.md)
-
----
-
 ## Roadmap
 
 ### Near-term
-- [x] Ship the four active collision fixes (+ startup crash fix)
 - [ ] `Game` state-machine class replacing module-level globals in `main.py`
 - [ ] `_clear_gameplay_entities()` as the canonical scene teardown path
-- [ ] Fix `HealthBar` eternal-entity leak on scene transition
 - [ ] Expand level editor JSON schema: enemy type, HP, rotation, block colour
 
 ### Engine features
-- [ ] Collision bitmask system — replace `isinstance` layer checks, break import cycles
-- [ ] Object pooling for bullets — eliminate per-shot `Entity` allocation at high fire rates
+- [x] Collision bitmask system — `Layers` registry + `can_hit()` replaces `isinstance` checks
+- [x] Object pooling for bullets — `BulletPool` eliminates per-shot allocation
 - [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition
 - [ ] Trigger/zone system — volume entry/exit callbacks for doors, checkpoints, kill planes
 - [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations
@@ -246,10 +198,7 @@ Full diagnosis: [`docs/collision_diagnosis.md`](./docs/collision_diagnosis.md)
 
 ---
 
-## See also
-
-- [`docs/collision_diagnosis.md`](./docs/collision_diagnosis.md) — root-cause write-up for all four active bugs
-
 ## License
 
 MIT
+

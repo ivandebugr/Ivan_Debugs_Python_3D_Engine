@@ -1,8 +1,8 @@
 from ursina import *
 from Scripts.player_controller import Player
-from Scripts.enemy import Enemy, EnemyBullet
-from Scripts.weapon import Weapon
+from Scripts.enemy import Enemy
 from Scripts.health_bar import HealthBar
+from Scripts.collision_system import collision_manager  # IMPROVED: step-5
 import json, pyglet
 
 player = None
@@ -185,6 +185,7 @@ class PauseMenu(Entity):
         
 if __name__ == '__main__':
     app = Ursina(title="Ivan's 3D Engine")
+    camera.clip_plane_near = 0.01  # default ~0.1 matches skin_width — geometry at arm's length disappears when looking down at walls
     window.title = "Ivan's 3D Engine"
     window.exit_button.visible = False
     window.fps_counter.enabled = True 
@@ -218,27 +219,11 @@ if __name__ == '__main__':
     window.on_resize = on_window_resize()
 
     def update():
-        # FIXED: bug-4 - removed duplicate bullet-vs-enemy AABB loop; PlayerBullet.update() raycasts are the single authority
-        # for bullet in [e for e in scene.entities if isinstance(e, PlayerBullet) and e.enabled]:
-        #     for enemy in [e for e in scene.entities if isinstance(e, Enemy) and e.enabled]:
-        #         if bullet.intersects(enemy):
-        #             enemy.health -= 25
-        #             if enemy.health <= 0:
-        #                 destroy(enemy)
-        #             destroy(bullet)
+        collision_manager.update()  # IMPROVED: step-5 — per-frame spatial grid update  # VERIFIED: step-5
 
-        for bullet in [e for e in scene.entities if isinstance(e, EnemyBullet) and e.enabled]:
-            if bullet and player and player.enabled:
-                if bullet.intersects(player):
-                    player.health -= 20
-                    destroy(bullet)
-                    if player.health <= 0:
-                        player.position = (0, 2, 0)
-                        player.health = 100
-                
         for e in scene.entities:
             if isinstance(e, HealthBar) and e.is_3d:
-                e.world_scale = (1,1,1)
+                e.world_scale = (1, 1, 1)
                 e.always_on_top = True
 
     def input(key):

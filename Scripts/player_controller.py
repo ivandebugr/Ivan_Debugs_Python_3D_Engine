@@ -2,6 +2,7 @@ from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
 from Scripts.weapon import Weapon
 from Scripts.health_bar import HealthBar
+from Scripts.collision_system import Layers, register  # IMPROVED: step-1
 
 class Player(FirstPersonController):
     def __init__(self, position=(0,0,0), **kwargs):
@@ -18,8 +19,10 @@ class Player(FirstPersonController):
         self.vertical_speed = 0
         self.mouse_sensitivity = Vec2(4000, 4000)
 
-        self.collider = BoxCollider(self, center=(0, 0, 0), size=(0.8, 2, 0.8))
+        # center=(0,0.75,0) keeps feet at entity.y-0.5 (unchanged) and raises top to entity.y+2.0
+        self.collider = BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))
         self.skin_width = 0.1
+        register(self, Layers.PLAYER)  # IMPROVED: step-1
         self.weapon = Weapon(self)
 
         self.debug_lines = []
@@ -53,10 +56,10 @@ class Player(FirstPersonController):
 
     def create_collider_visualization(self):
         corners = [
-            Vec3(-0.4, 0, -0.4), Vec3(0.4, 0, -0.4),
-            Vec3(0.4, 0, 0.4), Vec3(-0.4, 0, 0.4),
-            Vec3(-0.4, 2, -0.4), Vec3(0.4, 2, -0.4),
-            Vec3(0.4, 2, 0.4), Vec3(-0.4, 2, 0.4),
+            Vec3(-0.4, -0.5, -0.4), Vec3(0.4, -0.5, -0.4),  # bottom (feet)
+            Vec3(0.4, -0.5,  0.4), Vec3(-0.4, -0.5,  0.4),
+            Vec3(-0.4,  2.0, -0.4), Vec3(0.4,  2.0, -0.4),  # top (above camera)
+            Vec3(0.4,  2.0,  0.4), Vec3(-0.4,  2.0,  0.4),
         ]
         edges = [
             (0, 1), (1, 2), (2, 3), (3, 0),
@@ -75,9 +78,8 @@ class Player(FirstPersonController):
 
     def generate_raycast_points(self):
         collider_half_width = 0.5
-        collider_height = 2.0
         collider_bottom = 0
-        collider_top = 2.1
+        collider_top = 2.0  # top of collider in local space (entity.y + 2.0)
         rows = 5
         columns = 5
 
@@ -170,7 +172,7 @@ class Player(FirstPersonController):
             self.vertical_speed = 0
             if ground_hit.hit:
                 ground_top = ground_hit.world_point.y
-                player_bottom = self.y - 1
+                player_bottom = self.y - 0.5  # FIXED: lower character — half-height collider
                 if player_bottom < ground_top:
                     self.y += ground_top - player_bottom
 
@@ -221,15 +223,17 @@ class Player(FirstPersonController):
         for ray in self.debug_rays:
             ray.enabled = self.show_colliders
 
-    def _ignored_entities(self):  # FIXED: bug-2 - pass instances not classes to raycast ignore
-        from Scripts.weapon import PlayerBullet
-        from Scripts.enemy import EnemyBullet
-        return [self] + [e for e in scene.entities if isinstance(e, (PlayerBullet, EnemyBullet))]
-
-    def _swept_blocked(self, origin, direction, distance):  # FIXED: bug-3 - pre-move sweep at multiple heights
-        ignore = self._ignored_entities()
-        for offset in [Vec3(0, 0.1, 0), Vec3(0, 1, 0), Vec3(0, 1.8, 0)]:
-            if raycast(origin + offset, direction, distance=distance + self.skin_width,
+    def _swept_blocked(self, origin, direction, distance):
+        # Ignore self and all bullets (identified by layer, not isinstance)
+        ignore = [self] + [
+            e for e in scene.entities
+            if getattr(e, '_collision_layer', 0) in (Layers.PLAYER_BULLET, Layers.ENEMY_BULLET)
+        ]
+        # 5 heights: feet → knee → waist → shoulder → forehead — covers entity.y-0.4 to entity.y+1.9
+        for offset in (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
+                       Vec3(0, 1.5, 0), Vec3(0, 1.9, 0)):
+            if raycast(origin + offset, direction,
+                       distance=distance + self.skin_width,
                        ignore=ignore, debug=False).hit:
                 return True
         return False
