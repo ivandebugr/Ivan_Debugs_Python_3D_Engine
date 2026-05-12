@@ -1,6 +1,6 @@
 from ursina import *
 from ursina.prefabs.editor_camera import EditorCamera
-from panda3d.core import loadPrcFileData
+from panda3d.core import loadPrcFileData, AntialiasAttrib
 import json
 import os
 
@@ -182,7 +182,85 @@ class LevelEditor(Entity):
             print("No level file found")
 
 if __name__ == '__main__':
+    loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')
     app = Ursina(title="Level Editor")
+    def _patch_shaders_to_glsl120():
+        from ursina.shaders.unlit_shader import unlit_shader as _us
+        from ursina.shaders.unlit_with_fog_shader import unlit_with_fog_shader as _ufs
+        _us.vertex = (
+            '#version 120\n'
+            'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+            'uniform mat4 p3d_ModelViewMatrix;\n'
+            'uniform mat4 p3d_ModelMatrix;\n'
+            'attribute vec4 p3d_Vertex;\n'
+            'attribute vec2 p3d_MultiTexCoord0;\n'
+            'varying vec2 uvs;\n'
+            'uniform vec2 texture_scale;\n'
+            'uniform vec2 texture_offset;\n'
+            'attribute vec4 p3d_Color;\n'
+            'varying vec4 vertex_color;\n'
+            'void main() {\n'
+            '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+            '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
+            '    vertex_color = p3d_Color;\n'
+            '}\n'
+        )
+        _us.fragment = (
+            '#version 120\n'
+            'uniform sampler2D p3d_Texture0;\n'
+            'uniform vec4 p3d_ColorScale;\n'
+            'varying vec2 uvs;\n'
+            'varying vec4 vertex_color;\n'
+            'void main() {\n'
+            '    gl_FragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
+            '}\n'
+        )
+        _us.compiled = False
+        _ufs.vertex = (
+            '#version 120\n'
+            'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+            'uniform mat4 p3d_ModelViewMatrix;\n'
+            'uniform mat4 p3d_ModelMatrix;\n'
+            'attribute vec4 p3d_Vertex;\n'
+            'attribute vec2 p3d_MultiTexCoord0;\n'
+            'varying vec2 uvs;\n'
+            'uniform vec2 texture_scale;\n'
+            'uniform vec2 texture_offset;\n'
+            'attribute vec4 p3d_Color;\n'
+            'varying vec4 vertex_color;\n'
+            'varying vec3 vertex_world_position;\n'
+            'void main() {\n'
+            '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+            '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
+            '    vertex_color = p3d_Color;\n'
+            '    vertex_world_position = (p3d_ModelMatrix * p3d_Vertex).xyz;\n'
+            '}\n'
+        )
+        _ufs.fragment = (
+            '#version 120\n'
+            'uniform sampler2D p3d_Texture0;\n'
+            'uniform vec4 p3d_ColorScale;\n'
+            'varying vec2 uvs;\n'
+            'varying vec4 vertex_color;\n'
+            'varying vec3 vertex_world_position;\n'
+            'uniform vec3 camera_world_position;\n'
+            'uniform vec4 fog_color;\n'
+            'uniform float fog_start;\n'
+            'uniform float fog_end;\n'
+            'void main() {\n'
+            '    vec4 fragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
+            '    float distance_to_camera = length(vertex_world_position.xyz - camera_world_position);\n'
+            '    float fog_length = fog_end - fog_start;\n'
+            '    float t = clamp(distance_to_camera / fog_length, 0.0, 1.0);\n'
+            '    fragColor.rgb = mix(fragColor.rgb, fog_color.rgb, t * fog_color.a);\n'
+            '    gl_FragColor = fragColor;\n'
+            '}\n'
+        )
+        _ufs.compiled = False
+    _patch_shaders_to_glsl120()
+    window.color = color.rgb(50, 50, 60)
+    render.setAntialias(AntialiasAttrib.MAuto)
+    render2d.setAntialias(AntialiasAttrib.MAuto)
     window.title = 'Level Editor'
     window.exit_button.visible = True
     window.fps_counter.enabled = True
