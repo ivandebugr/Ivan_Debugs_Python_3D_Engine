@@ -248,7 +248,6 @@ Full diagnosis: [`docs/collision_diagnosis.md`](./docs/collision_diagnosis.md)
 
 ## See also
 
-- [`CLAUDE.md`](./CLAUDE.md) — architectural rules, import conventions, footguns (read before touching collision code)
 - [`docs/collision_diagnosis.md`](./docs/collision_diagnosis.md) — root-cause write-up for all four active bugs
 
 ## License
