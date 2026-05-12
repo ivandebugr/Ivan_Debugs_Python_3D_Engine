@@ -515,15 +515,6 @@
     {
         "type": "block",
         "position": [
-            2.0,
-            1.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
             3.0,
             1.0,
             -5.0
@@ -565,5 +556,220 @@
             -2.0
         ],
         "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            1.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            1.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            1.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            0.0,
+            0.0,
+            -2.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            0.0,
+            0.0,
+            -2.0
+        ],
+        "texture": "grass.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            0.0,
+            0.0,
+            -2.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            2.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            2.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            2.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            2.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            2.0,
+            -5.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            2.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -6.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -7.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            3.0,
+            -8.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            4.0,
+            -8.0
+        ],
+        "texture": "white_cube.png"
+    },
+    {
+        "type": "enemy",
+        "position": [
+            5.0,
+            2.0,
+            1.0
+        ]
     }
 ]
