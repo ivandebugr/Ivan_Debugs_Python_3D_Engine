@@ -1,46 +1,9 @@
 from ursina import *
 from Scripts.health_bar import HealthBar
-import math
+from Scripts.collision_system import AliveEntity, Layers, register  # IMPROVED: step-1
 
-class EnemyBullet(Entity):
-    def __init__(self, position, target, player, enemy, speed=10):
-        super().__init__(
-            model='cube',
-            color=color.yellow,
-            scale=(0.2, 0.2, 0.5),
-            position=position,
-        )
-        self.speed = speed
-        self.direction = (target - position).normalized()
-        self.player = player
-        self.enemy = enemy
-        self.look_at(self.position + self.direction)
-        self.travel_distance = 0
-        
-    def update(self):
-        move_amount = self.direction * self.speed * time.dt
-        self.travel_distance += self.speed * time.dt
-        
-        hit = raycast(
-            self.world_position,
-            self.direction,
-            distance=1,
-            ignore=[self, self.enemy],
-            debug=False
-        )
-        
-        if hit.hit:
-            if hit.entity == self.player:
-                self.player.health -= 25
-            destroy(self)
-            return
-            
-        self.position += move_amount
-        
-        if distance(self.position, (0,0,0)) > 500:
-            destroy(self)
 
-class Enemy(Entity):
+class Enemy(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-safe destroy
     def __init__(self, spawn_position, player):
         super().__init__(
             model='cube',
@@ -49,55 +12,46 @@ class Enemy(Entity):
             position=spawn_position,
             collider='box'
         )
-        self.health = 100
+        register(self, Layers.ENEMY)  # IMPROVED: step-1
+        self.health     = 100
         self.max_health = 100
-        self.player = player
-        self.shoot_cooldown = 1.0
-        self.can_shoot = True
-        self.attack_range = 30
+        self.player     = player
+        self.shoot_cooldown  = 1.0
+        self.can_shoot  = True
+        self.attack_range    = 30
         self.detection_range = 100
-        
+
         self.health_bar = HealthBar(
             parent=self,
             max_value=self.max_health,
             value=self.health,
-            position=(0, 2, 0), 
+            position=(0, 2, 0),
             scale=(2, 0.3),
             is_3d=True,
             bar_origin=(0, 0)
         )
 
     def update(self):
-        if not self.player:
+        if not self.alive or not self.player:  # IMPROVED: step-2 — guard  # VERIFIED: step-2
             return
         player_dist = distance(self.position, self.player.position)
-        
+
         if player_dist <= self.detection_range:
             self.look_at(self.player.position)
             self.rotation_x = 0
             self.rotation_z = 0
-            
+
             if player_dist <= self.attack_range and self.can_shoot:
                 self.shoot()
-                
+
         self.health_bar.world_position = self.world_position + Vec3(0, 2, 0)
         self.health_bar.value = self.health
-        
-        if self.health <= 0:
-            destroy(self.health_bar)
-            destroy(self)
-            
-        if hasattr(self, 'health_bar'):
-            self.health_bar.enabled = player_dist < 150 and not self.is_occluded()
-            self.health_bar.value = self.health
-        
-        if self.health <= 0:
-            if hasattr(self, 'health_bar'):
-                destroy(self.health_bar)
-            destroy(self)
-            return
+        self.health_bar.enabled = player_dist < 150 and not self._is_occluded()
 
-    def is_occluded(self):
+        if self.health <= 0:
+            self.die()
+
+    def _is_occluded(self) -> bool:
         hit = raycast(
             self.position + Vec3(0, 1, 0),
             (self.player.position - self.position).normalized(),
@@ -110,15 +64,18 @@ class Enemy(Entity):
     def shoot(self):
         if not self.can_shoot:
             return
-            
-        target_pos = self.player.position + Vec3(0, 1, 0)
-        EnemyBullet(
+        from Scripts.weapon import get_enemy_bullet_pool  # IMPROVED: step-1 — lazy import breaks cycle
+        pool = get_enemy_bullet_pool()
+        pool.acquire(
             position=self.position + Vec3(0, 1.5, 0),
-            target=target_pos,
+            target=self.player.position + Vec3(0, 1, 0),
             player=self.player,
-            enemy=self, 
+            enemy=self,
             speed=10
         )
-            
         self.can_shoot = False
         invoke(setattr, self, 'can_shoot', True, delay=self.shoot_cooldown)
+
+    def on_die(self):  # IMPROVED: step-2 — cleanup before destroy()
+        if hasattr(self, 'health_bar'):
+            destroy(self.health_bar)

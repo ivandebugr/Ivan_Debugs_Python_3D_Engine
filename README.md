@@ -1,137 +1,256 @@
-# Ivan_Debugs_Python_3D_Engine
+# Ivan's 3D Engine
 
-A first-person shooter / custom 3D engine built with [Ursina Engine](https://www.ursinaengine.org/) — a Python game framework built on Panda3D. Features a custom swept-collision system, spatial-grid broad-phase, in-engine level editor, and enemy AI with health tracking.
-
----
-
-## Status
-
-| System | State |
-|---|---|
-| Player movement & wall collision | Stable (swept raycast) |
-| Bullet → enemy damage | Fix in progress (Bug #1) |
-| Enemy AI & pathfinding | Stable |
-| Health bar UI | Stable |
-| Level editor | Usable |
-| Scene transitions | Known entity leak |
-| Performance monitor | Stable |
+A first-person shooter built on [Ursina](https://www.ursinaengine.org/) with a bitmask collision registry, object-pooled bullets, a shared swept-raycast system, and an in-engine level editor.
 
 ---
 
-## Getting Started
+## Getting started
 
-**Requirements:** Python 3.10+, pip
+**Requirements:** Python 3.10+, Ursina
 
 ```bash
-git clone <repo>
-cd <repo>
 pip install ursina
 python main.py
 ```
 
-**Controls**
-
-| Key | Action |
-|---|---|
-| `W A S D` | Move |
-| Mouse | Look |
-| `Left Click` | Shoot |
-| `Esc` | Pause / Menu |
-| `F3` | Toggle debug collision rays |
-| `E` | Open level editor |
+Controls: `WASD` move · `Space` jump · `LMB` shoot · `R` reset · `Esc` pause · `F` fullscreen · `C` toggle collider debug
 
 ---
 
 ## Architecture
 
 ```
-main.py                     Entry point, global update loop, scene management
+main.py                      App init, scene management, pause menu
 Scripts/
-  player_controller.py      Movement, multi-height swept-raycast wall/floor/ceiling checks
-  weapon.py                 Weapon, PlayerBullet (swept raycast, single damage authority)
-  enemy.py                  Enemy entity, EnemyBullet
-  collision_system.py       CollisionManager, spatial grid (cell_size=10), CollisionLayer enum
-  health_bar.py             3D world-space health bar with child Text entities
-  level_editor.py           In-engine block + enemy placer with save/load
+  collision_system.py        Bitmask layer registry, AliveEntity mixin, CollisionManager
+  player_controller.py       First-person controller with swept-raycast wall collision
+  weapon.py                  Weapon, PlayerBullet, EnemyBullet, BulletPool
+  enemy.py                   Enemy entity
+  health_bar.py              World-space health bar (attaches to any entity)
+  level_editor.py            In-engine block/entity placer with JSON save/load
+level.json                   Saved level data
 ```
 
-### Collision design
+---
 
-Three non-overlapping systems handle different concerns:
+## Collision design
 
-- **Projectiles** — swept `raycast` inside each bullet's `update()`. Single authority for hit detection and damage application. Continuous, so fast bullets don't tunnel at low FPS.
-- **Player movement** — multi-height swept raycasts (`_swept_blocked`) cast from the *current* position before moving, preventing wall tunnelling.
-- **Pickups / triggers** — AABB overlap via `CollisionManager` (spatial-grid broad phase + precise check). Appropriate for slow-moving or stationary triggers.
+Three authorities. Never add a fourth.
+
+| Authority | Where | What it covers |
+|---|---|---|
+| Swept projectile raycast | `PlayerBullet.update`, `EnemyBullet.update` in `weapon.py` | Bullet hits wall or character — single point where damage is applied |
+| Swept player movement | `Player._swept_blocked` in `player_controller.py` | Wall collision — 5 rays at different heights before moving, falls back to axis slide |
+| Ground / ceiling raycast | `Player.update` in `player_controller.py` | Gravity, landing, head bumps |
+
+### Bitmask layer registry (`collision_system.py`)
+
+Entities declare what they are and what they hit. No `isinstance` needed outside `collision_system.py`.
+
+```python
+from Scripts.collision_system import Layers, register, can_hit
+
+register(self, Layers.ENEMY)          # in Enemy.__init__
+register(self, Layers.PLAYER_BULLET)  # in PlayerBullet.__init__ (via pool)
+
+# In PlayerBullet.update — replaces isinstance(hit.entity, Enemy):
+if can_hit(self, hit.entity):
+    hit.entity.health -= self.damage
+```
+
+`can_hit(a, b)` checks `a._collision_layer & b._collision_mask` against the `COLLISION_MATRIX` without importing any entity types.
+
+**Important:** wall entities are plain Ursina `Entity` objects and are **not** registered. `_swept_blocked` therefore does raw `raycast().hit` — it does **not** filter through `can_hit`. `swept_cast` (the version in `collision_system.py`) is for bullets only.
+
+### Player collider
+
+`BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))`
+
+- Bottom: `entity.y − 0.5` (feet). Ground snap uses `player_bottom = self.y − 0.5`.
+- Top: `entity.y + 2.0` (above camera, prevents clipping through head-height objects).
+- Wall sweep offsets (local Y): `−0.4, +0.3, +0.9, +1.5, +1.9` — five heights from feet to forehead.
 
 ---
 
-## What's been built
+## Entity lifecycle — `AliveEntity`
 
-- **Custom swept collision** for player movement with wall-slide on axis separation
-- **Spatial grid broad-phase** (`CollisionManager`) with per-entity cell tracking — O(1) removal
-- **Layered collision** (`CollisionLayer` enum): `PLAYER`, `ENEMY`, `PLAYER_BULLET`, `ENEMY_BULLET`, `WALL`, `PICKUP`
-- **Health system** with 3D world-space bars parented to enemies
-- **Weapon system** with configurable fire rate, bullet speed, and lifetime
-- **Level editor** — click to place/remove blocks and enemies, save/load JSON levels
-- **Scene management** — main menu → gameplay → pause → main menu transitions
-- **Performance monitor** using `time.dt` for frame-time tracking
+All entities that can die mid-frame inherit `AliveEntity` from `collision_system.py`. Use `die()`, never `destroy()` directly.
+
+```python
+class MyEntity(AliveEntity):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        register(self, Layers.ENEMY)
+
+    def update(self):
+        if not self.alive:   # guard — update() fires after die() this frame
+            return
+        ...
+        if should_die:
+            self.die()
+
+    def on_die(self):
+        destroy(self.health_bar)   # sub-entities first; super().die() calls destroy(self)
+```
+
+`die()` is idempotent — safe to call from multiple paths in the same frame.
 
 ---
 
-## Known issues / active fixes
+## Bullet pool
 
-### Critical (in progress)
+`PlayerBullet` and `EnemyBullet` live in `weapon.py` and are rented from module-level pools. After the pool is warm, no new `Entity` objects are allocated per shot.
 
-**Bug #1 — Bullets hit enemies but deal no damage**
-`PlayerBullet.update` was checking `entity.name == 'enemy'`; `Enemy` never sets that attribute. Fix: `isinstance(hit.entity, Enemy)` + apply damage in the raycast path, removing the duplicate AABB pass in `main.py`.
+```python
+# Weapon.shoot():
+bullet = _player_bullet_pool.acquire(position=..., direction=..., speed=50, damage=25, player=self.player)
+if bullet is None:
+    return   # pool exhausted (>30 simultaneous player bullets)
 
-**Bug #2 — Player sticks / rubber-bands near projectiles**
-`raycast(ignore=[self, EnemyBullet, PlayerBullet])` passes *classes*, not instances — every live bullet is a valid wall-hit target. Fix: dynamic instance list built from `scene.entities` at call time.
+# Enemy.shoot():
+from Scripts.weapon import get_enemy_bullet_pool
+get_enemy_bullet_pool().acquire(position=..., target=..., player=self.player, enemy=self, speed=10)
+```
 
-**Bug #3 — Player clips through thin walls at low FPS**
-Move-then-check puts the player inside the wall before rays are cast. Fix: swept check *before* moving, using full move distance.
+Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/enabled-toggled — Panda3D's `unstash()` asserts on re-enable of a previously disabled `NodePath`.
 
-**Bug #4 — Double-destroy on bullet lifetime expiry**
-`self.lifetime` was used as both a countdown and a max-age constant, triggering `destroy()` twice. Fix: single `MAX_LIFETIME` class constant checked against `spawn_time`.
+---
 
-### Non-critical (queued)
+## Changelog
 
-- Bare `except:` blocks silencing real errors across several files — narrowing to `except Exception:` with logging
-- `HealthBar` sub-entities marked `eternal=True` leak across scene transitions
-- `Weapon` crosshair not destroyed on weapon teardown
-- `Player.__init__` allocates two `BoxCollider`s; second silently replaces first
-- `level_editor.py` save format missing rotation, enemy parameters, and custom colors
+### v6 — Level editor Ursina 8.3.0 compatibility
+
+Applied the same fixes from `main.py` to `Scripts/level_editor.py` so it renders correctly when run standalone (`python Scripts/level_editor.py`).
+
+- **GLSL 1.20 shader patch** — `_patch_shaders_to_glsl120()` defined and called immediately after `Ursina()`, before any entity is created. Same fix as `main.py`: rewrites `unlit_shader` and `unlit_with_fog_shader` to use `attribute`/`varying`, `texture2D()`, and `gl_FragColor` instead of GLSL 1.30+ syntax. Root cause and mechanism identical to the v5 black screen fix.
+- **MSAA 4×** — `loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')` added before `Ursina()` + `render.setAntialias` / `render2d.setAntialias` after.
+- **Window background** — `window.color = color.rgb(50, 50, 60)` to match the game's grey instead of Ursina 8.3.0's black default.
+- **`AntialiasAttrib` import** — added to the existing `from panda3d.core import ...` line at the top of the file.
+
+---
+
+### v5 — Ursina 8.3.0 compatibility, anti-aliasing, crosshair polish
+
+#### Black screen fix (root cause)
+
+Ursina 8.3.0 changed `Entity.default_shader` from `None` to `unlit_with_fog_shader`, and `Sky()` hardcodes `shader=unlit_shader`. Both shaders use GLSL `#version 130` / `#version 140`, but macOS OpenGL 2.1 (the only context available on Apple Silicon via Panda3D's CocoaGraphicsPipe) supports GLSL 1.20 at most. Every shader compilation failed silently → all geometry rendered as opaque black.
+
+**Fix:** `_patch_shaders_to_glsl120()` in `main.py` rewrites both shader objects to GLSL 1.20 syntax (`attribute`/`varying`, `texture2D()`, `gl_FragColor`) before the first entity is created.
+
+Additional fixes applied alongside:
+- `window.color = color.rgb(50, 50, 60)` — Ursina 8.3.0 changed the default window background to black.
+- `Sky()` instead of `Sky(texture='sky_default')` — the `sky_default` texture asset was removed in 8.3.0.
+
+#### Anti-aliasing (MSAA 4×)
+
+- `loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')` called before `App()` so the OS-level MSAA framebuffer is requested before the window opens.
+- `render.setAntialias(AntialiasAttrib.MAuto)` + `render2d.setAntialias(AntialiasAttrib.MAuto)` enable AA on the 3D scene and all UI.
+
+#### Crosshair
+
+- Scale halved: `(0.02, 0.02)` → `(0.01, 0.01)`.
+- Hidden by default (`visible=False` on creation); shown only when gameplay starts.
+- Hidden when pause menu opens; restored immediately on resume.
+
+---
+
+### v4 — dependency updates
+
+All Python dependencies bumped to their latest stable versions.
+
+| Package | Before | After |
+|---|---|---|
+| `ursina` | 8.1.1 | 8.3.0 |
+| `panda3d` | 1.10.15 | 1.10.16 |
+| `panda3d-simplepbr` | 0.12.0 | 0.13.1 |
+| `numpy` | 2.2.2 | 2.4.4 |
+| `pillow` | 11.1.0 | 12.2.0 |
+| `pygame` | 2.6.1 | 2.6.1 (already latest) |
+| `panda3d-gltf` | 1.3.0 | 1.3.0 (already latest) |
+
+---
+
+### v3 — collision system redesign
+
+**Bitmask layer registry** — `collision_system.py` created with `Layers`, `COLLISION_MATRIX`, `register()`, `unregister()`, `can_hit()`. Replaces all `isinstance(x, Enemy)` hit checks in `weapon.py`.
+
+**`AliveEntity` mixin** — single `die()` entry point replaces the `_destroyed` bool pattern. `Enemy`, `PlayerBullet`, `EnemyBullet` all inherit it. `update()` guards with `if not self.alive: return`.
+
+**Bullet object pool** — `BulletPool` in `weapon.py` recycles `PlayerBullet` (30 cap) and `EnemyBullet` (60 cap). Pool uses position-park (`y=−10000`) instead of `enabled` toggling to avoid a Panda3D `unstash()` assertion crash.
+
+**`EnemyBullet` moved to `weapon.py`** — eliminates the `weapon.py ↔ enemy.py` circular import. `enemy.py` accesses the pool via a lazy call to `get_enemy_bullet_pool()`.
+
+**`CollisionManager`** — spatial grid with `query_layer()` and `query_near()`. `collision_manager.update()` runs every frame in `main.py` (no frame-skip throttle).
+
+**Player collider raised** — height 1 → 2.5, center shifted to `(0, 0.75, 0)`. Feet unchanged at `entity.y − 0.5`; top raised to `entity.y + 2.0`. Fixes camera clipping through head-height geometry.
+
+**Wall sweep extended** — `_swept_blocked` offsets expanded from 3 heights (`−0.4, 0, +0.4`) to 5 (`−0.4, +0.3, +0.9, +1.5, +1.9`), covering the full collider height.
+
+**Camera near clip** — `camera.clip_plane_near = 0.01` (was ~0.1). Fixes see-through-wall artifact when looking down at close geometry.
+
+**Wall-clip regression introduced and fixed** — `swept_cast` was incorrectly used in `_swept_blocked`, which filtered wall hits through `can_hit`. Walls are unregistered so `can_hit` always returned `False` → player walked through walls. Fixed: `_swept_blocked` uses raw `raycast().hit` with layer-based ignore list.
+
+### v2 — collision audit + fixes
+
+**Enemy death crash** — `_destroyed` guard added to `Enemy.update()`.
+
+**EnemyBullet double damage** — AABB loop in `main.py` removed; raycast is single authority.
+
+**EnemyBullet double destroy** — `_destroy()` helper with guard on `EnemyBullet`.
+
+**EnemyBullet expiry** — distance check replaced with `MAX_LIFETIME` + `spawn_time`.
+
+**Wall collision at foot level** — `_swept_blocked` offsets made symmetric around entity center.
+
+**Player height** — `BoxCollider` reduced from height 2 to height 1.
+
+**Bullet hit condition** — `entity.name == 'enemy'` → `isinstance(hit.entity, Enemy)`.
+
+**Raycast ignore list** — bare class references → live instance list from `scene.entities`.
+
+---
+
+## Engine status
+
+| System | Status |
+|---|---|
+| Swept player collision | Stable |
+| Bullet pool (PlayerBullet / EnemyBullet) | Stable |
+| Bitmask layer registry | Stable |
+| `AliveEntity` lifecycle | Stable |
+| `CollisionManager` spatial grid | Stable |
+| Enemy base class | Stable |
+| World-space health bar | Stable |
+| Level editor | Usable — schema expanding |
+| Scene lifecycle | Stable |
+| `Game` state machine | Planned |
 
 ---
 
 ## Roadmap
 
 ### Near-term
+- [ ] `Game` state-machine class replacing module-level globals in `main.py`
+- [ ] `_clear_gameplay_entities()` as the canonical scene teardown path
+- [ ] Expand level editor JSON schema: enemy type, HP, rotation, block colour
 
-- [ ] Finish active bug fixes (see above)
-- [ ] Replace module-level globals in `main.py` with a `Game` class (`start`, `pause`, `resume`, `return_to_menu`)
-- [ ] Single `_clear_gameplay_entities()` method replacing manual scene-scrub loops
-- [ ] Narrow all bare `except:` to `except Exception:` with `logging.warning`
-- [ ] Fix `HealthBar` eternal-entity leak; maintain explicit cleanup registry
-- [ ] Extend level editor save schema: rotation, enemy HP/weapon type, block color
+### Engine features
+- [x] Collision bitmask system — `Layers` registry + `can_hit()` replaces `isinstance` checks
+- [x] Object pooling for bullets — `BulletPool` eliminates per-shot allocation
+- [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition
+- [ ] Trigger/zone system — volume entry/exit callbacks for doors, checkpoints, kill planes
+- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations
+- [ ] Asset hot-reload in the level editor
 
-### Medium-term
-
-- [ ] Enemy variety — ranged, melee, patrol-path configs saved in level JSON
-- [ ] Weapon inventory — multiple weapons, ammo pickups, weapon switching
-- [ ] Room/wave system — spawn waves from level data, inter-room doors
-- [ ] Collision mask system — replace per-type `isinstance` checks with bitmask layers, eliminating import cycles
-- [ ] Object pooling for bullets — avoid per-frame `Entity` alloc/dealloc at high fire rates
-
-### Long-term / exploratory
-
-- [ ] Networked multiplayer (Ursina + `python-enet` or WebSockets)
-- [ ] Procedural level generation feeding the existing level editor format
-- [ ] Full controller / gamepad support
-- [ ] Packaged builds via PyInstaller / Nuitka
+### Long-term
+- [ ] Packaged runtime via PyInstaller / Nuitka
+- [ ] Networked multiplayer substrate — authoritative server, client-side prediction
+- [ ] Procedural level generator outputting the existing JSON schema
+- [ ] Full gamepad / controller input layer
 
 ---
 
 ## License
 
 MIT
+
