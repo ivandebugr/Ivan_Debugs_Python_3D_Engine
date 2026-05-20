@@ -2,19 +2,16 @@ from ursina import *
 from Scripts.player_controller import Player
 from Scripts.enemy import Enemy
 from Scripts.health_bar import HealthBar
-from Scripts.collision_system import collision_manager  # IMPROVED: step-5
+from Scripts.collision_system import collision_manager
+from Scripts.game import game, Game
 import json, pyglet
-
-player = None
-game_paused = False
-pause_menu = None
 
 def load_level():
     try:
         with open('level.json', 'r') as f:
             entities = json.load(f)
-        
-        for e in scene.entities[:]:  # copy to avoid mid-loop mutation
+
+        for e in scene.entities[:]:
             try:
                 if e.name in ['level_block', 'level_enemy']:
                     destroy(e)
@@ -27,35 +24,78 @@ def load_level():
                     position=tuple(entity_data['position']),
                     model='cube',
                     color=color.red,
-                    y=+3,
+                    y=entity_data['position'][1] + 1.5,
                     scale=(1.5, 3, 1.5),
                     name='level_enemy'
                 )
+                enemy_placeholder.enemy_hp       = entity_data.get('hp', 100)
+                enemy_placeholder.enemy_type     = entity_data.get('enemy_type', 'default')
+                enemy_placeholder.enemy_rotation = entity_data.get('rotation_y', 0)
             else:
                 block = Entity(
                     model='cube',
                     collider='box',
                     texture=entity_data['texture'],
                     position=tuple(entity_data['position']),
+                    color=color.rgb(*[int(c * 255) for c in entity_data.get('colour', [1, 1, 1])]),
+                    rotation=tuple(entity_data.get('rotation', [0, 0, 0])),
                     scale=(1, 1, 1),
                     name='level_block'
                 )
     except FileNotFoundError:
         print("No level file found. Create one using the level editor.")
 
+
+def _clear_gameplay_entities():
+    """
+    Canonical gameplay scene teardown. Called exclusively by game.return_to_menu().
+    Order matters: sub-entities before owners, AliveEntity.die() before destroy().
+    """
+    for e in list(game.enemies):
+        if getattr(e, 'alive', False):
+            e.die()
+    game.enemies.clear()
+
+    if game.player:
+        if hasattr(game.player, 'weapon') and game.player.weapon:
+            if game.player.weapon.crosshair:
+                destroy(game.player.weapon.crosshair)
+            destroy(game.player.weapon)
+        if hasattr(game.player, 'health_bar') and game.player.health_bar:
+            if hasattr(game.player.health_bar, 'text') and game.player.health_bar.text:
+                destroy(game.player.health_bar.text)
+            destroy(game.player.health_bar)
+        collision_manager.remove(game.player)
+        destroy(game.player)
+        game.player = None
+
+    for e in scene.entities[:]:
+        try:
+            if e.name in ('level_block', 'level_enemy', 'ground',
+                          'main_sky', 'camera_pivot'):
+                destroy(e)
+        except Exception:
+            pass
+
+    camera.parent = scene
+    camera.position = (0, 0, 0)
+    camera.rotation = (0, 0, 0)
+    application.time_scale = 1
+
+
 def main_menu():
     from Scripts.collision_system import AliveEntity
-    for e in scene.entities[:]:  # die() first so on_die()/unregister() fire before blanket destroy
+    for e in scene.entities[:]:
         if isinstance(e, AliveEntity) and e.alive:
             e.die()
-    for e in scene.entities[:]:  # copy to avoid mid-loop mutation leaving dead NodePaths
+    for e in scene.entities[:]:
         try:
             if e.name not in ['main_camera']:
                 destroy(e)
         except Exception:
             pass
 
-    sky = Sky()  # FIX-1d: 'sky_default' texture absent in Ursina 8.3.0; use built-in gradient
+    sky = Sky()
     sky.name = 'main_sky'
 
     camera.name = 'main_camera'
@@ -69,7 +109,7 @@ def main_menu():
         texture='grass',
         name='ground'
     )
-    
+
     load_level()
 
     camera_pivot = Entity(name='camera_pivot')
@@ -85,31 +125,39 @@ def main_menu():
     quit_button = Button(text='Quit', color=color.black, scale=(0.2, 0.1), y=-0.1)
 
     def start_game():
-        global player, enemy
-        if player:
-            if hasattr(player, 'weapon'):
-                destroy(player.weapon.crosshair)
-                destroy(player.weapon)
-            if hasattr(player, 'health_bar'):
-                destroy(player.health_bar.text)
-                destroy(player.health_bar)
-            collision_manager.remove(player)   # prevent Layers.PLAYER leak in _registry
-            destroy(player)
-        player = Player(position=(0, 2, 0))
+        if game.player:
+            if hasattr(game.player, 'weapon'):
+                destroy(game.player.weapon.crosshair)
+                destroy(game.player.weapon)
+            if hasattr(game.player, 'health_bar'):
+                destroy(game.player.health_bar.text)
+                destroy(game.player.health_bar)
+            collision_manager.remove(game.player)
+            destroy(game.player)
+        game.player = Player(position=(0, 2, 0))
+        game.enemies = []
         for placeholder in [e for e in scene.entities if e.name == 'level_enemy']:
-            enemy = Enemy(spawn_position=placeholder.position, player=player)
+            enemy = Enemy(
+                spawn_position=placeholder.position,
+                player=game.player,
+                hp=getattr(placeholder, 'enemy_hp', 100),
+                enemy_type=getattr(placeholder, 'enemy_type', 'default'),
+                rotation_y=getattr(placeholder, 'enemy_rotation', 0),
+            )
+            game.enemies.append(enemy)
             destroy(placeholder)
         destroy(play_button)
         destroy(quit_button)
         destroy(camera_pivot)
-        
-        Text('Move: WASD | Jump: Space | Shoot: LMB | Reset: R | Mouse: Esc | Fullscreen: F', 
+
+        Text('Move: WASD | Jump: Space | Shoot: LMB | Reset: R | Mouse: Esc | Fullscreen: F',
             position=window.bottom_left + Vec2(0.01, 0.95),
             origin=(-0.5, -0.5))
         mouse.visible = False
         mouse.locked = True
-        if hasattr(player, 'weapon') and player.weapon.crosshair:  # FIX-3
-            player.weapon.crosshair.visible = True  # FIX-3: show crosshair when gameplay starts
+        game.start()
+        if hasattr(game.player, 'weapon') and game.player.weapon.crosshair:
+            game.player.weapon.crosshair.visible = True
 
     play_button.on_click = start_game
     quit_button.on_click = application.quit
@@ -125,7 +173,7 @@ class PauseMenu(Entity):
             z=1
         )
         self.visible = False
-        
+
         self.continue_button = Button(
             text='Continue',
             color=color.black,
@@ -147,15 +195,14 @@ class PauseMenu(Entity):
             y=-0.2,
             parent=self
         )
-        
+
         self.continue_button.on_click = self.resume_game
         self.main_menu_button.on_click = self.return_to_main_menu
         self.quit_button.on_click = application.quit
-        
+
     def resume_game(self):
-        global game_paused
         self.visible = False
-        game_paused = False
+        game.resume()
         mouse.visible = False
         mouse.locked = True
         application.time_scale = 1
@@ -164,54 +211,30 @@ class PauseMenu(Entity):
         destroy(self.main_menu_button)
         destroy(self.quit_button)
         destroy(self)
-        
+        game.pause_menu = None
+
         invoke(setattr, application, 'time_scale', 1, delay=0.1)
 
     def return_to_main_menu(self):
-        global game_paused, player
-        game_paused = False
-        
-        if player:
-            if hasattr(player, 'weapon'):
-                destroy(player.weapon.crosshair)
-                destroy(player.weapon)
-            if hasattr(player, 'health_bar'):
-                destroy(player.health_bar.text)
-                destroy(player.health_bar)
-            collision_manager.remove(player)   # prevent Layers.PLAYER leak in _registry
-            destroy(player)
-            player = None
-        
-        for e in scene.entities:
-            if e.name in ['level_block', 'ground', 'main_sky']:
-                destroy(e)
-        
         destroy(self.background)
         destroy(self.continue_button)
         destroy(self.main_menu_button)
         destroy(self.quit_button)
         destroy(self)
-        
-        camera.parent = scene
-        camera.position = (0, 0, 0)
-        camera.rotation = (0, 0, 0)
-        
-        application.time_scale = 1
-        
+        game.pause_menu = None
+        game.return_to_menu()
         main_menu()
         mouse.visible = True
         mouse.locked = False
-        
-        
+
+
 if __name__ == '__main__':
-    from panda3d.core import AntialiasAttrib, loadPrcFileData  # FIX-2
-    loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')  # FIX-2: request MSAA framebuffer before window opens
+    from panda3d.core import AntialiasAttrib, loadPrcFileData
+    loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')
     app = Ursina(title="Ivan's 3D Engine")
-    # FIX-1b: Ursina 8.3.0 made unlit_with_fog_shader the default for every Entity, and Sky()
-    # hardcodes shader=unlit_shader. Both shaders use GLSL #version 130/140, but macOS OpenGL 2.1
-    # (the only context available on this machine) only supports GLSL 1.20. Patch both shader objects
-    # to GLSL 1.20 syntax *before* any entity is created so the first compile succeeds.
-    def _patch_shaders_to_glsl120():  # FIX-1b
+    # Ursina 8.3.0 uses GLSL #version 130/140 shaders. macOS OpenGL 2.1 supports GLSL 1.20 only.
+    # Patch both shader objects to GLSL 1.20 syntax before any entity is created.
+    def _patch_shaders_to_glsl120():
         from ursina.shaders.unlit_shader import unlit_shader as _us
         from ursina.shaders.unlit_with_fog_shader import unlit_with_fog_shader as _ufs
         _us.vertex = (
@@ -284,14 +307,14 @@ if __name__ == '__main__':
             '}\n'
         )
         _ufs.compiled = False
-    _patch_shaders_to_glsl120()  # FIX-1b
-    window.color = color.rgb(50, 50, 60)  # FIX-1a: Ursina 8.3.0 changed default window background to black
-    render.setAntialias(AntialiasAttrib.MAuto)   # FIX-2: enable AA on 3D scene
-    render2d.setAntialias(AntialiasAttrib.MAuto)  # FIX-2: enable AA on UI / camera.ui
-    camera.clip_plane_near = 0.01  # default ~0.1 matches skin_width — geometry at arm's length disappears when looking down at walls
+    _patch_shaders_to_glsl120()
+    window.color = color.rgb(50, 50, 60)
+    render.setAntialias(AntialiasAttrib.MAuto)
+    render2d.setAntialias(AntialiasAttrib.MAuto)
+    camera.clip_plane_near = 0.01
     window.title = "Ivan's 3D Engine"
     window.exit_button.visible = False
-    window.fps_counter.enabled = True 
+    window.fps_counter.enabled = True
     window.fps_limit = 60
     mouse.visible = True
 
@@ -322,7 +345,7 @@ if __name__ == '__main__':
     window.on_resize = on_window_resize
 
     def update():
-        collision_manager.update()  # IMPROVED: step-5 — per-frame spatial grid update  # VERIFIED: step-5
+        collision_manager.update()
 
         for e in scene.entities:
             if isinstance(e, HealthBar) and e.is_3d:
@@ -330,8 +353,6 @@ if __name__ == '__main__':
                 e.always_on_top = True
 
     def input(key):
-        global game_paused, pause_menu, player
-        
         if key == 'f':
             window.fullscreen = not window.fullscreen
             if window.fullscreen:
@@ -349,27 +370,20 @@ if __name__ == '__main__':
                 mouse.visible = True
 
         if key == "escape":
-            if player and hasattr(player, 'enabled'):
-                game_paused = not game_paused
-                if game_paused:
-                    pause_menu = PauseMenu()
-                    pause_menu.visible = True
-                    mouse.visible = True
-                    mouse.locked = False
-                    application.time_scale = 0
-                    if hasattr(player, 'weapon') and player.weapon.crosshair:  # FIX-3
-                        player.weapon.crosshair.visible = False  # FIX-3: hide crosshair while paused
-                else:
-                    if pause_menu:
-                        destroy(pause_menu)
-                        pause_menu = None
-                    mouse.visible = False
-                    mouse.locked = True
-                    application.time_scale = 1
-                    if hasattr(player, 'weapon') and player.weapon.crosshair:  # FIX-3
-                        player.weapon.crosshair.visible = True  # FIX-3: restore crosshair on resume
+            if game.state == Game.PLAYING:
+                game.pause()
+                game.pause_menu = PauseMenu()
+                game.pause_menu.visible = True
+                mouse.visible = True
+                mouse.locked = False
+                application.time_scale = 0
+                if game.player and hasattr(game.player, 'weapon') and game.player.weapon.crosshair:
+                    game.player.weapon.crosshair.visible = False
+            elif game.state == Game.PAUSED:
+                if game.pause_menu:
+                    game.pause_menu.resume_game()
 
-        if key == 'left mouse' and not window.fullscreen and not game_paused:
+        if key == 'left mouse' and not window.fullscreen and game.state != Game.PAUSED:
             mouse.locked = True
             mouse.visible = False
 

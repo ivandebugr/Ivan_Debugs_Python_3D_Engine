@@ -58,17 +58,24 @@ every session builds on the last. See **Obsidian Mind Integration** below.
 
 ### Module Map
 ```
-main.py                    — App init, window setup, scene management, pause menu, global update
+main.py                    — App init, window setup, scene management, _clear_gameplay_entities(),
+                             PauseMenu, load_level(), main_menu(), global update/input
 Scripts/
+  game.py                  — Game state-machine class (MAIN_MENU/PLAYING/PAUSED/RETURNING_TO_MENU/WIN),
+                             module-level singleton game = Game(); no Ursina import at class-def time
   collision_system.py      — Bitmask Layers, COLLISION_MATRIX, register/unregister/can_hit,
                              AliveEntity mixin, swept_cast(), CollisionManager spatial grid
   player_controller.py     — FirstPersonController subclass, 5-height swept raycast movement,
                              BoxCollider, HealthBar attachment
   weapon.py                — Weapon, PlayerBullet, EnemyBullet, BulletPool (module-level singletons)
-  enemy.py                 — Enemy (AliveEntity subclass), lazy pool import pattern
+  enemy.py                 — Enemy (AliveEntity subclass), hp/enemy_type/rotation_y params,
+                             lazy pool import pattern
   health_bar.py            — World-space and screen-space health bar
-  level_editor.py          — In-engine block/enemy placer, JSON save/load (standalone runnable)
-level.json                 — Saved level data (blocks + enemy spawn points)
+  level_editor.py          — Unity-feel level editor: snap, undo/redo, multi-select, inspector,
+                             hierarchy, gizmos, bookmarks, play-in-editor (standalone runnable)
+  undo_redo.py             — Command-pattern undo/redo stack; UndoRedoStack + 6 command types
+level.json                 — Saved level data (blocks + enemies); schema v1.2 with colour/rotation/hp
+editor_prefs.json          — Camera bookmarks (slots 1–5) + grid snap, persisted across editor sessions
 ```
 
 ### Collision Authority (Three Systems — Never Add a Fourth)
@@ -155,8 +162,8 @@ The same shader patch is duplicated in `level_editor.py` for standalone runs.
 
 | Issue | Location | Priority | Notes |
 |---|---|---|---|
-| Module-level globals (`player`, `game_paused`, `pause_menu`) | `main.py` | Medium | Replace with `Game` state-machine class |
-| Scene teardown is ad-hoc | `PauseMenu.return_to_main_menu()` | Medium | Extract `_clear_gameplay_entities()` as canonical path |
+| **[FIXED v1.2]** Module-level globals (`player`, `game_paused`, `pause_menu`) | `main.py` | ~~Medium~~ | `Game` state-machine class in `Scripts/game.py`; module-level singleton `game = Game()` |
+| **[FIXED v1.2]** Scene teardown is ad-hoc | `PauseMenu.return_to_main_menu()` | ~~Medium~~ | `_clear_gameplay_entities()` in `main.py`; called exclusively by `game.return_to_menu()` |
 | No win condition / game-over state | `main.py`, `player_controller.py` | Low | Player health→0 resets position, not game |
 | HealthBar uses `eternal=True` on sub-entities | `health_bar.py` | Medium | Prevents clean scene teardown on menu return |
 | `level_editor.py` `_patch_shaders_to_glsl120()` is a copy-paste of `main.py` | `level_editor.py` | Low | Extract to shared module |
@@ -220,6 +227,25 @@ Log new footguns discovered during development → `brain/Gotchas.md` in the vau
 2. Handle the new type in `load_level()` (main.py) and `load_existing_level()` (level_editor.py)
 3. Add cleanup to `main_menu()` entity-clearing loop and `return_to_main_menu()`
 
+### Using the Level Editor (v1.2+)
+```
+python Scripts/level_editor.py
+# Left click on surface     — place block or enemy (mode button)
+# Shift + left click        — add to selection (multi-select)
+# Right mouse drag          — box-select rectangle
+# Click on entity           — select it (inspector + hierarchy update)
+# Delete                    — remove all selected entities
+# Ctrl+Z / Ctrl+Y           — undo / redo (depth 50)
+# Ctrl+S                    — save level.json (clears undo stack + saves prefs)
+# G or Snap button          — cycle grid snap: 1.0 → 0.5 → 0.25 → Off
+# Drag X/Y/Z gizmo axis     — move selection along that axis (snapped)
+# Ctrl+1 through Ctrl+5     — save camera bookmark to slot
+# 1 through 5               — recall camera bookmark
+# F5 / Esc                  — toggle play-in-editor mode
+```
+`editor_prefs.json` persists bookmarks and snap setting across sessions.
+All editor-only entities are named `editor_*` — excluded from level save/load.
+
 ### Testing a Fix
 ```bash
 python main.py
@@ -257,9 +283,15 @@ Never move `EnemyBullet` back to `enemy.py`.
 
 ---
 
-## Globals in `main.py`
-`player`, `game_paused`, `pause_menu` — treat as read-only outside `main.py`.
-Planned replacement: `Game` state-machine class (see Roadmap).
+## Game State Machine (`Scripts/game.py`)
+`game = Game()` is the module-level singleton. Import with `from Scripts.game import game, Game`.
+- `game.player` — current `Player` instance or `None`
+- `game.enemies` — `list[Enemy]` of active enemies
+- `game.pause_menu` — current `PauseMenu` instance or `None`
+- `game.state` — one of `Game.MAIN_MENU`, `Game.PLAYING`, `Game.PAUSED`, `Game.RETURNING_TO_MENU`, `Game.WIN`
+
+Use `game.state == Game.PLAYING` guards in `input()` and `update()` instead of the old `player` existence checks.
+`game.return_to_menu()` is the **only** code path that calls `_clear_gameplay_entities()`.
 
 ---
 
@@ -272,10 +304,10 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `main_menu()`.
 ## Roadmap
 
 ### Near-term
-- [ ] `Game` state-machine class replacing module-level globals in `main.py`
-- [ ] `_clear_gameplay_entities()` as the canonical scene teardown path
-- [ ] Expand level editor JSON schema: enemy type, HP, rotation, block colour
-- [ ] Dedup `level.json` entries
+- [x] `Game` state-machine class replacing module-level globals in `main.py` — **v1.2**
+- [x] `_clear_gameplay_entities()` as the canonical scene teardown path — **v1.2**
+- [x] Expand level editor JSON schema: enemy type, HP, rotation, block colour — **v1.2**
+- [x] Dedup `level.json` entries — **v1.1**
 - [ ] Extract shader patch into shared `compat.py` module
 
 ### Engine features
@@ -283,10 +315,12 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `main_menu()`.
 - [x] Object pooling for bullets — `BulletPool` eliminates per-shot allocation
 - [x] AliveEntity lifecycle — idempotent `die()` replaces `_destroyed` bool
 - [x] CollisionManager spatial grid — `query_layer()` / `query_near()`
-- [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition
-- [ ] Trigger/zone system — volume entry/exit callbacks
-- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations
-- [ ] Asset hot-reload in the level editor
+- [x] Game state machine — `Scripts/game.py`, replaces module-level globals — **v1.2**
+- [x] Level editor: snap, undo/redo, multi-select, inspector, hierarchy, gizmos, bookmarks, play-in-editor — **v1.2**
+- [ ] Asset browser + hot-reload in level editor — **v1.3**
+- [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition — **v1.4**
+- [ ] Trigger/zone system — volume entry/exit callbacks — **v1.5**
+- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations — **v1.5**
 
 ---
 
