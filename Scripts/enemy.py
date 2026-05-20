@@ -4,17 +4,20 @@ from Scripts.collision_system import AliveEntity, Layers, collision_manager  # I
 
 
 class Enemy(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-safe destroy
-    def __init__(self, spawn_position, player):
+    def __init__(self, spawn_position, player,
+                 hp=100, enemy_type='default', rotation_y=0):
         super().__init__(
             model='cube',
             color=color.red,
             scale=(1.5, 3, 1.5),
             position=spawn_position,
+            rotation_y=rotation_y,
             collider='box'
         )
         collision_manager.add(self, Layers.ENEMY)  # IMPROVED: step-1
-        self.health     = 100
-        self.max_health = 100
+        self.health     = hp
+        self.max_health = hp
+        self.enemy_type = enemy_type
         self.player     = player
         self.shoot_cooldown  = 1.0
         self.can_shoot  = True
