@@ -1,6 +1,6 @@
 from ursina import *
 from Scripts.collision_system import (  # IMPROVED: step-1
-    AliveEntity, Layers, register, unregister, can_hit
+    AliveEntity, Layers, can_hit, collision_manager
 )
 import time as _time
 
@@ -29,11 +29,11 @@ class BulletPool:  # IMPROVED: step-3 — eliminates per-shot Entity allocation
                 return None   # pool exhausted — caller skips the shot
             b = self._cls(_pooled=True, **kwargs)
             self._built += 1
-        register(b, b._layer)  # IMPROVED: step-1
+        collision_manager.add(b, b._layer)  # IMPROVED: step-1
         return b
 
     def release(self, bullet):  # IMPROVED: step-3 — teleport instead of stash/unstash
-        unregister(bullet)
+        collision_manager.remove(bullet)
         bullet.position = BulletPool._PARK   # avoids enabled-setter → unstash() assertion
         bullet._alive   = False
         self._free.append(bullet)
@@ -49,22 +49,6 @@ class PlayerBullet(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-s
 
     def __init__(self, _pooled=False, position=None, direction=None,
                  speed=50, damage=25, player=None):
-        if _pooled and position is None:
-            # Lazy pool pre-allocation: create disabled placeholder
-            super().__init__(
-                model='cube',
-                color=color.cyan,
-                scale=(0.1, 0.1, 0.3),
-                position=(0, -1000, 0),
-                collider='box',
-                enabled=False
-            )
-            self.speed = speed
-            self.direction = Vec3(0, 0, 1)
-            self.player = player
-            self.damage = damage
-            self.spawn_time = 0.0
-            return
         super().__init__(
             model='cube',
             color=color.cyan,
@@ -104,8 +88,7 @@ class PlayerBullet(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-s
         if not self._alive:
             return
         self._alive = False
-        unregister(self)
-        _player_bullet_pool.release(self)   # release() disables the entity; no destroy()
+        _player_bullet_pool.release(self)   # release() calls collision_manager.remove(); no destroy()
 
 
 # ---------------------------------------------------------------------------
@@ -118,20 +101,6 @@ class EnemyBullet(AliveEntity):  # IMPROVED: step-2
 
     def __init__(self, _pooled=False, position=None, target=None,
                  player=None, enemy=None, speed=10):
-        if _pooled and position is None:
-            super().__init__(
-                model='cube',
-                color=color.yellow,
-                scale=(0.2, 0.2, 0.5),
-                position=(0, -1000, 0),
-                enabled=False
-            )
-            self.speed  = speed
-            self.direction = Vec3(0, 0, 1)
-            self.player = player
-            self.enemy  = enemy
-            self.spawn_time = 0.0
-            return
         super().__init__(
             model='cube',
             color=color.yellow,
@@ -174,8 +143,7 @@ class EnemyBullet(AliveEntity):  # IMPROVED: step-2
         if not self._alive:
             return
         self._alive = False
-        unregister(self)
-        _enemy_bullet_pool.release(self)   # release() disables the entity; no destroy()
+        _enemy_bullet_pool.release(self)   # release() calls collision_manager.remove(); no destroy()
 
 
 # ---------------------------------------------------------------------------

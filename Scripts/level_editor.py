@@ -51,7 +51,7 @@ class LevelEditor(Entity):
         self.current_mode = 'enemy' if self.current_mode == 'block' else 'block'
         self.enemy_button.text = f'Mode: {self.current_mode.capitalize()}'
         
-        self.model_preview.scale = (1,2,1) if self.current_mode == 'enemy' else (1,1,1)
+        self.model_preview.scale = (1.5, 3, 1.5) if self.current_mode == 'enemy' else (1,1,1)
         self.model_preview.texture = self.current_texture if self.current_mode == 'block' else ''
 
     def toggle_texture(self):
@@ -110,7 +110,7 @@ class LevelEditor(Entity):
                             model='cube',
                             color=color.red,
                             texture='white_cube',
-                            scale=(1,2,1),
+                            scale=(1.5, 3, 1.5),
                             position=position,
                             collider='box',
                             origin_y=-0.5
@@ -145,10 +145,19 @@ class LevelEditor(Entity):
                 'type': 'enemy',
                 'position': [enemy.x, enemy.y, enemy.z]
             })
-        
+
+        seen = set()
+        deduped = []
+        for item in data:
+            key = (item['type'], tuple(item['position']))
+            if key not in seen:
+                seen.add(key)
+                deduped.append(item)
+        data = deduped
+
         with open(self.filename, 'w') as f:
             json.dump(data, f, indent=4)
-        print(f'Saved level to {self.filename}')
+        print(f'Saved level to {self.filename} ({len(data)} entries)')
 
     def load_existing_level(self):
         for e in self.blocks + self.enemies:
@@ -164,7 +173,7 @@ class LevelEditor(Entity):
                         new_entity = Entity(
                             model='cube',
                             color=color.red,
-                            scale=(1,2,1),
+                            scale=(1.5, 3, 1.5),
                             position=entity_data['position'],
                             collider='box',
                             origin_y=-0.5

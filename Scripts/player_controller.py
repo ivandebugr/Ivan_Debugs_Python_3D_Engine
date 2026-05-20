@@ -2,7 +2,7 @@ from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
 from Scripts.weapon import Weapon
 from Scripts.health_bar import HealthBar
-from Scripts.collision_system import Layers, register  # IMPROVED: step-1
+from Scripts.collision_system import Layers, collision_manager  # IMPROVED: step-1
 
 class Player(FirstPersonController):
     def __init__(self, position=(0,0,0), **kwargs):
@@ -22,7 +22,7 @@ class Player(FirstPersonController):
         # center=(0,0.75,0) keeps feet at entity.y-0.5 (unchanged) and raises top to entity.y+2.0
         self.collider = BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))
         self.skin_width = 0.1
-        register(self, Layers.PLAYER)  # IMPROVED: step-1
+        collision_manager.add(self, Layers.PLAYER)  # IMPROVED: step-1
         self.weapon = Weapon(self)
 
         self.debug_lines = []
@@ -224,11 +224,10 @@ class Player(FirstPersonController):
             ray.enabled = self.show_colliders
 
     def _swept_blocked(self, origin, direction, distance):
-        # Ignore self and all bullets (identified by layer, not isinstance)
-        ignore = [self] + [
-            e for e in scene.entities
-            if getattr(e, '_collision_layer', 0) in (Layers.PLAYER_BULLET, Layers.ENEMY_BULLET)
-        ]
+        # Ignore self and all active bullets via spatial index (O(1) vs O(N) scan)
+        ignore = ([self]
+                  + collision_manager.query_layer(Layers.PLAYER_BULLET)
+                  + collision_manager.query_layer(Layers.ENEMY_BULLET))
         # 5 heights: feet → knee → waist → shoulder → forehead — covers entity.y-0.4 to entity.y+1.9
         for offset in (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
                        Vec3(0, 1.5, 0), Vec3(0, 1.9, 0)):
