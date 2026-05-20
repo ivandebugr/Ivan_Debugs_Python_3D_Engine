@@ -1,5 +1,6 @@
-__pycache__/
+.Scripts/__pycache__
 *.pyc
 *.pyo
 .vscode/
 claude-skills-main 2 copy/
+obsidian-mind-main/

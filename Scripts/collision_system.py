@@ -9,7 +9,7 @@ class Layers:
     PLAYER_BULLET = 1 << 2   # 4
     ENEMY_BULLET  = 1 << 3   # 8
     WALL          = 1 << 4   # 16
-    PICKUP        = 1 << 5   # 32
+    PICKUP        = 1 << 5   # 32 -- forward declaration; no entity registers this yet
 
 
 # IMPROVED: step-1 — declarative hit matrix; no file needs to import enemy/bullet types
@@ -54,7 +54,7 @@ class AliveEntity(Entity):
         if not self._alive:
             return
         self._alive = False
-        unregister(self)
+        collision_manager.remove(self)   # removes from both _registry and _tracked
         self.on_die()
         destroy(self)
 
@@ -62,7 +62,7 @@ class AliveEntity(Entity):
         pass
 
 
-# IMPROVED: step-4 — shared swept-raycast utility used by bullets and player movement
+# NOTE: unused — candidate for removal if no call site added by next audit
 def swept_cast(origin, direction, distance: float,
                source_entity,
                y_offsets: tuple = (0.1, 1.0, 1.8)):

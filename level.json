@@ -20,15 +20,6 @@
     {
         "type": "block",
         "position": [
-            0.0,
-            1.0,
-            0.0
-        ],
-        "texture": "grass.png"
-    },
-    {
-        "type": "block",
-        "position": [
             1.0,
             1.0,
             0.0
@@ -70,24 +61,6 @@
             -1.0
         ],
         "texture": "grass.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "grass.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "white_cube.png"
     },
     {
         "type": "block",
@@ -173,15 +146,6 @@
     {
         "type": "block",
         "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
             4.0,
             1.0,
             0.0
@@ -221,15 +185,6 @@
             2.0,
             1.0,
             -3.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            0.0,
-            0.0,
-            -2.0
         ],
         "texture": "white_cube.png"
     },
@@ -551,15 +506,6 @@
     {
         "type": "block",
         "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
             2.0,
             1.0,
             -5.0
@@ -570,87 +516,6 @@
         "type": "block",
         "position": [
             2.0,
-            1.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            2.0,
-            1.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "grass.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            0.0,
-            0.0,
-            -2.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            2.0,
-            2.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            2.0,
-            2.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            2.0,
-            2.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            2.0,
-            2.0,
-            -5.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            2.0,
             2.0,
             -5.0
         ],
@@ -669,60 +534,6 @@
         "type": "block",
         "position": [
             2.0,
-            3.0,
-            -6.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            3.0,
-            3.0,
-            -6.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            3.0,
-            3.0,
-            -6.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            3.0,
-            3.0,
-            -6.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            3.0,
-            3.0,
-            -6.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            3.0,
-            3.0,
-            -6.0
-        ],
-        "texture": "white_cube.png"
-    },
-    {
-        "type": "block",
-        "position": [
-            3.0,
             3.0,
             -6.0
         ],

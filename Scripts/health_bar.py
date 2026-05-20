@@ -49,14 +49,18 @@ class HealthBar(Entity):
             )
         else:
             text_pos = kwargs.get('text_position', (0, 0))
+            text_scale = kwargs.get('text_scale', 2)
+            # Parented to camera.ui so text position is in screen space.
+            # Callers must explicitly destroy(health_bar.text) before destroy(health_bar)
+            # because Ursina's destroy() does not cascade to camera.ui children.
             self.text = Text(
                 parent=camera.ui,
                 text=f"{int(self.value)}/{int(self.max_value)}",
                 position=(
-                    self.position.x + text_pos[0], 
-                    self.position.y + text_pos[1]  
+                    self.position.x + text_pos[0],
+                    self.position.y + text_pos[1]
                 ),
-                scale=2,
+                scale=text_scale,
                 color=color.white,
                 eternal=True,
                 z=-1
@@ -84,8 +88,3 @@ class HealthBar(Entity):
         else:
             self.text.text = f"{int(self.value)}/{int(self.max_value)}"
             
-    def destroy(self):
-        """Clean up text when health bar is destroyed"""
-        if hasattr(self, 'text'):
-            destroy(self.text)
-        super().destroy()

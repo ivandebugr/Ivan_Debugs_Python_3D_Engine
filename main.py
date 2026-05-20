@@ -44,6 +44,10 @@ def load_level():
         print("No level file found. Create one using the level editor.")
 
 def main_menu():
+    from Scripts.collision_system import AliveEntity
+    for e in scene.entities[:]:  # die() first so on_die()/unregister() fire before blanket destroy
+        if isinstance(e, AliveEntity) and e.alive:
+            e.die()
     for e in scene.entities[:]:  # copy to avoid mid-loop mutation leaving dead NodePaths
         try:
             if e.name not in ['main_camera']:
@@ -83,6 +87,13 @@ def main_menu():
     def start_game():
         global player, enemy
         if player:
+            if hasattr(player, 'weapon'):
+                destroy(player.weapon.crosshair)
+                destroy(player.weapon)
+            if hasattr(player, 'health_bar'):
+                destroy(player.health_bar.text)
+                destroy(player.health_bar)
+            collision_manager.remove(player)   # prevent Layers.PLAYER leak in _registry
             destroy(player)
         player = Player(position=(0, 2, 0))
         for placeholder in [e for e in scene.entities if e.name == 'level_enemy']:
@@ -161,6 +172,13 @@ class PauseMenu(Entity):
         game_paused = False
         
         if player:
+            if hasattr(player, 'weapon'):
+                destroy(player.weapon.crosshair)
+                destroy(player.weapon)
+            if hasattr(player, 'health_bar'):
+                destroy(player.health_bar.text)
+                destroy(player.health_bar)
+            collision_manager.remove(player)   # prevent Layers.PLAYER leak in _registry
             destroy(player)
             player = None
         
@@ -301,7 +319,7 @@ if __name__ == '__main__':
                 (screen_height - window.size[1]) // 2
             )
 
-    window.on_resize = on_window_resize()
+    window.on_resize = on_window_resize
 
     def update():
         collision_manager.update()  # IMPROVED: step-5 — per-frame spatial grid update  # VERIFIED: step-5

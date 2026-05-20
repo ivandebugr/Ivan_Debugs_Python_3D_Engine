@@ -1,6 +1,6 @@
 from ursina import *
 from Scripts.health_bar import HealthBar
-from Scripts.collision_system import AliveEntity, Layers, register  # IMPROVED: step-1
+from Scripts.collision_system import AliveEntity, Layers, collision_manager  # IMPROVED: step-1
 
 
 class Enemy(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-safe destroy
@@ -12,7 +12,7 @@ class Enemy(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-safe des
             position=spawn_position,
             collider='box'
         )
-        register(self, Layers.ENEMY)  # IMPROVED: step-1
+        collision_manager.add(self, Layers.ENEMY)  # IMPROVED: step-1
         self.health     = 100
         self.max_health = 100
         self.player     = player
@@ -59,7 +59,7 @@ class Enemy(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-safe des
             ignore=[self],
             debug=False
         )
-        return hit.hit and hit.entity.name != 'player'
+        return hit.hit and getattr(hit.entity, '_collision_layer', 0) != Layers.PLAYER
 
     def shoot(self):
         if not self.can_shoot:
