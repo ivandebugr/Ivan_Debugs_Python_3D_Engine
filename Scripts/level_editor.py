@@ -401,7 +401,10 @@ class LevelEditor(Entity):
             return
         self._gizmo_root.enabled = True
         positions = [e.position for e in self.selected]
-        centroid = sum(positions, Vec3(0, 0, 0)) / len(positions)
+        centroid = Vec3(0, 0, 0)
+        for p in positions:
+            centroid += p
+        centroid /= len(positions)
         self._gizmo_root.position = centroid
 
     def _handle_gizmo_drag(self):
@@ -664,24 +667,33 @@ class LevelEditor(Entity):
         # Place / select with left mouse
         if key == 'left mouse down':
             hovered = mouse.hovered_entity
+
+            # Skip if a UI widget (button, panel) consumed the click
+            if hovered and getattr(hovered, 'parent', None) == camera.ui:
+                return
+
             # Gizmo drag is handled in _handle_gizmo_drag(); skip placement if on gizmo
             if hovered and hovered.name.startswith('editor_gizmo'):
                 return
 
             if held_keys['shift']:
+                # Shift+click: add/remove from selection
                 if hovered in (self.blocks + self.enemies):
-                    self._select(hovered, additive=True)
-                elif hovered in self.selected:
-                    # shift-click selected entity deselects it
-                    self.selected.discard(hovered)
-                    hovered.color = getattr(hovered, '_original_color', color.white)
-                    self._update_inspector()
-                    self._update_hierarchy_highlight()
-            else:
-                if hovered in (self.blocks + self.enemies):
-                    self._select(hovered)
+                    if hovered in self.selected:
+                        self.selected.discard(hovered)
+                        hovered.color = getattr(hovered, '_original_color', color.white)
+                        self._update_inspector()
+                        self._update_hierarchy_highlight()
+                    else:
+                        self._select(hovered, additive=True)
                 elif hovered and hovered.collider:
-                    # Place entity on surface
+                    # shift-click on a non-tracked surface (e.g. ground) — no-op
+                    pass
+                else:
+                    self._deselect_all()
+            else:
+                if hovered and hovered.collider:
+                    # Always attempt placement on any collidable surface (ground, wall, or existing block)
                     position = hovered.position + mouse.normal
                     position = self._snap(position)
 
@@ -907,12 +919,12 @@ if __name__ == '__main__':
     editor._editor_camera = editor_cam
 
     Text(
-        text="LClick: Place/Select | Shift+LClick: Multi-select | RDrag: Box-select\n"
+        text="LClick: Place | Shift+LClick: Select/Deselect | RDrag: Box-select\n"
              "Delete: Remove selected | Ctrl+Z: Undo | Ctrl+Y/Shift+Z: Redo\n"
              "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor\n"
              "Ctrl+1-5: Save cam bookmark | 1-5: Recall bookmark",
         parent=camera.ui,
-        position=(-.97, .48),
+        position=(-.88, .48),
         origin=(-.5, .5),
         scale=0.75,
         z=-1
