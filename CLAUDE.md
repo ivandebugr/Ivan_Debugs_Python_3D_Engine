@@ -1,5 +1,7 @@
 # CLAUDE.md — Ivan's 3D Engine Operating Manual
 
+@.claude/skills/karpathy-guidelines/SKILL.md
+
 **Ivan's 3D Engine** is a first-person shooter built on Ursina (Python / Panda3D).
 This file is the authoritative operating manual loaded at the start of every Claude Code session.
 
@@ -33,12 +35,12 @@ and ships everything. Prioritize:
 ## Active Skills Stack
 
 ### Always Load
-| Skill                  | Path                                                   | Why for this project                                       |
-|------------------------|--------------------------------------------------------|------------------------------------------------------------|
-| `senior-architect`     | `engineering-team/senior-architect/SKILL.md`           | Collision authority, singleton design, scene lifecycle     |
-| `karpathy-coder`       | `engineering/karpathy-coder/SKILL.md`                  | Game-loop performance, tight Python loops, raycast budget  |
-| `code-reviewer`        | `engineering-team/code-reviewer/SKILL.md`              | Catch deferred-destroy bugs, double-authority collisions   |
-| `tech-debt-tracker`    | `engineering/tech-debt-tracker/SKILL.md`               | Track module-level globals, missing collision_system stubs |
+| Skill                  | Path                                                                  | Why for this project                                       |
+|------------------------|-----------------------------------------------------------------------|------------------------------------------------------------|
+| `senior-architect`     | `engineering-team/senior-architect/SKILL.md`                          | Collision authority, singleton design, scene lifecycle     |
+| `karpathy-guidelines`  | `.claude/skills/karpathy-guidelines/SKILL.md`                         | Think before coding, simplicity first, surgical changes    |
+| `code-reviewer`        | `engineering-team/code-reviewer/SKILL.md`                             | Catch deferred-destroy bugs, double-authority collisions   |
+| `tech-debt-tracker`    | `engineering/tech-debt-tracker/SKILL.md`                              | Track module-level globals, missing collision_system stubs |
 
 ### Load When Relevant
 | Task                               | Skill                               |
@@ -189,6 +191,8 @@ The same shader patch is duplicated in `level_editor.py` for standalone runs.
 | **[FIXED v1.2.1]** `return_to_menu()` state stuck at `RETURNING_TO_MENU` on exception | `Scripts/game.py` | ~~Medium~~ | `_clear_gameplay_entities()` wrapped in `try/finally` to guarantee state transition |
 | **[FIXED v1.2.1]** Block `rotation` not applied in play-in-editor spawn | `Scripts/level_editor.py` `_spawn_gameplay_from_snapshot()` | ~~Medium~~ | `rotation=tuple(entry.get('rotation', [0, 0, 0]))` added to block `Entity` constructor |
 | **[FIXED v1.2.2]** Level editor placement broken — clicking any surface selected instead of placing | `Scripts/level_editor.py` `input()` | ~~High~~ | Selection branch short-circuited placement when `hovered` was in `self.blocks`; UI buttons also intercepted clicks. Fix: UI guard added; left-click always places, shift-click selects. |
+| **[FIXED v1.2.2]** Gizmo axis drag wrong direction when camera behind object | `Scripts/level_editor.py` `_handle_gizmo_drag()` | ~~Medium~~ | Screen-space delta sign flipped with camera orientation. Fix: project world axis via `camera.getRelativePoint`; dot mouse velocity against screen projection for signed magnitude. |
+| **[ADDED v1.2.2]** Bottom asset tray with drag-and-drop placement | `Scripts/level_editor.py` | — | Replaces Block/Enemy mode toggle button. Five hardcoded tiles (Cube, Stone, Metal, Wood, Enemy); ghost follows mouse ray; release places entity + pushes PlaceEntityCommand; Esc cancels. |
 
 Log new footguns discovered during development → `brain/Gotchas.md` in the vault.
 
@@ -237,18 +241,21 @@ Log new footguns discovered during development → `brain/Gotchas.md` in the vau
 ### Using the Level Editor (v1.2+)
 ```
 python Scripts/level_editor.py
-# Left click on surface     — place block or enemy (mode button)
-# Shift + left click        — add/remove from selection (multi-select)
-# Right mouse drag          — box-select rectangle
-# Shift + click on entity   — select it (inspector + hierarchy update)
-# Delete                    — remove all selected entities
-# Ctrl+Z / Ctrl+Y           — undo / redo (depth 50)
-# Ctrl+S                    — save level.json (clears undo stack + saves prefs)
-# G or Snap button          — cycle grid snap: 1.0 → 0.5 → 0.25 → Off
-# Drag X/Y/Z gizmo axis     — move selection along that axis (snapped)
-# Ctrl+1 through Ctrl+5     — save camera bookmark to slot
-# 1 through 5               — recall camera bookmark
-# F5 / Esc                  — toggle play-in-editor mode
+# Click-hold tile in bottom tray — drag asset; ghost follows mouse
+# Release over viewport          — place entity (block or enemy per tile type)
+# Release over tray / Esc        — cancel drag, no placement
+# Scroll wheel over tray         — scroll tile list horizontally
+# Shift + left click             — add/remove from selection (multi-select)
+# Right mouse drag               — box-select rectangle
+# Shift + click on entity        — select it (inspector + hierarchy update)
+# Delete                         — remove all selected entities
+# Ctrl+Z / Ctrl+Y                — undo / redo (depth 50)
+# Ctrl+S                         — save level.json (clears undo stack + saves prefs)
+# G or Snap button               — cycle grid snap: 1.0 → 0.5 → 0.25 → Off
+# Drag X/Y/Z gizmo axis          — move selection along that axis (snapped)
+# Ctrl+1 through Ctrl+5          — save camera bookmark to slot
+# 1 through 5                    — recall camera bookmark
+# F5 / Esc                       — toggle play-in-editor mode
 ```
 `editor_prefs.json` persists bookmarks and snap setting across sessions.
 All editor-only entities are named `editor_*` — excluded from level save/load.

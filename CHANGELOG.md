@@ -15,11 +15,74 @@ Versions follow [Semantic Versioning](https://semver.org/).
   `hovered_entity` was in `self.blocks`/`self.enemies`; (2) toolbar `Button` widgets (which have
   colliders) could intercept clicks and trigger phantom placements.
 
+- **Gizmo axis drag moved entities in the wrong direction when the camera was on certain sides of
+  the selected object** — drag delta was computed in screen space without accounting for camera
+  orientation, so the sign flipped when the camera orbited behind the object. Fixed by projecting
+  each world axis into screen space each frame (`camera.getRelativePoint`) and dotting mouse
+  velocity against that projection to determine signed magnitude.
+
+### Added
+- **Bottom asset tray** (`Scripts/level_editor.py`) — fixed panel at the bottom of the screen
+  (dark background, full width, height ~0.12 units) with five hardcoded asset tiles:
+  Cube (blue), Stone (grey), Metal (light grey), Wood (brown), Enemy (red).
+  Tiles highlight on hover; mouse-wheel scrolls the tray horizontally.
+- **Drag-and-drop placement** — click-and-hold a tile to pick up an asset; a semi-transparent
+  ghost entity (alpha 0.5) follows the mouse raycast hit point, snapped to the current grid
+  setting. Releasing the mouse over the viewport places the entity and pushes a
+  `PlaceEntityCommand` (fully undoable with Ctrl+Z). Releasing over the tray or pressing Esc
+  cancels the drag without placing. Enemy tiles spawn at `(1.5, 3, 1.5)` scale with
+  `origin_y = −0.5` consistent with the existing enemy placeholder convention.
+
+### Removed
+- **Mode: Block / Enemy toggle button** — replaced by the asset tray. Asset type (block vs.
+  enemy) is now selected by choosing the appropriate tile rather than a global mode switch.
+
 ### Changed
 - **Left-click = place, Shift+click = select** — UX aligned with standard level-editor convention.
   Single left-click on any collidable surface (ground, wall, or existing block face) places a new
   entity. Shift+click adds/removes an entity from the selection. Right-drag box-select unchanged.
 - Updated in-editor help overlay and `CLAUDE.md` to reflect new click bindings.
+- **Karpathy guidelines skill installed** — `multica-ai/andrej-karpathy-skills` placed at
+  `.claude/skills/karpathy-guidelines/SKILL.md` and imported via `@` directive at the top of
+  `CLAUDE.md`. Guidelines (think before coding, simplicity first, surgical changes,
+  goal-driven execution) are now active every Claude Code session automatically.
+- **`mouse.direction` replaced with derived ray direction** (`Scripts/level_editor.py`
+  `_update_ghost()`) — `mouse.direction` was removed in Ursina 8.3.0, causing an
+  `AttributeError` every frame while dragging an asset from the tray. Fixed by deriving the
+  ray direction from `camera.forward`, `camera.right`, `camera.up`, and `mouse.x`/`mouse.y`
+  screen coordinates. Ghost placement and snap logic unchanged.
+
+### Fixed (continued)
+- **Mouse wheel over hierarchy / inspector panels zoomed EditorCamera** — scrolling while the
+  cursor was over either side panel caused the camera to zoom instead of (or in addition to)
+  the panel scrolling. Fixed by checking `_is_over_panel()` in `input()` before the event
+  reaches `EditorCamera` and returning early to suppress the zoom.
+- **Left-click on empty space while entities were selected placed a new block** — the placement
+  branch fired on any collidable surface regardless of selection state, so deselecting by
+  clicking empty space inadvertently created geometry. Fixed with a priority chain:
+  clicking a tracked entity selects it; clicking empty space with a non-empty selection
+  deselects only (no placement, no undo entry); placement only occurs when nothing is selected
+  and the cursor is over a surface.
+- **Block placement triggered during active gizmo drag or box-select** — held-key repeat events
+  could fire `left mouse down` while a drag was in progress, creating phantom blocks. Fixed by
+  guarding the entire `left mouse down` handler when `_gizmo_drag_axis is not None` or
+  `_box_selecting` is `True`.
+
+### Improved
+- **Hierarchy panel scroll** — entity list now supports mouse-wheel scrolling when the cursor
+  hovers the hierarchy panel. Shows 14 rows at a time; a proportional thumb on the right edge
+  indicates scroll position. Hidden when all entities fit without scrolling.
+- **Inspector even spacing** — property rows are distributed evenly across the full panel height
+  instead of bunching at the top. A subtle separator line divides the transform group
+  (Pos X/Y/Z, Rot Y, Scale X/Y/Z) from the entity group (HP).
+- **GLSL 1.20 shader compatibility for macOS / OpenGL 2.1** — Ursina 8.3.0 ships
+  `unlit_shader`, `unlit_with_fog_shader`, and `text_shader` with `#version 130/140` directives,
+  causing all geometry to render black on Apple Silicon (Panda3D CocoaGraphicsPipe, GLSL 1.20
+  max). A runtime monkey-patch could not win the race because `from ursina import *` at module
+  top-level pre-compiles shader objects before any `if __name__ == '__main__'` code runs. Fixed by
+  patching the three shader source files in the installed ursina package directly — `in`/`out`
+  replaced with `attribute`/`varying`, `texture()` with `texture2D()`, named `out vec4` outputs
+  replaced with `gl_FragColor`. Originals backed up as `.bak` files alongside each shader.
 
 ---
 
