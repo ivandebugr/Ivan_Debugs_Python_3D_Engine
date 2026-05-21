@@ -188,6 +188,7 @@ The same shader patch is duplicated in `level_editor.py` for standalone runs.
 | **[FIXED v1.2.1]** 201 `eternal=True` debug entities per Player spawn | `Scripts/player_controller.py` | ~~High~~ | `draw_raycasts` default changed `True` → `False`; no entities created in normal play |
 | **[FIXED v1.2.1]** `return_to_menu()` state stuck at `RETURNING_TO_MENU` on exception | `Scripts/game.py` | ~~Medium~~ | `_clear_gameplay_entities()` wrapped in `try/finally` to guarantee state transition |
 | **[FIXED v1.2.1]** Block `rotation` not applied in play-in-editor spawn | `Scripts/level_editor.py` `_spawn_gameplay_from_snapshot()` | ~~Medium~~ | `rotation=tuple(entry.get('rotation', [0, 0, 0]))` added to block `Entity` constructor |
+| **[FIXED v1.2.2]** Level editor placement broken — clicking any surface selected instead of placing | `Scripts/level_editor.py` `input()` | ~~High~~ | Selection branch short-circuited placement when `hovered` was in `self.blocks`; UI buttons also intercepted clicks. Fix: UI guard added; left-click always places, shift-click selects. |
 
 Log new footguns discovered during development → `brain/Gotchas.md` in the vault.
 
@@ -237,9 +238,9 @@ Log new footguns discovered during development → `brain/Gotchas.md` in the vau
 ```
 python Scripts/level_editor.py
 # Left click on surface     — place block or enemy (mode button)
-# Shift + left click        — add to selection (multi-select)
+# Shift + left click        — add/remove from selection (multi-select)
 # Right mouse drag          — box-select rectangle
-# Click on entity           — select it (inspector + hierarchy update)
+# Shift + click on entity   — select it (inspector + hierarchy update)
 # Delete                    — remove all selected entities
 # Ctrl+Z / Ctrl+Y           — undo / redo (depth 50)
 # Ctrl+S                    — save level.json (clears undo stack + saves prefs)
