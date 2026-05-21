@@ -18,6 +18,14 @@ loadPrcFileData('', 'model-cache-dir')
 
 
 class LevelEditor(Entity):
+    ASSETS = [
+        {'name': 'Cube',  'model': 'cube', 'color': (80, 120, 200),  'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Stone', 'model': 'cube', 'color': (110, 110, 110), 'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Metal', 'model': 'cube', 'color': (160, 160, 180), 'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Wood',  'model': 'cube', 'color': (160, 100, 60),  'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Enemy', 'model': 'cube', 'color': (200, 60, 60),   'scale': (1.5, 3, 1.5), 'type': 'enemy'},
+    ]
+
     def __init__(self):
         super().__init__()
         self.blocks = []
@@ -47,6 +55,8 @@ class LevelEditor(Entity):
         self._insp_fields = {}
         self._hier_panel = None
         self._hier_buttons = []
+        self._hier_scroll_bar = None
+        self.hierarchy_scroll = 0
 
         # Grid snap
         self.snap_values = [1.0, 0.5, 0.25, None]
@@ -58,6 +68,15 @@ class LevelEditor(Entity):
 
         # Undo/redo
         self._history = UndoRedoStack()
+
+        # Drag-and-drop state
+        self._drag_asset = None    # asset dict currently being dragged
+        self._drag_ghost = None    # semi-transparent ghost Entity
+        self._dragging = False     # True once mouse moves after tile click
+        self._drag_origin = None   # Vec2 mouse pos when tile was pressed
+
+        # Asset tray scroll offset (number of tile widths shifted left)
+        self._tray_scroll = 0
 
         # Build toolbar buttons
         self.texture_button = Button(
@@ -71,22 +90,11 @@ class LevelEditor(Entity):
             z=-1
         )
 
-        self.enemy_button = Button(
-            parent=camera.ui,
-            text='Mode: Block',
-            scale=(.18, .05),
-            position=(.35, .41),
-            on_click=self.toggle_mode,
-            color=color.dark_gray,
-            text_scale=1.2,
-            z=-1
-        )
-
         self.snap_button = Button(
             parent=camera.ui,
             text='Snap: 1.0',
             scale=(.18, .05),
-            position=(.35, .35),
+            position=(.35, .41),
             on_click=self.cycle_snap,
             color=color.dark_gray,
             text_scale=1.2,
@@ -97,7 +105,7 @@ class LevelEditor(Entity):
             parent=camera.ui,
             text='Play (F5)',
             scale=(.18, .05),
-            position=(.35, .29),
+            position=(.35, .35),
             on_click=self.toggle_play,
             color=color.rgb(120, 60, 100),
             text_scale=1.2,
@@ -114,6 +122,7 @@ class LevelEditor(Entity):
         self._build_inspector()
         self._build_hierarchy()
         self._build_gizmo()
+        self._build_asset_tray()
         self.load_existing_level()
 
     # -------------------------------------------------------------------------
@@ -137,24 +146,17 @@ class LevelEditor(Entity):
         return round(value / self.grid_snap) * self.grid_snap
 
     # -------------------------------------------------------------------------
-    # Mode / texture toggles
+    # Texture toggle
     # -------------------------------------------------------------------------
 
-    def toggle_mode(self):
-        self.current_mode = 'enemy' if self.current_mode == 'block' else 'block'
-        self.enemy_button.text = f'Mode: {self.current_mode.capitalize()}'
-        self.model_preview.scale = (1.5, 3, 1.5) if self.current_mode == 'enemy' else (1, 1, 1)
-        self.model_preview.texture = self.current_texture if self.current_mode == 'block' else ''
-
     def toggle_texture(self):
-        if self.current_mode == 'block':
-            if self.current_texture == 'white_cube':
-                self.current_texture = 'grass'
-                self.texture_button.text = 'Texture: Grass'
-            else:
-                self.current_texture = 'white_cube'
-                self.texture_button.text = 'Texture: White'
-            self.model_preview.texture = self.current_texture
+        if self.current_texture == 'white_cube':
+            self.current_texture = 'grass'
+            self.texture_button.text = 'Texture: Grass'
+        else:
+            self.current_texture = 'white_cube'
+            self.texture_button.text = 'Texture: White'
+        self.model_preview.texture = self.current_texture
 
     # -------------------------------------------------------------------------
     # Selection
@@ -237,15 +239,37 @@ class LevelEditor(Entity):
             scale=(.055, .055),
             color=color.white
         )
+        # 8 rows distributed evenly in the usable area below the title.
+        # Usable: from +0.38 to -0.43  →  height = 0.81 units (in panel-local space).
+        # Transform group: rows 0-6 (pos x/y/z, rot y, scale x/y/z)
+        # Entity group: rows 7+ (HP)
+        # Separator drawn between group boundary.
         fields = [
             ('pos_x', 'Pos X'), ('pos_y', 'Pos Y'), ('pos_z', 'Pos Z'),
             ('rot_y', 'Rot Y'),
             ('scl_x', 'Scale X'), ('scl_y', 'Scale Y'), ('scl_z', 'Scale Z'),
             ('hp', 'HP'),
         ]
+        _panel_top = 0.38
+        _panel_height = 0.81
+        _num_rows = len(fields)
+        # Index of first entity-group row (HP and beyond)
+        _entity_group_start = 7
         self._insp_fields = {}
         for i, (key, label) in enumerate(fields):
-            y_pos = .35 - i * .09
+            y_pos = _panel_top - (i + 0.5) * (_panel_height / _num_rows)
+            # Separator line between transform and entity groups
+            if i == _entity_group_start:
+                sep_y = _panel_top - i * (_panel_height / _num_rows)
+                Entity(
+                    parent=self._inspector,
+                    model=Mesh(
+                        vertices=[Vec3(-0.48, sep_y, 0), Vec3(0.48, sep_y, 0)],
+                        mode='line', thickness=1
+                    ),
+                    color=color.rgba(180, 180, 180, 80),
+                    z=-1
+                )
             Text(
                 parent=self._inspector,
                 text=label,
@@ -312,6 +336,11 @@ class LevelEditor(Entity):
     # Hierarchy panel
     # -------------------------------------------------------------------------
 
+    # Hierarchy layout constants (panel-local space)
+    _HIER_TOP    = 0.36   # y of first row
+    _HIER_ROW_H  = 0.05   # row pitch
+    _HIER_MAX_VISIBLE = 14
+
     def _build_hierarchy(self):
         self._hier_panel = Entity(
             parent=camera.ui,
@@ -328,6 +357,15 @@ class LevelEditor(Entity):
             scale=(.055, .055),
             color=color.white
         )
+        # Thin vertical scroll indicator — right edge of panel
+        self._hier_scroll_bar = Entity(
+            parent=self._hier_panel,
+            model='quad',
+            color=color.rgba(200, 200, 200, 120),
+            scale=(.018, .05),
+            position=(.46, self._HIER_TOP),
+            z=-1
+        )
         self._hier_buttons = []
 
     def _refresh_hierarchy(self):
@@ -335,14 +373,19 @@ class LevelEditor(Entity):
             destroy(b)
         self._hier_buttons.clear()
         all_entities = self.blocks + self.enemies
-        for i, e in enumerate(all_entities):
+        total = len(all_entities)
+        max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
+        self.hierarchy_scroll = max(0, min(self.hierarchy_scroll, max_scroll))
+
+        visible_slice = all_entities[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
+        for row, e in enumerate(visible_slice):
             is_enemy = e in self.enemies
             label = f"{'E' if is_enemy else 'B'} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
             btn = Button(
                 parent=self._hier_panel,
                 text=label,
                 scale=(.18, .038),
-                position=(0, .36 - i * .05),
+                position=(-.01, self._HIER_TOP - row * self._HIER_ROW_H),
                 color=color.orange if e in self.selected else color.dark_gray,
                 text_scale=.75,
                 z=-1
@@ -350,10 +393,247 @@ class LevelEditor(Entity):
             btn.on_click = lambda entity=e: self._select(entity)
             self._hier_buttons.append(btn)
 
+        self._update_hier_scroll_bar(total)
+
+    def _update_hier_scroll_bar(self, total):
+        if not self._hier_scroll_bar:
+            return
+        if total <= self._HIER_MAX_VISIBLE:
+            self._hier_scroll_bar.enabled = False
+            return
+        self._hier_scroll_bar.enabled = True
+        # Track height spans from _HIER_TOP down to the last row bottom
+        track_top    = self._HIER_TOP
+        track_bottom = self._HIER_TOP - self._HIER_MAX_VISIBLE * self._HIER_ROW_H
+        track_h      = track_top - track_bottom  # positive
+
+        thumb_ratio  = self._HIER_MAX_VISIBLE / total
+        thumb_h      = max(0.03, track_h * thumb_ratio)
+        max_scroll   = total - self._HIER_MAX_VISIBLE
+        scroll_frac  = self.hierarchy_scroll / max_scroll if max_scroll > 0 else 0
+        # Centre of thumb travels from track_top - thumb_h/2  down to  track_bottom + thumb_h/2
+        travel       = track_h - thumb_h
+        thumb_centre = track_top - thumb_h / 2 - scroll_frac * travel
+
+        self._hier_scroll_bar.scale_y = thumb_h
+        self._hier_scroll_bar.y       = thumb_centre
+
     def _update_hierarchy_highlight(self):
         all_entities = self.blocks + self.enemies
-        for btn, e in zip(self._hier_buttons, all_entities):
+        visible_slice = all_entities[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
+        for btn, e in zip(self._hier_buttons, visible_slice):
             btn.color = color.orange if e in self.selected else color.dark_gray
+
+    def _is_over_panel(self, panel):
+        """Return True if the mouse cursor is currently over the given UI panel quad."""
+        mx, my = mouse.x, mouse.y
+        px, py = panel.x, panel.y
+        hw = panel.scale_x * 0.5
+        hh = panel.scale_y * 0.5
+        return (px - hw) <= mx <= (px + hw) and (py - hh) <= my <= (py + hh)
+
+    # -------------------------------------------------------------------------
+    # Asset tray
+    # -------------------------------------------------------------------------
+
+    # Tray layout constants
+    _TRAY_Y       = -0.45   # centre y of the tray panel in camera.ui space
+    _TRAY_H       =  0.12   # panel height
+    _TILE_SIZE    =  0.09   # tile width and height in camera.ui space
+    _TILE_GAP     =  0.01   # horizontal gap between tiles
+    _TILE_PITCH   =  0.10   # _TILE_SIZE + _TILE_GAP
+
+    def _build_asset_tray(self):
+        self._tray_panel = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(25, 25, 31, 220),
+            scale=(2.0, self._TRAY_H),
+            position=(0, self._TRAY_Y),
+            z=-0.5
+        )
+
+        self._tray_tiles = []   # list of (bg_entity, icon_entity, label_entity, asset_dict)
+        assets = LevelEditor.ASSETS
+        for i, asset in enumerate(assets):
+            self._create_tray_tile(i, asset)
+
+    def _tile_x(self, index):
+        """Camera.ui x-position of tile centre at given index, accounting for scroll."""
+        first_x = -(len(LevelEditor.ASSETS) - 1) * self._TILE_PITCH * 0.5
+        return first_x + index * self._TILE_PITCH - self._tray_scroll * self._TILE_PITCH
+
+    def _create_tray_tile(self, index, asset):
+        asset_color = color.rgb(*asset['color'])
+        tx = self._tile_x(index)
+
+        bg = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(50, 50, 60, 200),
+            scale=(self._TILE_SIZE, self._TILE_SIZE),
+            position=(tx, self._TRAY_Y),
+            z=-0.6
+        )
+        icon = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=asset_color,
+            scale=(self._TILE_SIZE * 0.65, self._TILE_SIZE * 0.65),
+            position=(tx, self._TRAY_Y + 0.01),
+            z=-0.7
+        )
+        label = Text(
+            parent=camera.ui,
+            text=asset['name'],
+            position=(tx, self._TRAY_Y - self._TILE_SIZE * 0.42),
+            scale=0.55,
+            color=color.light_gray,
+            origin=(0, 0),
+            z=-0.7
+        )
+        self._tray_tiles.append((bg, icon, label, asset))
+
+    def _refresh_tray_positions(self):
+        for i, (bg, icon, label, asset) in enumerate(self._tray_tiles):
+            tx = self._tile_x(i)
+            bg.x    = tx
+            icon.x  = tx
+            label.x = tx
+
+    def _is_over_tray(self):
+        my = mouse.y
+        return (self._TRAY_Y - self._TRAY_H * 0.5) <= my <= (self._TRAY_Y + self._TRAY_H * 0.5)
+
+    def _tile_at_mouse(self):
+        """Return asset dict for the tile the mouse is over, or None."""
+        mx, my = mouse.x, mouse.y
+        if not self._is_over_tray():
+            return None
+        for i, (bg, icon, label, asset) in enumerate(self._tray_tiles):
+            tx = self._tile_x(i)
+            hw = self._TILE_SIZE * 0.5
+            hh = self._TILE_SIZE * 0.5
+            if (tx - hw) <= mx <= (tx + hw) and (self._TRAY_Y - hh) <= my <= (self._TRAY_Y + hh):
+                return asset
+        return None
+
+    def _highlight_hovered_tile(self):
+        """Brighten the tile the mouse is hovering over."""
+        for i, (bg, icon, label, asset) in enumerate(self._tray_tiles):
+            tx = self._tile_x(i)
+            hw = self._TILE_SIZE * 0.5
+            mx, my = mouse.x, mouse.y
+            hovered = (tx - hw) <= mx <= (tx + hw) and (self._TRAY_Y - hw) <= my <= (self._TRAY_Y + hw)
+            bg.color = color.rgba(80, 80, 100, 220) if hovered else color.rgba(50, 50, 60, 200)
+
+    def _begin_drag(self, asset):
+        self._drag_asset = asset
+        self._drag_ghost = None   # created lazily when mouse moves over viewport
+
+    def _update_ghost(self):
+        """Move ghost to snapped raycast hit point; create it if needed."""
+        asset = self._drag_asset
+        if asset is None:
+            return
+
+        ignore_list = [self._drag_ghost] if self._drag_ghost else []
+        # mouse.direction was removed in Ursina 8.3.0; derive ray from screen coords
+        ray_dir = (
+            camera.forward
+            + camera.right * mouse.x * (camera.fov / camera.aspect_ratio) * 0.017453
+            + camera.up    * mouse.y * camera.fov * 0.017453
+        ).normalized()
+        hit = raycast(
+            camera.world_position,
+            ray_dir,
+            distance=200,
+            ignore=ignore_list,
+            traverse_target=scene,
+        )
+
+        if not hit.hit or hit.entity is None:
+            if self._drag_ghost:
+                self._drag_ghost.visible = False
+            return
+
+        # Compute placement position
+        pos = list(hit.entity.position + hit.normal)
+        pos = self._snap(pos)
+        if asset['type'] == 'enemy':
+            pos[1] += 1
+
+        asset_color = color.rgb(*asset['color'])
+        ghost_color = Color(asset_color.r, asset_color.g, asset_color.b, 0.5)
+
+        if self._drag_ghost is None:
+            self._drag_ghost = Entity(
+                model=asset['model'],
+                color=ghost_color,
+                scale=asset['scale'],
+                position=pos,
+                collider=None,
+                name='editor_drag_ghost'
+            )
+            if asset['type'] == 'enemy':
+                self._drag_ghost.origin_y = -0.5
+        else:
+            self._drag_ghost.visible = True
+            self._drag_ghost.position = pos
+
+    def _cancel_drag(self):
+        if self._drag_ghost:
+            destroy(self._drag_ghost)
+            self._drag_ghost = None
+        self._drag_asset = None
+        self._dragging = False
+        self._drag_origin = None
+
+    def _commit_drag(self):
+        """Place entity at ghost position and push undo command."""
+        asset = self._drag_asset
+        ghost = self._drag_ghost
+
+        if ghost is None or not ghost.visible or asset is None:
+            self._cancel_drag()
+            return
+
+        pos = ghost.position
+        asset_color = color.rgb(*asset['color'])
+
+        if asset['type'] == 'enemy':
+            new_entity = Entity(
+                model=asset['model'],
+                color=asset_color,
+                scale=asset['scale'],
+                position=pos,
+                collider='box',
+                origin_y=-0.5
+            )
+            new_entity.enemy_hp = 100
+            new_entity.enemy_type = 'default'
+            new_entity._original_color = asset_color
+            self.enemies.append(new_entity)
+        else:
+            new_entity = Entity(
+                model=asset['model'],
+                color=asset_color,
+                scale=asset['scale'],
+                position=pos,
+                collider='box'
+            )
+            new_entity._original_color = asset_color
+            self.blocks.append(new_entity)
+
+        cmd = PlaceEntityCommand(self, new_entity)
+        self._history.push(cmd)
+        self._refresh_hierarchy()
+
+        destroy(ghost)
+        self._drag_ghost = None
+        self._drag_asset = None
+        self._dragging = False
+        self._drag_origin = None
 
     # -------------------------------------------------------------------------
     # Transform gizmos
@@ -413,6 +693,7 @@ class LevelEditor(Entity):
             'editor_gizmo_y': 'y', 'editor_gizmo_tip_y': 'y',
             'editor_gizmo_z': 'z', 'editor_gizmo_tip_z': 'z',
         }
+        _world_axes = {'x': Vec3(1, 0, 0), 'y': Vec3(0, 1, 0), 'z': Vec3(0, 0, 1)}
         if held_keys['left mouse']:
             if self._gizmo_drag_axis is None:
                 if mouse.hovered_entity and mouse.hovered_entity.name in axis_map:
@@ -420,16 +701,25 @@ class LevelEditor(Entity):
                     self._gizmo_drag_start_mouse = Vec2(mouse.x, mouse.y)
                     self._gizmo_drag_start_pos = {e: Vec3(e.position) for e in self.selected}
             else:
-                delta_screen = Vec2(mouse.x, mouse.y) - self._gizmo_drag_start_mouse
-                sensitivity = 10.0
+                # Project the world axis into screen space to determine drag sign.
+                # camera.getRelativePoint gives the axis endpoint in camera-local space;
+                # the 2D difference is the screen-space projection of that axis.
+                axis_world = _world_axes[self._gizmo_drag_axis]
+                cam_origin = camera.getRelativePoint(render, Vec3(0, 0, 0))
+                cam_tip    = camera.getRelativePoint(render, axis_world)
+                axis_screen = Vec2(cam_tip.x - cam_origin.x, cam_tip.y - cam_origin.y)
+                axis_len = axis_screen.length()
+                if axis_len > 0.0001:
+                    axis_screen /= axis_len
+                else:
+                    axis_screen = Vec2(1, 0)
+
+                mouse_vel = Vec2(mouse.velocity[0], mouse.velocity[1])
+                magnitude = mouse_vel.dot(axis_screen) * 200.0  # scale velocity → world units
+
                 for e in self.selected:
-                    base = self._gizmo_drag_start_pos[e]
-                    if self._gizmo_drag_axis == 'x':
-                        e.x = self._snap_1d(base.x + delta_screen.x * sensitivity)
-                    elif self._gizmo_drag_axis == 'y':
-                        e.y = self._snap_1d(base.y + delta_screen.y * sensitivity)
-                    elif self._gizmo_drag_axis == 'z':
-                        e.z = self._snap_1d(base.z + delta_screen.x * sensitivity)
+                    raw = getattr(e, self._gizmo_drag_axis) + magnitude
+                    setattr(e, self._gizmo_drag_axis, self._snap_1d(raw))
                 self._update_gizmo()
         else:
             if self._gizmo_drag_axis is not None:
@@ -503,10 +793,14 @@ class LevelEditor(Entity):
 
     def _set_editor_ui_visible(self, visible):
         for widget in [self._inspector, self._hier_panel, self._insp_title,
-                       self.texture_button, self.enemy_button, self.snap_button,
-                       self.play_button]:
+                       self.texture_button, self.snap_button,
+                       self.play_button, self._tray_panel]:
             if widget:
                 widget.enabled = visible
+        for bg, icon, label, asset in self._tray_tiles:
+            bg.enabled    = visible
+            icon.enabled  = visible
+            label.enabled = visible
 
     def toggle_play(self):
         if self._play_mode:
@@ -587,10 +881,6 @@ class LevelEditor(Entity):
                 return
             preview_position = mouse.hovered_entity.position + mouse.normal
             preview_position = self._snap(preview_position)
-
-            if self.current_mode == 'enemy':
-                preview_position[1] += 1
-
             self.model_preview.position = preview_position
             self.model_preview.visible = True
         else:
@@ -598,7 +888,13 @@ class LevelEditor(Entity):
 
     def update(self):
         if not self._play_mode:
-            self.update_model_preview()
+            if self._dragging:
+                self._update_ghost()
+                # Suppress normal model preview while dragging
+                self.model_preview.visible = False
+            else:
+                self.update_model_preview()
+                self._highlight_hovered_tile()
             self._handle_gizmo_drag()
             self._update_gizmo()
 
@@ -664,8 +960,34 @@ class LevelEditor(Entity):
             self._update_gizmo()
             return
 
-        # Place / select with left mouse
+        # Cancel drag with Esc
+        if key == 'escape' and self._dragging:
+            self._cancel_drag()
+            return
+
+        # Asset tray: begin drag on left mouse down over a tile
         if key == 'left mouse down':
+            tile_asset = self._tile_at_mouse()
+            if tile_asset is not None:
+                self._drag_origin = Vec2(mouse.x, mouse.y)
+                self._dragging = True
+                self._begin_drag(tile_asset)
+                return
+
+        # Commit or cancel drag on left mouse up
+        if key == 'left mouse up' and self._dragging:
+            if self._is_over_tray():
+                self._cancel_drag()
+            else:
+                self._commit_drag()
+            return
+
+        # Place / select with left mouse (only when not dragging from tray)
+        if key == 'left mouse down':
+            # Guard: ignore clicks while a gizmo drag or box-select is in progress
+            if self._gizmo_drag_axis is not None or self._box_selecting:
+                return
+
             hovered = mouse.hovered_entity
 
             # Skip if a UI widget (button, panel) consumed the click
@@ -692,43 +1014,55 @@ class LevelEditor(Entity):
                 else:
                     self._deselect_all()
             else:
+                # Priority: clicking an entity selects it
+                if hovered in (self.blocks + self.enemies):
+                    self._select(hovered)
+                    return
+
+                # Priority: first click on empty space when something is selected = deselect only
+                if self.selected:
+                    self._deselect_all()
+                    return
+
+                # Nothing selected and clicking a collidable surface = place new block
                 if hovered and hovered.collider:
-                    # Always attempt placement on any collidable surface (ground, wall, or existing block)
                     position = hovered.position + mouse.normal
                     position = self._snap(position)
 
-                    if self.current_mode == 'enemy':
-                        if not self.position_valid(position):
-                            return
-                        new_entity = Entity(
-                            model='cube',
-                            color=color.red,
-                            texture='white_cube',
-                            scale=(1.5, 3, 1.5),
-                            position=position,
-                            collider='box',
-                            origin_y=-0.5
-                        )
-                        new_entity.enemy_hp = 100
-                        new_entity.enemy_type = 'default'
-                        new_entity._original_color = color.red
-                        self.enemies.append(new_entity)
-                        cmd = PlaceEntityCommand(self, new_entity)
-                        self._history.push(cmd)
-                    else:
-                        new_entity = Entity(
-                            model='cube',
-                            texture=self.current_texture,
-                            collider='box',
-                            position=position
-                        )
-                        new_entity._original_color = color.white
-                        self.blocks.append(new_entity)
-                        cmd = PlaceEntityCommand(self, new_entity)
-                        self._history.push(cmd)
+                    new_entity = Entity(
+                        model='cube',
+                        texture=self.current_texture,
+                        collider='box',
+                        position=position
+                    )
+                    new_entity._original_color = color.white
+                    self.blocks.append(new_entity)
+                    cmd = PlaceEntityCommand(self, new_entity)
+                    self._history.push(cmd)
                     self._refresh_hierarchy()
-                else:
-                    self._deselect_all()
+
+        # Hierarchy scroll — mouse wheel while cursor over the hierarchy panel or inspector
+        if key in ('scroll up', 'scroll down'):
+            if self._hier_panel and self._is_over_panel(self._hier_panel):
+                total = len(self.blocks) + len(self.enemies)
+                max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
+                delta = -1 if key == 'scroll up' else 1
+                self.hierarchy_scroll = max(0, min(self.hierarchy_scroll + delta, max_scroll))
+                self._refresh_hierarchy()
+                self._update_hierarchy_highlight()
+                return
+
+            # Inspector panel — suppress camera zoom when cursor is over it
+            if self._inspector and self._is_over_panel(self._inspector):
+                return
+
+            # Tray horizontal scroll — mouse wheel while cursor over tray
+            if self._is_over_tray():
+                max_scroll = max(0, len(LevelEditor.ASSETS) - 1)
+                delta = -1 if key == 'scroll up' else 1
+                self._tray_scroll = max(0, min(self._tray_scroll + delta, max_scroll))
+                self._refresh_tray_positions()
+                return
 
         # Box-select with right mouse drag
         if key == 'right mouse down':
@@ -818,84 +1152,151 @@ class LevelEditor(Entity):
 
 if __name__ == '__main__':
     loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')
-    app = Ursina(title="Level Editor")
 
-    # Shader patch applied before any Entity — must not be called again in play-in-editor
-    # (level_editor.py already applies it at startup; _spawn_gameplay_from_snapshot relies on this)
+    # Patch shader source objects BEFORE Ursina() — Ursina's own window/UI entities
+    # compile shaders during __init__, so the patch must happen before App() runs.
+    # Important: ursina.shader.imported_shaders holds different object instances than direct imports.
+    # We patch every live instance reachable by entity.py and clear ._shader on pre-compiled ones.
+    def _patch_shader_obj(obj, vertex_src, fragment_src):
+        obj.vertex = vertex_src
+        obj.fragment = fragment_src
+        obj.compiled = False
+        if hasattr(obj, '_shader'):
+            del obj._shader
+
+    _UNLIT_VERT = (
+        '#version 120\n'
+        'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+        'uniform mat4 p3d_ModelViewMatrix;\n'
+        'uniform mat4 p3d_ModelMatrix;\n'
+        'attribute vec4 p3d_Vertex;\n'
+        'attribute vec2 p3d_MultiTexCoord0;\n'
+        'varying vec2 uvs;\n'
+        'uniform vec2 texture_scale;\n'
+        'uniform vec2 texture_offset;\n'
+        'attribute vec4 p3d_Color;\n'
+        'varying vec4 vertex_color;\n'
+        'void main() {\n'
+        '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+        '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
+        '    vertex_color = p3d_Color;\n'
+        '}\n'
+    )
+    _UNLIT_FRAG = (
+        '#version 120\n'
+        'uniform sampler2D p3d_Texture0;\n'
+        'uniform vec4 p3d_ColorScale;\n'
+        'varying vec2 uvs;\n'
+        'varying vec4 vertex_color;\n'
+        'void main() {\n'
+        '    gl_FragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
+        '}\n'
+    )
+    _UFS_VERT = (
+        '#version 120\n'
+        'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+        'uniform mat4 p3d_ModelViewMatrix;\n'
+        'uniform mat4 p3d_ModelMatrix;\n'
+        'attribute vec4 p3d_Vertex;\n'
+        'attribute vec2 p3d_MultiTexCoord0;\n'
+        'varying vec2 uvs;\n'
+        'uniform vec2 texture_scale;\n'
+        'uniform vec2 texture_offset;\n'
+        'attribute vec4 p3d_Color;\n'
+        'varying vec4 vertex_color;\n'
+        'varying vec3 vertex_world_position;\n'
+        'void main() {\n'
+        '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+        '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
+        '    vertex_color = p3d_Color;\n'
+        '    vertex_world_position = (p3d_ModelMatrix * p3d_Vertex).xyz;\n'
+        '}\n'
+    )
+    _UFS_FRAG = (
+        '#version 120\n'
+        'uniform sampler2D p3d_Texture0;\n'
+        'uniform vec4 p3d_ColorScale;\n'
+        'varying vec2 uvs;\n'
+        'varying vec4 vertex_color;\n'
+        'varying vec3 vertex_world_position;\n'
+        'uniform vec3 camera_world_position;\n'
+        'uniform vec4 fog_color;\n'
+        'uniform float fog_start;\n'
+        'uniform float fog_end;\n'
+        'void main() {\n'
+        '    vec4 fragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
+        '    float distance_to_camera = length(vertex_world_position.xyz - camera_world_position);\n'
+        '    float fog_length = fog_end - fog_start;\n'
+        '    float t = clamp(distance_to_camera / fog_length, 0.0, 1.0);\n'
+        '    fragColor.rgb = mix(fragColor.rgb, fog_color.rgb, t * fog_color.a);\n'
+        '    gl_FragColor = fragColor;\n'
+        '}\n'
+    )
+    _TEXT_VERT = (
+        '#version 120\n'
+        'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+        'attribute vec4 p3d_Vertex;\n'
+        'attribute vec2 p3d_MultiTexCoord0;\n'
+        'varying vec2 uvs;\n'
+        'attribute vec4 p3d_Color;\n'
+        'varying vec4 vertex_color;\n'
+        'void main() {\n'
+        '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+        '    uvs = p3d_MultiTexCoord0;\n'
+        '    vertex_color = p3d_Color;\n'
+        '}\n'
+    )
+    _TEXT_FRAG = (
+        '#version 120\n'
+        'uniform sampler2D p3d_Texture0;\n'
+        'uniform vec4 p3d_ColorScale;\n'
+        'uniform vec4 outline_color;\n'
+        'uniform vec2 outline_offset;\n'
+        'uniform float outline_power;\n'
+        'varying vec2 uvs;\n'
+        'varying vec4 vertex_color;\n'
+        'void main() {\n'
+        '    float dist = texture2D(p3d_Texture0, uvs).a;\n'
+        '    vec2 width = vec2(0.5-fwidth(dist), 0.5+fwidth(dist));\n'
+        '    float alpha = smoothstep(width.x, width.y, dist);\n'
+        '    float scale = 0.354;\n'
+        '    vec2 duv = scale * (dFdx(uvs) + dFdy(uvs));\n'
+        '    vec4 box = vec4(uvs-duv, uvs+duv);\n'
+        '    alpha += 0.5*(smoothstep(width.x, width.y, texture2D(p3d_Texture0, box.xy).a)\n'
+        '            +smoothstep(width.x, width.y, texture2D(p3d_Texture0, box.zw).a)\n'
+        '            +smoothstep(width.x, width.y, texture2D(p3d_Texture0, box.xw).a)\n'
+        '            +smoothstep(width.x, width.y, texture2D(p3d_Texture0, box.zy).a));\n'
+        '    alpha /= 3.0;\n'
+        '    float outline = pow(texture2D(p3d_Texture0, uvs-outline_offset).a, outline_power);\n'
+        '    gl_FragColor = mix(vec4(vertex_color.rgb, outline_color.a * outline), vertex_color, alpha);\n'
+        '}\n'
+    )
+
     def _patch_shaders_to_glsl120():
+        from ursina import shader as _shader_mod
         from ursina.shaders.unlit_shader import unlit_shader as _us
         from ursina.shaders.unlit_with_fog_shader import unlit_with_fog_shader as _ufs
-        _us.vertex = (
-            '#version 120\n'
-            'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
-            'uniform mat4 p3d_ModelViewMatrix;\n'
-            'uniform mat4 p3d_ModelMatrix;\n'
-            'attribute vec4 p3d_Vertex;\n'
-            'attribute vec2 p3d_MultiTexCoord0;\n'
-            'varying vec2 uvs;\n'
-            'uniform vec2 texture_scale;\n'
-            'uniform vec2 texture_offset;\n'
-            'attribute vec4 p3d_Color;\n'
-            'varying vec4 vertex_color;\n'
-            'void main() {\n'
-            '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
-            '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
-            '    vertex_color = p3d_Color;\n'
-            '}\n'
-        )
-        _us.fragment = (
-            '#version 120\n'
-            'uniform sampler2D p3d_Texture0;\n'
-            'uniform vec4 p3d_ColorScale;\n'
-            'varying vec2 uvs;\n'
-            'varying vec4 vertex_color;\n'
-            'void main() {\n'
-            '    gl_FragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
-            '}\n'
-        )
-        _us.compiled = False
-        _ufs.vertex = (
-            '#version 120\n'
-            'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
-            'uniform mat4 p3d_ModelViewMatrix;\n'
-            'uniform mat4 p3d_ModelMatrix;\n'
-            'attribute vec4 p3d_Vertex;\n'
-            'attribute vec2 p3d_MultiTexCoord0;\n'
-            'varying vec2 uvs;\n'
-            'uniform vec2 texture_scale;\n'
-            'uniform vec2 texture_offset;\n'
-            'attribute vec4 p3d_Color;\n'
-            'varying vec4 vertex_color;\n'
-            'varying vec3 vertex_world_position;\n'
-            'void main() {\n'
-            '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
-            '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
-            '    vertex_color = p3d_Color;\n'
-            '    vertex_world_position = (p3d_ModelMatrix * p3d_Vertex).xyz;\n'
-            '}\n'
-        )
-        _ufs.fragment = (
-            '#version 120\n'
-            'uniform sampler2D p3d_Texture0;\n'
-            'uniform vec4 p3d_ColorScale;\n'
-            'varying vec2 uvs;\n'
-            'varying vec4 vertex_color;\n'
-            'varying vec3 vertex_world_position;\n'
-            'uniform vec3 camera_world_position;\n'
-            'uniform vec4 fog_color;\n'
-            'uniform float fog_start;\n'
-            'uniform float fog_end;\n'
-            'void main() {\n'
-            '    vec4 fragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
-            '    float distance_to_camera = length(vertex_world_position.xyz - camera_world_position);\n'
-            '    float fog_length = fog_end - fog_start;\n'
-            '    float t = clamp(distance_to_camera / fog_length, 0.0, 1.0);\n'
-            '    fragColor.rgb = mix(fragColor.rgb, fog_color.rgb, t * fog_color.a);\n'
-            '    gl_FragColor = fragColor;\n'
-            '}\n'
-        )
-        _ufs.compiled = False
+        from ursina.shaders.text_shader import text_shader as _ts
+        seen = set()
+        for obj, verts, frags in [
+            (_us, _UNLIT_VERT, _UNLIT_FRAG),
+            (_ufs, _UFS_VERT, _UFS_FRAG),
+            (_ts, _TEXT_VERT, _TEXT_FRAG),
+        ]:
+            if id(obj) not in seen:
+                _patch_shader_obj(obj, verts, frags)
+                seen.add(id(obj))
+        for name, verts, frags in [
+            ('unlit_shader', _UNLIT_VERT, _UNLIT_FRAG),
+            ('unlit_with_fog_shader', _UFS_VERT, _UFS_FRAG),
+            ('text_shader', _TEXT_VERT, _TEXT_FRAG),
+        ]:
+            obj = _shader_mod.imported_shaders.get(name)
+            if obj is not None and id(obj) not in seen:
+                _patch_shader_obj(obj, verts, frags)
+                seen.add(id(obj))
     _patch_shaders_to_glsl120()
+    app = Ursina(title="Level Editor")
 
     window.color = color.rgb(50, 50, 60)
     render.setAntialias(AntialiasAttrib.MAuto)
@@ -919,9 +1320,9 @@ if __name__ == '__main__':
     editor._editor_camera = editor_cam
 
     Text(
-        text="LClick: Place | Shift+LClick: Select/Deselect | RDrag: Box-select\n"
-             "Delete: Remove selected | Ctrl+Z: Undo | Ctrl+Y/Shift+Z: Redo\n"
-             "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor\n"
+        text="Drag tile from tray: Place block/enemy | Shift+LClick: Select | RDrag: Box-select\n"
+             "Delete: Remove selected | Ctrl+Z: Undo | Ctrl+Y/Shift+Z: Redo | Esc: Cancel drag\n"
+             "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor | Scroll over tray: scroll tiles\n"
              "Ctrl+1-5: Save cam bookmark | 1-5: Recall bookmark",
         parent=camera.ui,
         position=(-.88, .48),
