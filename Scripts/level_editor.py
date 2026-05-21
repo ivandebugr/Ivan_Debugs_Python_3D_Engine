@@ -521,7 +521,7 @@ class LevelEditor(Entity):
         mouse.visible = False
 
     def _exit_play_mode(self):
-        from Scripts.game import game
+        from Scripts.game import game, Game
         # _clear_gameplay_entities is defined in main — import lazily
         try:
             from main import _clear_gameplay_entities
@@ -535,6 +535,7 @@ class LevelEditor(Entity):
             if game.player:
                 destroy(game.player)
                 game.player = None
+        game.state = Game.MAIN_MENU
         self._play_mode = False
         self._set_editor_ui_visible(True)
         self._update_gizmo()
@@ -554,6 +555,7 @@ class LevelEditor(Entity):
                     texture=entry.get('texture', 'white_cube'),
                     position=entry['position'],
                     color=color.rgb(*[int(c * 255) for c in entry.get('colour', [1, 1, 1])]),
+                    rotation=tuple(entry.get('rotation', [0, 0, 0])),
                     name='level_block'
                 )
 

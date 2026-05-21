@@ -118,6 +118,17 @@ Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/e
 
 ## Changelog
 
+### v1.2.1 — Hotfixes
+
+- **H1** `load_level()` no longer adds `+1.5` Y to enemy spawn — foot position from `level.json` is trusted directly
+- **H2** `PlaceEntityCommand.redo()` was a no-op; command now captures a creation snapshot at push time and recreates the entity on redo
+- **H3** `_exit_play_mode()` now sets `game.state = Game.MAIN_MENU` after teardown, fixing state stuck at `PLAYING`
+- **H4** `draw_raycasts` default changed to `False` — eliminates 200+ `eternal=True` debug entities created per Player spawn
+- **M** `game.return_to_menu()` wraps teardown in `try/finally` so `game.state` always reaches `MAIN_MENU` even on exception
+- **M** `_spawn_gameplay_from_snapshot()` now passes `rotation=` to block `Entity` constructor so rotated blocks appear correctly in play-in-editor
+
+---
+
 ### v6 — Level editor Ursina 8.3.0 compatibility
 
 Applied the same fixes from `main.py` to `Scripts/level_editor.py` so it renders correctly when run standalone (`python Scripts/level_editor.py`).

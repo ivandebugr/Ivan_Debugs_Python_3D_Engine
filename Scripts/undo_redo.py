@@ -10,9 +10,43 @@ class PlaceEntityCommand(Command):
     def __init__(self, editor, entity):
         self.editor = editor
         self.entity = entity
+        is_enemy = entity in editor.enemies
+        tex_name = ''
+        if hasattr(entity, 'texture') and entity.texture:
+            tex_name = getattr(entity.texture, 'name', str(entity.texture))
+        self._snapshot = {
+            'position': entity.position,
+            'texture': tex_name,
+            'color': getattr(entity, '_original_color', entity.color),
+            'rotation': (entity.rotation_x, entity.rotation_y, entity.rotation_z),
+            'scale': entity.scale,
+            'enemy_hp': getattr(entity, 'enemy_hp', 100),
+            'enemy_type': getattr(entity, 'enemy_type', 'default'),
+            'is_enemy': is_enemy,
+        }
 
     def execute(self):
-        pass  # entity already placed before command is recorded
+        # Called on redo — recreate the entity from snapshot
+        from ursina import Entity, color
+        snap = self._snapshot
+        e = Entity(
+            model='cube',
+            texture=snap.get('texture', 'white_cube'),
+            position=snap['position'],
+            color=snap.get('color', color.white),
+            rotation=snap.get('rotation', (0, 0, 0)),
+            scale=snap.get('scale', (1, 1, 1)),
+            collider='box'
+        )
+        e.enemy_hp = snap.get('enemy_hp', 100)
+        e.enemy_type = snap.get('enemy_type', 'default')
+        e._original_color = snap.get('color', color.white)
+        if snap.get('is_enemy'):
+            self.editor.enemies.append(e)
+        else:
+            self.editor.blocks.append(e)
+        self.entity = e
+        self.editor._refresh_hierarchy()
 
     def undo(self):
         if self.entity in self.editor.blocks:

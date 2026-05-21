@@ -24,7 +24,6 @@ def load_level():
                     position=tuple(entity_data['position']),
                     model='cube',
                     color=color.red,
-                    y=entity_data['position'][1] + 1.5,
                     scale=(1.5, 3, 1.5),
                     name='level_enemy'
                 )
