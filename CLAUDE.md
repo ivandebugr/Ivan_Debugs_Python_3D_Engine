@@ -182,6 +182,12 @@ The same shader patch is duplicated in `level_editor.py` for standalone runs.
 | **[FIXED v2026-05-20]** Enemy placeholder scale mismatch in level editor | `level_editor.py` | ~~Low~~ | All three placeholder instances updated to `(1.5, 3, 1.5)` |
 | **[FIXED v2026-05-20]** Player unregister leak on scene transition | `player_controller.py`, `main.py` | ~~Medium~~ | Explicit `collision_manager.remove(player)` before every `destroy(player)` |
 | **[FIXED v2026-05-20]** `main_menu()` loop bypasses `AliveEntity.die()` | `main.py` | ~~Medium~~ | Explicit `die()` pass added before blanket destroy loop |
+| **[FIXED v1.2.1]** Enemy Y spawns 1.5u above editor placement | `main.py` `load_level()` | ~~High~~ | Removed `y=entity_data['position'][1] + 1.5` override; Y from `level.json` trusted directly |
+| **[FIXED v1.2.1]** `PlaceEntityCommand.redo()` permanent no-op | `Scripts/undo_redo.py` | ~~High~~ | Constructor captures snapshot; `execute()` recreates entity from snapshot on redo |
+| **[FIXED v1.2.1]** `game.state` stuck at `PLAYING` after play-in-editor exit | `Scripts/level_editor.py` `_exit_play_mode()` | ~~High~~ | `game.state = Game.MAIN_MENU` set after teardown in both happy path and fallback |
+| **[FIXED v1.2.1]** 201 `eternal=True` debug entities per Player spawn | `Scripts/player_controller.py` | ~~High~~ | `draw_raycasts` default changed `True` → `False`; no entities created in normal play |
+| **[FIXED v1.2.1]** `return_to_menu()` state stuck at `RETURNING_TO_MENU` on exception | `Scripts/game.py` | ~~Medium~~ | `_clear_gameplay_entities()` wrapped in `try/finally` to guarantee state transition |
+| **[FIXED v1.2.1]** Block `rotation` not applied in play-in-editor spawn | `Scripts/level_editor.py` `_spawn_gameplay_from_snapshot()` | ~~Medium~~ | `rotation=tuple(entry.get('rotation', [0, 0, 0]))` added to block `Entity` constructor |
 
 Log new footguns discovered during development → `brain/Gotchas.md` in the vault.
 

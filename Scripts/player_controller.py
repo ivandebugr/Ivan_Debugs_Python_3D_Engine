@@ -32,7 +32,7 @@ class Player(FirstPersonController):
         self.raycast_directions = []
         self.generate_raycast_points()
 
-        self.draw_raycasts = True 
+        self.draw_raycasts = False
         self.show_colliders = False
         self.debug_rays = []
         self.draw_raycast_visuals()

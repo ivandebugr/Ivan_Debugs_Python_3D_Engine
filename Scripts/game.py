@@ -22,9 +22,11 @@ class Game:
 
     def return_to_menu(self):
         self.state = Game.RETURNING_TO_MENU
-        from main import _clear_gameplay_entities
-        _clear_gameplay_entities()
-        self.state = Game.MAIN_MENU
+        try:
+            from main import _clear_gameplay_entities
+            _clear_gameplay_entities()
+        finally:
+            self.state = Game.MAIN_MENU
 
 
 game = Game()
