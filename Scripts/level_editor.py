@@ -17,6 +17,9 @@ from Scripts.undo_redo import (
 loadPrcFileData('', 'model-cache-dir')
 
 
+EDITOR_GRID_SNAPS = (1.0, 0.5, 0.25, None)
+
+
 class LevelEditor(Entity):
     ASSETS = [
         {'name': 'Cube',  'model': 'cube', 'color': (80, 120, 200),  'scale': (1, 1, 1),     'type': 'block'},
@@ -27,6 +30,7 @@ class LevelEditor(Entity):
     ]
 
     def __init__(self):
+        """Build all editor UI, load level and prefs; attach to app before calling app.run()."""
         super().__init__()
         self.blocks = []
         self.enemies = []
@@ -36,6 +40,8 @@ class LevelEditor(Entity):
         self._play_mode = False
         self._play_level_snapshot = None
         self._editor_camera = None
+        self._saved_cam_pos = None
+        self._saved_cam_rot = None
 
         # Selection state
         self.selected = set()
@@ -59,7 +65,7 @@ class LevelEditor(Entity):
         self.hierarchy_scroll = 0
 
         # Grid snap
-        self.snap_values = [1.0, 0.5, 0.25, None]
+        self.snap_values = list(EDITOR_GRID_SNAPS)
         self.snap_index = 0
         self.grid_snap = self.snap_values[0]
 
@@ -123,6 +129,24 @@ class LevelEditor(Entity):
         self._build_hierarchy()
         self._build_gizmo()
         self._build_asset_tray()
+
+        self._spawn_marker = Entity(
+            name='editor_player_spawn',
+            model='cube',
+            color=color.rgba(0, 255, 100, 160),
+            scale=(0.6, 1.8, 0.6),
+            position=(0, 1.4, 0),
+            collider=None,
+        )
+        self._spawn_label = Text(
+            text='SPAWN',
+            parent=self._spawn_marker,
+            scale=6,
+            color=color.white,
+            billboard=True,
+            position=(0, 1, 0),
+        )
+
         self.load_existing_level()
 
     # -------------------------------------------------------------------------
@@ -532,33 +556,20 @@ class LevelEditor(Entity):
         self._drag_ghost = None   # created lazily when mouse moves over viewport
 
     def _update_ghost(self):
-        """Move ghost to snapped raycast hit point; create it if needed."""
+        """Move ghost to snapped hit position under cursor; create it if needed."""
         asset = self._drag_asset
         if asset is None:
             return
 
-        ignore_list = [self._drag_ghost] if self._drag_ghost else []
-        # mouse.direction was removed in Ursina 8.3.0; derive ray from screen coords
-        ray_dir = (
-            camera.forward
-            + camera.right * mouse.x * (camera.fov / camera.aspect_ratio) * 0.017453
-            + camera.up    * mouse.y * camera.fov * 0.017453
-        ).normalized()
-        hit = raycast(
-            camera.world_position,
-            ray_dir,
-            distance=200,
-            ignore=ignore_list,
-            traverse_target=scene,
-        )
-
-        if not hit.hit or hit.entity is None:
+        hovered = mouse.hovered_entity
+        if (hovered is None
+                or hovered is self._drag_ghost
+                or getattr(hovered, 'parent', None) is camera.ui):
             if self._drag_ghost:
                 self._drag_ghost.visible = False
             return
 
-        # Compute placement position
-        pos = list(hit.entity.position + hit.normal)
+        pos = list(hovered.position + mouse.normal)
         pos = self._snap(pos)
         if asset['type'] == 'enemy':
             pos[1] += 1
@@ -676,6 +687,7 @@ class LevelEditor(Entity):
             )
 
     def _update_gizmo(self):
+        """Position gizmo at centroid of selection; hide when nothing selected or in play mode."""
         if not self.selected or self._play_mode:
             self._gizmo_root.enabled = False
             return
@@ -688,6 +700,7 @@ class LevelEditor(Entity):
         self._gizmo_root.position = centroid
 
     def _handle_gizmo_drag(self):
+        """Translate selected entities along the grabbed world axis; push MoveEntityCommand on release."""
         axis_map = {
             'editor_gizmo_x': 'x', 'editor_gizmo_tip_x': 'x',
             'editor_gizmo_y': 'y', 'editor_gizmo_tip_y': 'y',
@@ -765,11 +778,9 @@ class LevelEditor(Entity):
     # -------------------------------------------------------------------------
 
     def _build_level_data(self):
+        """Serialize current blocks and enemies to a list of dicts for save or play snapshot."""
         data = []
         for block in self.blocks:
-            r = getattr(block, '_original_color', block.color).r if block in self.selected else block.color.r
-            g = getattr(block, '_original_color', block.color).g if block in self.selected else block.color.g
-            b_val = getattr(block, '_original_color', block.color).b if block in self.selected else block.color.b
             actual_color = getattr(block, '_original_color', block.color)
             tex_name = ''
             if hasattr(block, 'texture') and block.texture:
@@ -780,6 +791,7 @@ class LevelEditor(Entity):
                 'texture': tex_name,
                 'colour': [round(actual_color.r, 3), round(actual_color.g, 3), round(actual_color.b, 3)],
                 'rotation': [round(block.rotation_x, 2), round(block.rotation_y, 2), round(block.rotation_z, 2)],
+                'scale': [round(block.scale_x, 4), round(block.scale_y, 4), round(block.scale_z, 4)],
             })
         for enemy in self.enemies:
             data.append({
@@ -809,6 +821,11 @@ class LevelEditor(Entity):
             self._enter_play_mode()
 
     def _enter_play_mode(self):
+        if self._editor_camera:
+            self._saved_cam_pos = Vec3(self._editor_camera.position)
+            self._saved_cam_rot = Vec3(self._editor_camera.rotation_x,
+                                       self._editor_camera.rotation_y,
+                                       self._editor_camera.rotation_z)
         self._play_level_snapshot = self._build_level_data()
         self._set_editor_ui_visible(False)
         self._gizmo_root.enabled = False
@@ -818,13 +835,14 @@ class LevelEditor(Entity):
         mouse.visible = False
 
     def _exit_play_mode(self):
+        """Tear down gameplay entities, reset game state, and restore editor UI."""
         from Scripts.game import game, Game
+        game.state = Game.MAIN_MENU  # set before teardown so guards see MAIN_MENU even if teardown raises
         # _clear_gameplay_entities is defined in main — import lazily
         try:
             from main import _clear_gameplay_entities
             _clear_gameplay_entities()
-        except Exception:
-            # Fallback: destroy game entities directly
+        except ImportError:
             for e in list(game.enemies):
                 if getattr(e, 'alive', False):
                     e.die()
@@ -832,12 +850,18 @@ class LevelEditor(Entity):
             if game.player:
                 destroy(game.player)
                 game.player = None
-        game.state = Game.MAIN_MENU
         self._play_mode = False
         self._set_editor_ui_visible(True)
         self._update_gizmo()
         mouse.locked = False
         mouse.visible = True
+        if self._saved_cam_pos is not None and self._editor_camera:
+            self._editor_camera.position = self._saved_cam_pos
+            self._editor_camera.rotation_x = self._saved_cam_rot.x
+            self._editor_camera.rotation_y = self._saved_cam_rot.y
+            self._editor_camera.rotation_z = self._saved_cam_rot.z
+            self._saved_cam_pos = None
+            self._saved_cam_rot = None
 
     def _spawn_gameplay_from_snapshot(self, level_data):
         from Scripts.player_controller import Player
@@ -887,6 +911,7 @@ class LevelEditor(Entity):
             self.model_preview.visible = False
 
     def update(self):
+        """Per-frame: drive ghost drag, model preview, gizmo, and highlight in editor mode."""
         if not self._play_mode:
             if self._dragging:
                 self._update_ghost()
@@ -899,6 +924,7 @@ class LevelEditor(Entity):
             self._update_gizmo()
 
     def input(self, key):
+        """Route keyboard/mouse events to placement, selection, undo/redo, bookmarks, and drag."""
         if self._play_mode:
             if key in ('f5', 'escape'):
                 self._exit_play_mode()
@@ -939,6 +965,8 @@ class LevelEditor(Entity):
 
         # Camera bookmarks — recall (only when not in a control combo)
         if not held_keys['control']:
+            if isinstance(getattr(scene, 'focused_entity', None), InputField):
+                return
             for i in range(1, 6):
                 if key == str(i):
                     bm = self._bookmarks.get(str(i))
@@ -976,7 +1004,11 @@ class LevelEditor(Entity):
 
         # Commit or cancel drag on left mouse up
         if key == 'left mouse up' and self._dragging:
-            if self._is_over_tray():
+            hovered = mouse.hovered_entity
+            if (self._is_over_tray()
+                    or hovered is None
+                    or hovered is self._drag_ghost
+                    or getattr(hovered, 'parent', None) is camera.ui):
                 self._cancel_drag()
             else:
                 self._commit_drag()
@@ -1043,6 +1075,14 @@ class LevelEditor(Entity):
 
         # Hierarchy scroll — mouse wheel while cursor over the hierarchy panel or inspector
         if key in ('scroll up', 'scroll down'):
+            over_ui = (
+                (self._hier_panel and self._is_over_panel(self._hier_panel))
+                or (self._inspector and self._is_over_panel(self._inspector))
+                or self._is_over_tray()
+            )
+            if self._editor_camera:
+                self._editor_camera.zoom_speed = 0 if over_ui else 1.25
+
             if self._hier_panel and self._is_over_panel(self._hier_panel):
                 total = len(self.blocks) + len(self.enemies)
                 max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
@@ -1106,6 +1146,7 @@ class LevelEditor(Entity):
         self._save_prefs()
 
     def load_existing_level(self):
+        """Destroy all current editor entities, then reload from level.json if it exists."""
         for e in self.blocks + self.enemies:
             destroy(e)
         self.blocks.clear()
@@ -1136,6 +1177,7 @@ class LevelEditor(Entity):
                         texture=entity_data.get('texture', 'white_cube'),
                         position=entity_data['position'],
                         rotation=tuple(entity_data.get('rotation', [0, 0, 0])),
+                        scale=tuple(entity_data.get('scale', [1, 1, 1])),
                         color=color.rgb(*[int(c * 255) for c in entity_data.get('colour', [1, 1, 1])]),
                         collider='box'
                     )

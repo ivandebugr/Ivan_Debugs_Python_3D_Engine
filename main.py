@@ -6,6 +6,69 @@ from Scripts.collision_system import collision_manager
 from Scripts.game import game, Game
 import json, pyglet
 
+
+class PlayerHUD:
+    """Owns all screen-space player UI: crosshair, health bar, hint text.
+
+    Lifetime: created in start_game(), stored as game.hud, destroyed in
+    _clear_gameplay_entities(). show()/hide() toggle everything together so
+    no per-element visibility is scattered across main.py.
+    """
+
+    def __init__(self, player):
+        self.crosshair = Entity(
+            parent=camera.ui,
+            model='quad',
+            texture='circle',
+            color=color.red,
+            scale=(0.01, 0.01),
+            z=-1,
+        )
+
+        # Reference to the player's existing HealthBar (created in Player.__init__).
+        # PlayerHUD does not own the bar's lifetime — _clear_gameplay_entities() still
+        # destroys the Player (which triggers HealthBar teardown). We just borrow the
+        # reference so hide()/show() can toggle bar visibility.
+        self.health_bar = player.health_bar
+
+        self.hint_text = Text(
+            text='Move: WASD | Jump: Space | Shoot: LMB | Reset: R | Mouse: Esc | Fullscreen: F',
+            parent=camera.ui,
+            position=window.bottom_left + Vec2(0.01, 0.04),
+            origin=(-0.5, -0.5),
+            scale=0.7,
+            z=-1,
+        )
+
+        self.ammo_text = None   # placeholder until ammo system is implemented
+        self._visible = True
+
+    def show(self):
+        self._visible = True
+        self.crosshair.visible = True
+        if self.health_bar:
+            self.health_bar.visible = True
+        if self.hint_text:
+            self.hint_text.visible = True
+
+    def hide(self):
+        self._visible = False
+        self.crosshair.visible = False
+        if self.health_bar:
+            self.health_bar.visible = False
+        if self.hint_text:
+            self.hint_text.visible = False
+
+    def destroy(self):
+        if self.crosshair:
+            destroy(self.crosshair)
+            self.crosshair = None
+        if self.hint_text:
+            destroy(self.hint_text)
+            self.hint_text = None
+        # health_bar lifetime is owned by Player — do not destroy here
+        self.health_bar = None
+
 def load_level():
     try:
         with open('level.json', 'r') as f:
@@ -38,7 +101,7 @@ def load_level():
                     position=tuple(entity_data['position']),
                     color=color.rgb(*[int(c * 255) for c in entity_data.get('colour', [1, 1, 1])]),
                     rotation=tuple(entity_data.get('rotation', [0, 0, 0])),
-                    scale=(1, 1, 1),
+                    scale=tuple(entity_data.get('scale', [1, 1, 1])),
                     name='level_block'
                 )
     except FileNotFoundError:
@@ -49,7 +112,32 @@ def _clear_gameplay_entities():
     """
     Canonical gameplay scene teardown. Called exclusively by game.return_to_menu().
     Order matters: sub-entities before owners, AliveEntity.die() before destroy().
+    # Teardown order is load-bearing — do not reorder.
+    # 1. Pool bullets back  2. Unregister from collision_manager
+    # 3. die() all AliveEntities  4. Destroy UI  5. Clear lists/refs
+    # 6. Reset time_scale  7. Set state = MAIN_MENU
+    # Regression: pause → menu → restart must complete without NodePath assertion.
     """
+    # Reset bullet pools FIRST — before any entity they reference is destroyed.
+    # Pools are module-level singletons that survive scene transitions.  main_menu()
+    # sweeps scene.entities and destroys parked bullets; without reset(), _free still
+    # holds dead NodePaths and the next acquire() crashes on _reset() position assignment.
+    # reset() clears _free and _built so the pool rebuilds from scratch next session.
+    from Scripts.weapon import reset_bullet_pools
+    reset_bullet_pools()
+
+    if game.hud:
+        game.hud.destroy()
+        game.hud = None
+
+    if game.win_screen:
+        destroy(game.win_screen)
+        game.win_screen = None
+
+    if game.game_over_screen:
+        destroy(game.game_over_screen)
+        game.game_over_screen = None
+
     for e in list(game.enemies):
         if getattr(e, 'alive', False):
             e.die()
@@ -57,8 +145,6 @@ def _clear_gameplay_entities():
 
     if game.player:
         if hasattr(game.player, 'weapon') and game.player.weapon:
-            if game.player.weapon.crosshair:
-                destroy(game.player.weapon.crosshair)
             destroy(game.player.weapon)
         if hasattr(game.player, 'health_bar') and game.player.health_bar:
             if hasattr(game.player.health_bar, 'text') and game.player.health_bar.text:
@@ -126,7 +212,6 @@ def main_menu():
     def start_game():
         if game.player:
             if hasattr(game.player, 'weapon'):
-                destroy(game.player.weapon.crosshair)
                 destroy(game.player.weapon)
             if hasattr(game.player, 'health_bar'):
                 destroy(game.player.health_bar.text)
@@ -149,14 +234,11 @@ def main_menu():
         destroy(quit_button)
         destroy(camera_pivot)
 
-        Text('Move: WASD | Jump: Space | Shoot: LMB | Reset: R | Mouse: Esc | Fullscreen: F',
-            position=window.bottom_left + Vec2(0.01, 0.95),
-            origin=(-0.5, -0.5))
+        game.hud = PlayerHUD(game.player)
+        game.hud.show()
         mouse.visible = False
         mouse.locked = True
         game.start()
-        if hasattr(game.player, 'weapon') and game.player.weapon.crosshair:
-            game.player.weapon.crosshair.visible = True
 
     play_button.on_click = start_game
     quit_button.on_click = application.quit
@@ -164,20 +246,21 @@ def main_menu():
 class PauseMenu(Entity):
     def __init__(self):
         super().__init__(parent=camera.ui)
+
+        # scale=(2,2) fills the full UI space (-0.5→+0.5 on both axes); z=1 stays behind buttons
         self.background = Entity(
             parent=self,
             model='quad',
             color=color.black66,
-            scale=(0.6, 0.8),
+            scale=(2, 2),
             z=1
         )
-        self.visible = False
 
         self.continue_button = Button(
             text='Continue',
             color=color.black,
             scale=(0.3, 0.1),
-            y=0.2,
+            y=0.15,
             parent=self
         )
         self.main_menu_button = Button(
@@ -191,7 +274,7 @@ class PauseMenu(Entity):
             text='Quit',
             color=color.black,
             scale=(0.3, 0.1),
-            y=-0.2,
+            y=-0.15,
             parent=self
         )
 
@@ -199,28 +282,22 @@ class PauseMenu(Entity):
         self.main_menu_button.on_click = self.return_to_main_menu
         self.quit_button.on_click = application.quit
 
+        if game.hud:
+            game.hud.hide()
+
     def resume_game(self):
-        self.visible = False
         game.resume()
+        application.time_scale = 1
         mouse.visible = False
         mouse.locked = True
-        application.time_scale = 1
-        destroy(self.background)
-        destroy(self.continue_button)
-        destroy(self.main_menu_button)
-        destroy(self.quit_button)
-        destroy(self)
+        if game.hud:
+            game.hud.show()
         game.pause_menu = None
-
-        invoke(setattr, application, 'time_scale', 1, delay=0.1)
+        destroy(self)
 
     def return_to_main_menu(self):
-        destroy(self.background)
-        destroy(self.continue_button)
-        destroy(self.main_menu_button)
-        destroy(self.quit_button)
-        destroy(self)
         game.pause_menu = None
+        destroy(self)
         game.return_to_menu()
         main_menu()
         mouse.visible = True
@@ -376,11 +453,13 @@ if __name__ == '__main__':
             if obj is not None and id(obj) not in seen:
                 _patch_shader_obj(obj, verts, frags)
                 seen.add(id(obj))
+    print("[main] shader patch 1/2 — pre-Ursina")
     _patch_shaders_to_glsl120()
+    print("[main] patch 1/2 complete, calling Ursina()...")
     app = Ursina(title="Ivan's 3D Engine")
     window.color = color.rgb(50, 50, 60)
-    render.setAntialias(AntialiasAttrib.MAuto)
-    render2d.setAntialias(AntialiasAttrib.MAuto)
+    # BUG 1 FIX: render/render2d NodePaths are not fully initialized during the
+    # window-setup resize sequence; defer setAntialias to the first frame.
     camera.clip_plane_near = 0.01
     window.title = "Ivan's 3D Engine"
     window.exit_button.visible = False
@@ -403,6 +482,20 @@ if __name__ == '__main__':
         (screen_height - window.size[1]) // 2
     )
 
+    # BUG 2 FIX: Ursina() and subsequent window resizes can re-initialize shader
+    # objects on internal entities. Re-patch after window setup so all shaders
+    # compiled during main_menu() entity creation use GLSL 1.20.
+    print("[main] shader patch 2/2 — post-window-setup")
+    _patch_shaders_to_glsl120()
+
+    def _deferred_antialias(task):
+        # BUG 1 FIX cont.: run after first frame so render/render2d NodePaths exist.
+        render.setAntialias(AntialiasAttrib.MAuto)
+        render2d.setAntialias(AntialiasAttrib.MAuto)
+        return task.done
+
+    taskMgr.doMethodLater(0, _deferred_antialias, '_deferred_antialias')
+
     main_menu()
 
     def on_window_resize():
@@ -416,11 +509,6 @@ if __name__ == '__main__':
 
     def update():
         collision_manager.update()
-
-        for e in scene.entities:
-            if isinstance(e, HealthBar) and e.is_3d:
-                e.world_scale = (1, 1, 1)
-                e.always_on_top = True
 
     def input(key):
         if key == 'f':
@@ -442,18 +530,15 @@ if __name__ == '__main__':
         if key == "escape":
             if game.state == Game.PLAYING:
                 game.pause()
-                game.pause_menu = PauseMenu()
-                game.pause_menu.visible = True
+                application.time_scale = 0
                 mouse.visible = True
                 mouse.locked = False
-                application.time_scale = 0
-                if game.player and hasattr(game.player, 'weapon') and game.player.weapon.crosshair:
-                    game.player.weapon.crosshair.visible = False
+                game.pause_menu = PauseMenu()  # PauseMenu.__init__ calls game.hud.hide()
             elif game.state == Game.PAUSED:
                 if game.pause_menu:
                     game.pause_menu.resume_game()
 
-        if key == 'left mouse' and not window.fullscreen and game.state != Game.PAUSED:
+        if key == 'left mouse' and not window.fullscreen and game.state == Game.PLAYING:
             mouse.locked = True
             mouse.visible = False
 
