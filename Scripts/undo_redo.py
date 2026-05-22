@@ -6,7 +6,34 @@ class Command:
     def undo(self):    raise NotImplementedError
 
 
+def _restore_entity(editor, snap):
+    """Reconstruct an editor entity from a snapshot dict; add to correct list."""
+    from ursina import Entity, color
+    is_enemy = snap.get('is_enemy', False)
+    e = Entity(
+        model='cube',
+        texture=snap.get('texture', 'white_cube'),
+        position=snap['position'],
+        color=snap.get('color', color.white),
+        rotation=snap.get('rotation', (0, 0, 0)),
+        scale=snap.get('scale', (1, 1, 1)),
+        collider='box',
+    )
+    if is_enemy:
+        e.origin_y = -0.5
+    e.enemy_hp    = snap.get('enemy_hp', 100)
+    e.enemy_type  = snap.get('enemy_type', 'default')
+    e._original_color = snap.get('color', color.white)
+    if is_enemy:
+        editor.enemies.append(e)
+    else:
+        editor.blocks.append(e)
+    return e
+
+
 class PlaceEntityCommand(Command):
+    """Place entity at position from snapshot; undo destroys it, redo recreates it."""
+
     def __init__(self, editor, entity):
         self.editor = editor
         self.entity = entity
@@ -25,27 +52,11 @@ class PlaceEntityCommand(Command):
             'is_enemy': is_enemy,
         }
 
+    def __repr__(self):
+        return f"PlaceEntityCommand(pos={list(self._snapshot['position'])}, enemy={self._snapshot['is_enemy']})"
+
     def execute(self):
-        # Called on redo — recreate the entity from snapshot
-        from ursina import Entity, color
-        snap = self._snapshot
-        e = Entity(
-            model='cube',
-            texture=snap.get('texture', 'white_cube'),
-            position=snap['position'],
-            color=snap.get('color', color.white),
-            rotation=snap.get('rotation', (0, 0, 0)),
-            scale=snap.get('scale', (1, 1, 1)),
-            collider='box'
-        )
-        e.enemy_hp = snap.get('enemy_hp', 100)
-        e.enemy_type = snap.get('enemy_type', 'default')
-        e._original_color = snap.get('color', color.white)
-        if snap.get('is_enemy'):
-            self.editor.enemies.append(e)
-        else:
-            self.editor.blocks.append(e)
-        self.entity = e
+        self.entity = _restore_entity(self.editor, self._snapshot)
         self.editor._refresh_hierarchy()
 
     def undo(self):
@@ -59,11 +70,17 @@ class PlaceEntityCommand(Command):
 
 
 class DeleteEntityCommand(Command):
+    """Remove entity from scene; undo restores it from snapshot, redo removes again."""
+
     def __init__(self, editor, entity, entity_data):
         self.editor      = editor
         self.entity_data = entity_data
         self.entity      = entity
         self._restored   = None
+
+    def __repr__(self):
+        pos = self.entity_data.get('position', '?')
+        return f"DeleteEntityCommand(pos={pos}, enemy={self.entity_data.get('is_enemy')})"
 
     def execute(self):
         if self.entity in self.editor.blocks:
@@ -75,39 +92,36 @@ class DeleteEntityCommand(Command):
         self.editor._refresh_hierarchy()
 
     def undo(self):
-        from ursina import Entity, color, destroy
-        e = Entity(
-            model='cube',
-            texture=self.entity_data.get('texture', 'white_cube'),
-            position=self.entity_data['position'],
-            color=self.entity_data.get('color', color.white),
-            rotation=self.entity_data.get('rotation', (0, 0, 0)),
-            collider='box'
-        )
-        e.enemy_hp   = self.entity_data.get('enemy_hp', 100)
-        e.enemy_type = self.entity_data.get('enemy_type', 'default')
-        e._original_color = self.entity_data.get('color', color.white)
-        target_list = self.editor.enemies if self.entity_data.get('is_enemy') else self.editor.blocks
-        target_list.append(e)
-        self._restored = e
+        self._restored = _restore_entity(self.editor, self.entity_data)
+        self.entity = self._restored
         self.editor._refresh_hierarchy()
 
 
 class MoveEntityCommand(Command):
+    """Move entity to new_pos; undo restores old_pos, redo reapplies new_pos."""
+
     def __init__(self, entity, old_pos, new_pos):
         self.entity  = entity
         self.old_pos = old_pos
         self.new_pos = new_pos
+
+    def __repr__(self):
+        return f"MoveEntityCommand(old={list(self.old_pos)}, new={list(self.new_pos)})"
 
     def execute(self): self.entity.position = self.new_pos
     def undo(self):    self.entity.position = self.old_pos
 
 
 class ChangeTextureCommand(Command):
+    """Apply new_texture to all entities; undo restores per-entity old textures."""
+
     def __init__(self, entities, old_textures, new_texture):
         self.entities     = entities
         self.old_textures = old_textures
         self.new_texture  = new_texture
+
+    def __repr__(self):
+        return f"ChangeTextureCommand(n={len(self.entities)}, new={self.new_texture!r})"
 
     def execute(self):
         for e in self.entities:
@@ -119,10 +133,15 @@ class ChangeTextureCommand(Command):
 
 
 class ChangeColourCommand(Command):
+    """Apply new_colour to all entities; undo restores per-entity old colours."""
+
     def __init__(self, entities, old_colours, new_colour):
         self.entities    = entities
         self.old_colours = old_colours
         self.new_colour  = new_colour
+
+    def __repr__(self):
+        return f"ChangeColourCommand(n={len(self.entities)}, new={self.new_colour})"
 
     def execute(self):
         for e in self.entities:
@@ -134,11 +153,16 @@ class ChangeColourCommand(Command):
 
 
 class ChangePropertyCommand(Command):
+    """Set entity.prop to new_val; undo restores old_val."""
+
     def __init__(self, entity, prop, old_val, new_val):
         self.entity  = entity
         self.prop    = prop
         self.old_val = old_val
         self.new_val = new_val
+
+    def __repr__(self):
+        return f"ChangePropertyCommand(prop={self.prop!r}, old={self.old_val}, new={self.new_val})"
 
     def execute(self): setattr(self.entity, self.prop, self.new_val)
     def undo(self):    setattr(self.entity, self.prop, self.old_val)

@@ -1,18 +1,39 @@
+# collision_system.py — bitmask layer registry, AliveEntity lifecycle, spatial grid
+# Last audited: 2026-05-22 — 0 open items
+#
+# Three collision authorities (never add a fourth):
+#   1. Swept projectile raycast  — PlayerBullet/EnemyBullet.update() in weapon.py
+#   2. Swept player movement     — Player._swept_blocked() in player_controller.py
+#   3. Ground/ceiling raycast   — Player.update() in player_controller.py
+#
+# External code uses query_layer() / query_near() — not _tracked or spatial_grid directly.
+
 from ursina import *
 from itertools import product
 
+__all__ = [
+    'Layers',
+    'COLLISION_MATRIX',
+    'register',
+    'unregister',
+    'can_hit',
+    'AliveEntity',
+    'CollisionManager',
+    'collision_manager',
+]
 
-# IMPROVED: step-1 — bitmask layer registry replaces CollisionLayer enum + isinstance checks
+
 class Layers:
+    """Bitmask constants for every entity type that participates in collision."""
     PLAYER        = 1 << 0   # 1
     ENEMY         = 1 << 1   # 2
     PLAYER_BULLET = 1 << 2   # 4
     ENEMY_BULLET  = 1 << 3   # 8
     WALL          = 1 << 4   # 16
-    PICKUP        = 1 << 5   # 32 -- forward declaration; no entity registers this yet
+    PICKUP        = 1 << 5   # 32 — forward declaration; no entity registers this yet
 
 
-# IMPROVED: step-1 — declarative hit matrix; no file needs to import enemy/bullet types
+# Declarative hit matrix — no file needs to import enemy/bullet types.
 COLLISION_MATRIX = {
     Layers.PLAYER_BULLET: Layers.ENEMY | Layers.WALL,
     Layers.ENEMY_BULLET:  Layers.PLAYER | Layers.WALL,
@@ -20,97 +41,96 @@ COLLISION_MATRIX = {
     Layers.ENEMY:         Layers.WALL | Layers.PLAYER_BULLET,
 }
 
-_registry: dict = {}   # entity id → (layer, mask)  # IMPROVED: step-1
+_registry: dict = {}   # entity id → (layer, mask)
 
 
-def register(entity, layer: int):  # IMPROVED: step-1
+def register(entity, layer: int):
+    """Assign `layer` to `entity` and cache its hit-mask from COLLISION_MATRIX."""
     mask = COLLISION_MATRIX.get(layer, 0)
     _registry[id(entity)] = (layer, mask)
     entity._collision_layer = layer
     entity._collision_mask  = mask
 
 
-def unregister(entity):  # IMPROVED: step-1
+def unregister(entity):
+    """Remove `entity` from the registry; safe to call if not registered."""
     _registry.pop(id(entity), None)
 
 
-def can_hit(a, b) -> bool:  # IMPROVED: step-1 — replaces isinstance checks in weapon.py
+def can_hit(a, b) -> bool:
+    """Return True if `a` is allowed to deal damage to `b`.
+
+    Intentionally asymmetric: a bullet can_hit an enemy, but the enemy does not
+    can_hit the bullet.  Unregistered entities (walls) have layer/mask 0 → False.
+    """
     la = getattr(a, '_collision_layer', 0)
     mb = getattr(b, '_collision_mask',  0)
     return bool(la & mb)
 
 
-# IMPROVED: step-2 — AliveEntity mixin: frame-safe single-entry destroy
 class AliveEntity(Entity):
+    """Entity subclass with an idempotent die() / on_die() lifecycle.
+
+    update() must guard with `if not self.alive: return` because destroy() is
+    deferred — the entity stays in scene.entities until end-of-frame flush.
+    """
+
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._alive = True
 
     @property
     def alive(self) -> bool:
+        """True until die() has been called."""
         return self._alive
 
     def die(self):
+        """Idempotent: mark dead, run on_die(), then queue Ursina destroy."""
         if not self._alive:
             return
         self._alive = False
-        collision_manager.remove(self)   # removes from both _registry and _tracked
+        collision_manager.remove(self)
         self.on_die()
         destroy(self)
 
     def on_die(self):
+        """Override to clean up sub-entities before super().die() destroys self."""
         pass
 
 
-# NOTE: unused — candidate for removal if no call site added by next audit
-def swept_cast(origin, direction, distance: float,
-               source_entity,
-               y_offsets: tuple = (0.1, 1.0, 1.8)):
-    """Cast rays at multiple heights; return first hit passing collision matrix."""
-    ignore = [source_entity] + [
-        e for e in scene.entities
-        if getattr(e, '_collision_layer', 0) in (Layers.PLAYER_BULLET, Layers.ENEMY_BULLET)
-    ]
-    for y in y_offsets:
-        h = raycast(Vec3(*origin) + Vec3(0, y, 0), direction,
-                    distance=distance, ignore=ignore, debug=False)
-        if h.hit and can_hit(source_entity, h.entity):
-            return h
-    from ursina.hit_info import HitInfo
-    return HitInfo()
-
-
-# IMPROVED: step-5 — CollisionManager with per-frame grid update and typed queries
 class CollisionManager:
+    """Spatial grid registry for tracked entities.
+
+    External callers use query_layer() and query_near().
+    _tracked and spatial_grid are internal — do not access them directly.
+    """
+
     def __init__(self, cell_size: float = 5.0):
         self._cell_size   = cell_size
         self._tracked     = set()
-        self._cell_map    = {}   # entity id → cell
-        self.spatial_grid = {}   # cell → list[entity]
-
-    # -- registration --
+        self._cell_map    = {}   # entity id → cell key
+        self.spatial_grid = {}   # cell key → list[entity]
 
     def add(self, entity, layer: int):
+        """Register `entity` at `layer` and add it to the spatial grid."""
         register(entity, layer)
         self._tracked.add(entity)
         self._update_cell(entity)
 
     def remove(self, entity):
+        """Unregister `entity` and remove it from the spatial grid."""
         unregister(entity)
         self._remove_from_grid(entity)
         self._tracked.discard(entity)
 
-    # -- per-frame update --
-
-    def update(self):  # IMPROVED: step-5 — no frame-skip throttle
+    def update(self):
+        """Rebuild grid positions for all tracked entities; remove dead ones."""
         for entity in list(self._tracked):
             if not getattr(entity, 'alive', True):
                 self._remove_from_grid(entity)
                 self._tracked.discard(entity)
                 continue
             self._update_cell(entity)
-
-    # -- spatial grid helpers --
 
     def _cell(self, position) -> tuple:
         cs = self._cell_size
@@ -128,21 +148,19 @@ class CollisionManager:
         self._cell_map[id(entity)] = new_cell
         self.spatial_grid.setdefault(new_cell, []).append(entity)
 
-    def _remove_from_grid(self, entity):  # IMPROVED: step-5 — O(1) via stored cell
+    def _remove_from_grid(self, entity):
         cell = self._cell_map.pop(id(entity), None)
         if cell is not None:
             bucket = self.spatial_grid.get(cell, [])
             if entity in bucket:
                 bucket.remove(entity)
 
-    # -- typed queries (replaces scene.entities comprehensions) --
-
-    def query_layer(self, layer: int) -> list:  # IMPROVED: step-5
-        """Return all live entities on `layer`."""
+    def query_layer(self, layer: int) -> list:
+        """Return a snapshot list of all live tracked entities on `layer`."""
         return [e for e in self._tracked
                 if getattr(e, '_collision_layer', 0) == layer]
 
-    def query_near(self, position, radius: float, layer: int) -> list:  # IMPROVED: step-5
+    def query_near(self, position, radius: float, layer: int) -> list:
         """Return entities on `layer` within `radius` of `position`."""
         cell = self._cell(position)
         candidates = []
@@ -154,5 +172,4 @@ class CollisionManager:
                 and distance(e.position, position) <= radius]
 
 
-# Module-level singleton used by main.py
 collision_manager = CollisionManager()
