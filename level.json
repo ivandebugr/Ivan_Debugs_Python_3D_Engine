@@ -6,7 +6,22 @@
             0.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -15,7 +30,22 @@
             1.0,
             0.0
         ],
-        "texture": "grass.png"
+        "texture": "grass.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -24,7 +54,22 @@
             1.0,
             0.0
         ],
-        "texture": "grass.png"
+        "texture": "grass.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -33,7 +78,22 @@
             1.0,
             0.0
         ],
-        "texture": "grass.png"
+        "texture": "grass.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -42,7 +102,22 @@
             1.0,
             -1.0
         ],
-        "texture": "grass.png"
+        "texture": "grass.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -51,7 +126,22 @@
             1.0,
             -1.0
         ],
-        "texture": "grass.png"
+        "texture": "grass.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -60,7 +150,22 @@
             1.0,
             -1.0
         ],
-        "texture": "grass.png"
+        "texture": "grass.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -69,7 +174,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -78,7 +198,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -87,7 +222,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -96,7 +246,22 @@
             1.0,
             0.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -105,7 +270,22 @@
             1.0,
             -1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -114,7 +294,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -123,7 +318,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -132,7 +342,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -141,7 +366,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -150,7 +390,22 @@
             1.0,
             0.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -159,7 +414,22 @@
             1.0,
             -1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -168,7 +438,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -177,7 +462,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -186,7 +486,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -195,7 +510,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -204,7 +534,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -213,7 +558,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -222,7 +582,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -231,7 +606,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -240,7 +630,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -249,7 +654,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -258,7 +678,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -267,7 +702,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -276,7 +726,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -285,7 +750,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -294,7 +774,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -303,7 +798,22 @@
             1.0,
             0.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -312,7 +822,22 @@
             1.0,
             -1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -321,7 +846,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -330,7 +870,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -339,7 +894,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -348,7 +918,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -357,7 +942,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -366,7 +966,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -375,7 +990,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -384,7 +1014,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -393,7 +1038,22 @@
             1.0,
             2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -402,7 +1062,22 @@
             1.0,
             1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -411,7 +1086,22 @@
             1.0,
             0.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -420,7 +1110,22 @@
             1.0,
             -1.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -429,7 +1134,22 @@
             1.0,
             -2.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -438,7 +1158,22 @@
             1.0,
             -3.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -447,7 +1182,22 @@
             1.0,
             -4.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -456,7 +1206,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -465,7 +1230,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -474,7 +1254,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -483,7 +1278,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -492,7 +1302,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -501,7 +1326,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -510,7 +1350,22 @@
             1.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -519,7 +1374,22 @@
             2.0,
             -5.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -528,7 +1398,22 @@
             2.0,
             -6.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -537,7 +1422,22 @@
             3.0,
             -6.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -546,7 +1446,22 @@
             3.0,
             -6.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -555,7 +1470,22 @@
             3.0,
             -7.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -564,7 +1494,22 @@
             3.0,
             -8.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "block",
@@ -573,7 +1518,238 @@
             4.0,
             -8.0
         ],
-        "texture": "white_cube.png"
+        "texture": "white_cube.png",
+        "colour": [
+            255.0,
+            255.0,
+            255.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            0.0,
+            0.0,
+            0.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -1.0,
+            1.0,
+            -3.0
+        ],
+        "texture": "",
+        "colour": [
+            160.0,
+            160.0,
+            180.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -1.0,
+            1.0,
+            -2.0
+        ],
+        "texture": "",
+        "colour": [
+            80.0,
+            120.0,
+            200.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            2.0,
+            1.0,
+            3.0
+        ],
+        "texture": "",
+        "colour": [
+            160.0,
+            160.0,
+            180.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            1.0,
+            1.0,
+            3.0
+        ],
+        "texture": "",
+        "colour": [
+            80.0,
+            120.0,
+            200.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            1.0,
+            1.0,
+            4.0
+        ],
+        "texture": "",
+        "colour": [
+            160.0,
+            160.0,
+            180.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            1.0,
+            1.0,
+            5.0
+        ],
+        "texture": "",
+        "colour": [
+            110.0,
+            110.0,
+            110.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            1.0,
+            1.0,
+            6.0
+        ],
+        "texture": "",
+        "colour": [
+            110.0,
+            110.0,
+            110.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            1.0,
+            2.0,
+            6.0
+        ],
+        "texture": "",
+        "colour": [
+            80.0,
+            120.0,
+            200.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
     },
     {
         "type": "enemy",
@@ -581,6 +1757,31 @@
             5.0,
             2.0,
             1.0
-        ]
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": -0.0
+    },
+    {
+        "type": "enemy",
+        "position": [
+            -1.0,
+            2.0,
+            -4.0
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": -0.0
+    },
+    {
+        "type": "enemy",
+        "position": [
+            -2.0,
+            2.0,
+            -3.0
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": -0.0
     }
 ]

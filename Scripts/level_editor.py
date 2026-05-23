@@ -13,6 +13,9 @@ from Scripts.undo_redo import (
     MoveEntityCommand, ChangeTextureCommand, ChangeColourCommand,
     ChangePropertyCommand
 )
+from Scripts.session_logger import SessionLogger
+
+logger = SessionLogger()
 
 loadPrcFileData('', 'model-cache-dir')
 
@@ -93,7 +96,8 @@ class LevelEditor(Entity):
             on_click=self.toggle_texture,
             color=color.dark_gray,
             text_scale=1.2,
-            z=-1
+            z=-1,
+            eternal=True,
         )
 
         self.snap_button = Button(
@@ -104,7 +108,8 @@ class LevelEditor(Entity):
             on_click=self.cycle_snap,
             color=color.dark_gray,
             text_scale=1.2,
-            z=-1
+            z=-1,
+            eternal=True,
         )
 
         self.play_button = Button(
@@ -115,7 +120,8 @@ class LevelEditor(Entity):
             on_click=self.toggle_play,
             color=color.rgb(120, 60, 100),
             text_scale=1.2,
-            z=-1
+            z=-1,
+            eternal=True,
         )
 
         self.model_preview = Entity(
@@ -123,7 +129,9 @@ class LevelEditor(Entity):
             color=color.white33,
             texture=self.current_texture,
             visible=False,
-            scale=(1, 1, 1))
+            scale=(1, 1, 1),
+            eternal=True,
+        )
 
         self._build_inspector()
         self._build_hierarchy()
@@ -137,6 +145,7 @@ class LevelEditor(Entity):
             scale=(0.6, 1.8, 0.6),
             position=(0, 1.4, 0),
             collider=None,
+            eternal=True,
         )
         self._spawn_label = Text(
             text='SPAWN',
@@ -145,6 +154,7 @@ class LevelEditor(Entity):
             color=color.white,
             billboard=True,
             position=(0, 1, 0),
+            eternal=True,
         )
 
         self.load_existing_level()
@@ -234,8 +244,8 @@ class LevelEditor(Entity):
                     self._snapshot_color(e)
                     self.selected.add(e)
                     e.color = color.orange
-            except Exception:
-                pass
+            except Exception as e:
+                logger.log('ERROR', f"_finish_box_select {type(e).__name__}: {e}")
         self._update_inspector()
         self._update_hierarchy_highlight()
         if self._box_rect:
@@ -253,15 +263,18 @@ class LevelEditor(Entity):
             model='quad',
             color=color.rgba(0, 0, 0, 0.75),
             scale=(.22, .9),
-            position=(.67, 0),
-            z=-0.5
+            position=(.769, 0),
+            z=-0.5,
+            eternal=True,
         )
         self._insp_title = Text(
             parent=self._inspector,
             text='Inspector',
             position=(0, .42),
             scale=(.055, .055),
-            color=color.white
+            color=color.white,
+            z=-1,
+            eternal=True,
         )
         # 8 rows distributed evenly in the usable area below the title.
         # Usable: from +0.38 to -0.43  →  height = 0.81 units (in panel-local space).
@@ -292,7 +305,8 @@ class LevelEditor(Entity):
                         mode='line', thickness=1
                     ),
                     color=color.rgba(180, 180, 180, 80),
-                    z=-1
+                    z=-1,
+                    eternal=True,
                 )
             Text(
                 parent=self._inspector,
@@ -300,13 +314,17 @@ class LevelEditor(Entity):
                 position=(-.45, y_pos + .01),
                 scale=(.045, .045),
                 color=color.light_gray,
-                origin=(-.5, 0)
+                origin=(-.5, 0),
+                z=-1,
+                eternal=True,
             )
             field = InputField(
                 parent=self._inspector,
                 position=(.1, y_pos),
                 scale=(.15, .04),
-                default_value='0'
+                default_value='0',
+                z=-1,
+                eternal=True,
             )
             field.on_submit = lambda v, k=key: self._inspector_commit(k, v)
             self._insp_fields[key] = field
@@ -352,9 +370,11 @@ class LevelEditor(Entity):
             return
         for e in self.selected:
             old = getattr(e, attr, 0)
+            logger.log('INFO', f"Inspector property changed: entity@{[round(p,3) for p in e.position]} field={key} {old} -> {value}")
             cmd = ChangePropertyCommand(e, attr, old, value)
             cmd.execute()
             self._history.push(cmd)
+        self._update_inspector()
 
     # -------------------------------------------------------------------------
     # Hierarchy panel
@@ -371,15 +391,17 @@ class LevelEditor(Entity):
             model='quad',
             color=color.rgba(0, 0, 0, 0.75),
             scale=(.20, .9),
-            position=(-.70, 0),
-            z=-0.5
+            position=(-.779, 0),
+            z=-0.5,
+            eternal=True,
         )
         Text(
             parent=self._hier_panel,
             text='Hierarchy',
             position=(0, .42),
             scale=(.055, .055),
-            color=color.white
+            color=color.white,
+            eternal=True,
         )
         # Thin vertical scroll indicator — right edge of panel
         self._hier_scroll_bar = Entity(
@@ -388,7 +410,8 @@ class LevelEditor(Entity):
             color=color.rgba(200, 200, 200, 120),
             scale=(.018, .05),
             position=(.46, self._HIER_TOP),
-            z=-1
+            z=-1,
+            eternal=True,
         )
         self._hier_buttons = []
 
@@ -474,7 +497,8 @@ class LevelEditor(Entity):
             color=color.rgba(25, 25, 31, 220),
             scale=(2.0, self._TRAY_H),
             position=(0, self._TRAY_Y),
-            z=-0.5
+            z=-0.5,
+            eternal=True,
         )
 
         self._tray_tiles = []   # list of (bg_entity, icon_entity, label_entity, asset_dict)
@@ -497,7 +521,8 @@ class LevelEditor(Entity):
             color=color.rgba(50, 50, 60, 200),
             scale=(self._TILE_SIZE, self._TILE_SIZE),
             position=(tx, self._TRAY_Y),
-            z=-0.6
+            z=-0.6,
+            eternal=True,
         )
         icon = Entity(
             parent=camera.ui,
@@ -505,7 +530,8 @@ class LevelEditor(Entity):
             color=asset_color,
             scale=(self._TILE_SIZE * 0.65, self._TILE_SIZE * 0.65),
             position=(tx, self._TRAY_Y + 0.01),
-            z=-0.7
+            z=-0.7,
+            eternal=True,
         )
         label = Text(
             parent=camera.ui,
@@ -514,7 +540,8 @@ class LevelEditor(Entity):
             scale=0.55,
             color=color.light_gray,
             origin=(0, 0),
-            z=-0.7
+            z=-0.7,
+            eternal=True,
         )
         self._tray_tiles.append((bg, icon, label, asset))
 
@@ -562,9 +589,12 @@ class LevelEditor(Entity):
             return
 
         hovered = mouse.hovered_entity
+        # Reject UI parents, the ghost itself, and any editor-internal entity
+        # (gizmo handles, spawn marker, etc.) that should not act as placement surfaces.
         if (hovered is None
                 or hovered is self._drag_ghost
-                or getattr(hovered, 'parent', None) is camera.ui):
+                or getattr(hovered, 'parent', None) is camera.ui
+                or (hovered.name and hovered.name.startswith('editor_'))):
             if self._drag_ghost:
                 self._drag_ghost.visible = False
             return
@@ -639,6 +669,7 @@ class LevelEditor(Entity):
         cmd = PlaceEntityCommand(self, new_entity)
         self._history.push(cmd)
         self._refresh_hierarchy()
+        logger.log('INFO', f"Entity placed: type={asset['type']} pos={[round(p, 3) for p in pos]}")
 
         destroy(ghost)
         self._drag_ghost = None
@@ -651,40 +682,49 @@ class LevelEditor(Entity):
     # -------------------------------------------------------------------------
 
     def _build_gizmo(self):
-        self._gizmo_root = Entity(name='editor_gizmo_root', enabled=False)
+        self._gizmo_root = Entity(name='editor_gizmo_root', enabled=False, eternal=True)
         shaft_len = 1.2
         Entity(
             parent=self._gizmo_root,
             model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(shaft_len, 0, 0)], mode='line', thickness=3),
             color=color.red,
-            name='editor_gizmo_x'
+            name='editor_gizmo_x',
+            eternal=True,
         )
         Entity(
             parent=self._gizmo_root,
             model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(0, shaft_len, 0)], mode='line', thickness=3),
             color=color.green,
-            name='editor_gizmo_y'
+            name='editor_gizmo_y',
+            eternal=True,
         )
         Entity(
             parent=self._gizmo_root,
             model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(0, 0, shaft_len)], mode='line', thickness=3),
             color=color.blue,
-            name='editor_gizmo_z'
+            name='editor_gizmo_z',
+            eternal=True,
         )
         for offset, col, gname in [
             (Vec3(shaft_len, 0, 0), color.red,   'editor_gizmo_tip_x'),
             (Vec3(0, shaft_len, 0), color.green, 'editor_gizmo_tip_y'),
             (Vec3(0, 0, shaft_len), color.blue,  'editor_gizmo_tip_z'),
         ]:
-            Entity(
+            tip = Entity(
                 parent=self._gizmo_root,
                 model='cube',
                 color=col,
                 scale=.12,
                 position=offset,
                 name=gname,
-                collider='box'
+                collider='box',
+                eternal=True,
             )
+            # Always draw on top of scene geometry so handles are clickable
+            # even when they overlap another block.
+            tip.setDepthTest(False)
+            tip.setDepthWrite(False)
+            tip.setBin('fixed', 40)
 
     def _update_gizmo(self):
         """Position gizmo at centroid of selection; hide when nothing selected or in play mode."""
@@ -740,6 +780,8 @@ class LevelEditor(Entity):
                     old_pos = self._gizmo_drag_start_pos[e]
                     new_pos = Vec3(e.position)
                     if old_pos != new_pos:
+                        etype = 'enemy' if e in self.enemies else 'block'
+                        logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
                         self._history.push(MoveEntityCommand(e, old_pos, new_pos))
             self._gizmo_drag_axis = None
             self._gizmo_drag_start_mouse = None
@@ -762,8 +804,8 @@ class LevelEditor(Entity):
                     self.grid_snap = snap_val
                     label = str(snap_val) if snap_val is not None else 'Off'
                     self.snap_button.text = f'Snap: {label}'
-            except Exception:
-                pass
+            except Exception as e:
+                logger.log('ERROR', f"_load_prefs {type(e).__name__}: {e}")
 
     def _save_prefs(self):
         prefs = {
@@ -808,11 +850,16 @@ class LevelEditor(Entity):
                        self.texture_button, self.snap_button,
                        self.play_button, self._tray_panel]:
             if widget:
+                if getattr(widget, 'destroy_source', None) is not None:
+                    logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed widget {widget}')
+                    continue
                 widget.enabled = visible
         for bg, icon, label, asset in self._tray_tiles:
-            bg.enabled    = visible
-            icon.enabled  = visible
-            label.enabled = visible
+            for e in (bg, icon, label):
+                if getattr(e, 'destroy_source', None) is not None:
+                    logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed tray entity {e}')
+                    continue
+                e.enabled = visible
 
     def toggle_play(self):
         if self._play_mode:
@@ -821,12 +868,13 @@ class LevelEditor(Entity):
             self._enter_play_mode()
 
     def _enter_play_mode(self):
+        self._play_level_snapshot = self._build_level_data()
+        logger.log('INFO', f'Play-in-editor started ({len(self._play_level_snapshot)} entities in snapshot)')
         if self._editor_camera:
             self._saved_cam_pos = Vec3(self._editor_camera.position)
             self._saved_cam_rot = Vec3(self._editor_camera.rotation_x,
                                        self._editor_camera.rotation_y,
                                        self._editor_camera.rotation_z)
-        self._play_level_snapshot = self._build_level_data()
         self._set_editor_ui_visible(False)
         self._gizmo_root.enabled = False
         self._play_mode = True
@@ -836,6 +884,7 @@ class LevelEditor(Entity):
 
     def _exit_play_mode(self):
         """Tear down gameplay entities, reset game state, and restore editor UI."""
+        logger.log('INFO', 'Play-in-editor stopped')
         from Scripts.game import game, Game
         game.state = Game.MAIN_MENU  # set before teardown so guards see MAIN_MENU even if teardown raises
         # _clear_gameplay_entities is defined in main — import lazily
@@ -851,6 +900,7 @@ class LevelEditor(Entity):
                 destroy(game.player)
                 game.player = None
         self._play_mode = False
+        self._restore_editor_level()
         self._set_editor_ui_visible(True)
         self._update_gizmo()
         mouse.locked = False
@@ -862,6 +912,53 @@ class LevelEditor(Entity):
             self._editor_camera.rotation_z = self._saved_cam_rot.z
             self._saved_cam_pos = None
             self._saved_cam_rot = None
+
+    def _restore_editor_level(self):
+        """Rebuild editor blocks/enemies from the play snapshot after exiting play mode.
+
+        Any entity in self.blocks/self.enemies that was destroyed by scene teardown
+        is replaced with a fresh editor entity built from the snapshot data.
+        """
+        if not self._play_level_snapshot:
+            return
+        # Destroy surviving refs (may still be alive if nothing cleared them)
+        for e in self.blocks + self.enemies:
+            if getattr(e, 'destroy_source', None) is None:
+                destroy(e)
+        self.blocks.clear()
+        self.enemies.clear()
+        self.selected.clear()
+
+        for entry in self._play_level_snapshot:
+            if entry['type'] == 'enemy':
+                new_entity = Entity(
+                    model='cube',
+                    color=color.red,
+                    scale=(1.5, 3, 1.5),
+                    position=tuple(entry['position']),
+                    rotation_y=entry.get('rotation_y', 0),
+                    collider='box',
+                    origin_y=-0.5,
+                )
+                new_entity.enemy_hp   = entry.get('hp', 100)
+                new_entity.enemy_type = entry.get('enemy_type', 'default')
+                new_entity._original_color = color.red
+                self.enemies.append(new_entity)
+            else:
+                new_entity = Entity(
+                    model='cube',
+                    texture=entry.get('texture', 'white_cube'),
+                    position=tuple(entry['position']),
+                    rotation=tuple(entry.get('rotation', [0, 0, 0])),
+                    scale=tuple(entry.get('scale', [1, 1, 1])),
+                    color=color.rgb(*[int(c * 255) for c in entry.get('colour', [1, 1, 1])]),
+                    collider='box',
+                )
+                new_entity._original_color = new_entity.color
+                self.blocks.append(new_entity)
+
+        logger.log('INFO', f'Editor level restored: {len(self.blocks)} blocks, {len(self.enemies)} enemies')
+        self._refresh_hierarchy()
 
     def _spawn_gameplay_from_snapshot(self, level_data):
         from Scripts.player_controller import Player
@@ -943,11 +1040,17 @@ class LevelEditor(Entity):
 
         # Undo / Redo
         if key == 'z' and held_keys['control'] and held_keys['shift']:
+            cmd = self._history._redo[-1] if self._history._redo else None
             self._history.redo()
+            logger.log('INFO', f"Redo executed: {type(cmd).__name__ if cmd else 'nothing'}")
         elif key == 'z' and held_keys['control']:
+            cmd = self._history._undo[-1] if self._history._undo else None
             self._history.undo()
+            logger.log('INFO', f"Undo executed: {type(cmd).__name__ if cmd else 'nothing'}")
         if key == 'y' and held_keys['control']:
+            cmd = self._history._redo[-1] if self._history._redo else None
             self._history.redo()
+            logger.log('INFO', f"Redo executed: {type(cmd).__name__ if cmd else 'nothing'}")
 
         # Camera bookmarks — save
         for i in range(1, 6):
@@ -979,6 +1082,8 @@ class LevelEditor(Entity):
         if key == 'delete' and self.selected:
             for e in list(self.selected):
                 snapshot = self._entity_snapshot(e)
+                etype = 'enemy' if e in self.enemies else 'block'
+                logger.log('INFO', f"Entity deleted: type={etype} pos={[round(p, 3) for p in e.position]}")
                 cmd = DeleteEntityCommand(self, e, snapshot)
                 cmd.execute()
                 self._history.push(cmd)
@@ -1020,9 +1125,38 @@ class LevelEditor(Entity):
             if self._gizmo_drag_axis is not None or self._box_selecting:
                 return
 
+            # Gizmo handles use setDepthTest(False) so they render on top, but the
+            # pick ray still hits whatever geometry is behind them.  Explicitly raycast
+            # against known gizmo handle names so a click that visually lands on a
+            # handle is consumed before the scene-selection branch runs.
+            if self._gizmo_root and self._gizmo_root.enabled:
+                _axis_map = {
+                    'editor_gizmo_tip_x': 'x',
+                    'editor_gizmo_tip_y': 'y',
+                    'editor_gizmo_tip_z': 'z',
+                }
+                _hit = raycast(camera.world_position,
+                               camera.forward,
+                               distance=200,
+                               ignore=[e for e in scene.entities
+                                       if not e.name.startswith('editor_gizmo_tip')])
+                if _hit.hit and _hit.entity and _hit.entity.name in _axis_map:
+                    self._gizmo_drag_axis = _axis_map[_hit.entity.name]
+                    self._gizmo_drag_start_mouse = Vec2(mouse.x, mouse.y)
+                    self._gizmo_drag_start_pos = {e: Vec3(e.position) for e in self.selected}
+                    return
+
             hovered = mouse.hovered_entity
 
-            # Skip if a UI widget (button, panel) consumed the click
+            # Skip if cursor is over any editor panel (hierarchy or inspector).
+            # Buttons inside panels are grandchildren of camera.ui, so checking
+            # hovered.parent == camera.ui would miss them — use _is_over_panel instead.
+            if (self._hier_panel and self._is_over_panel(self._hier_panel)):
+                return
+            if (self._inspector and self._is_over_panel(self._inspector)):
+                return
+
+            # Skip direct camera.ui children (toolbar buttons, tray panel, etc.)
             if hovered and getattr(hovered, 'parent', None) == camera.ui:
                 return
 
@@ -1142,6 +1276,7 @@ class LevelEditor(Entity):
         with open(self.filename, 'w') as f:
             json.dump(deduped, f, indent=4)
         print(f'Saved level to {self.filename} ({len(deduped)} entries)')
+        logger.log('INFO', f"Level saved: {os.path.abspath(self.filename)} ({len(deduped)} entries)")
         self._history.clear()
         self._save_prefs()
 
@@ -1183,8 +1318,13 @@ class LevelEditor(Entity):
                     )
                     new_entity._original_color = new_entity.color
                     self.blocks.append(new_entity)
+            logger.log('INFO', f"Level loaded: {os.path.abspath(self.filename)} ({len(entities)} entries)")
         except FileNotFoundError:
+            logger.log('INFO', f"Level file not found: {self.filename} — starting empty")
             print("No level file found")
+        except Exception as e:
+            logger.log('ERROR', f"{type(e).__name__}: {e}")
+            print(f"Error loading level: {e}")
 
         self._refresh_hierarchy()
         self._history.clear()
@@ -1349,12 +1489,14 @@ if __name__ == '__main__':
     window.borderless = False
     window.size = (1280, 720)
 
+
     ground = Entity(
         model='plane',
         collider='box',
         y=-0.5,
         scale=(100, 1, 100),
-        texture='grass'
+        texture='grass',
+        eternal=True,
     )
 
     editor = LevelEditor()
@@ -1370,7 +1512,8 @@ if __name__ == '__main__':
         position=(-.88, .48),
         origin=(-.5, .5),
         scale=0.75,
-        z=-1
+        z=-1,
+        eternal=True,
     )
 
     app.run()

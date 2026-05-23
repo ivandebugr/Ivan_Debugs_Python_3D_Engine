@@ -23,7 +23,7 @@ This file is the authoritative operating manual loaded at the start of every Cla
 ## Active Persona
 
 ### `solo-founder`
-Read `.claude/agents/solo-founder.md` at session start.
+Read `/.claude/agents/solo-founder.md` at session start.
 This is a solo indie game project. Think in terms of a single developer who designs, codes,
 and ships everything. Prioritize:
 - Playability and game-feel over perfect architecture
@@ -31,7 +31,7 @@ and ships everything. Prioritize:
 - Highest-impact fixes first (RICE score thinking)
 - Honest tech-debt tracking so decisions are made consciously, not by accident
 
-Switch to `.claude/agents/startup-cto.md` for architecture, performance, and collision audit tasks.
+Switch to `/.claude/agents/startup-cto.md` for architecture, performance, and collision audit tasks.
 
 ---
 
@@ -40,26 +40,23 @@ Switch to `.claude/agents/startup-cto.md` for architecture, performance, and col
 ### Always Load
 | Skill               | Path                                                  | Why for this project                                       |
 |---------------------|-------------------------------------------------------|------------------------------------------------------------|
-| `karpathy-coder`    | `engineering/karpathy-coder/SKILL.md`                 | ⚠️ FILE NOT FOUND — apply as mental lens; reinstall from claude-skills repo |
-| `senior-architect`  | `engineering-team/senior-architect/SKILL.md`          | ⚠️ FILE NOT FOUND — apply as mental lens; reinstall from claude-skills repo |
-| `code-reviewer`     | `engineering-team/code-reviewer/SKILL.md`             | ⚠️ FILE NOT FOUND — apply as mental lens; reinstall from claude-skills repo |
-| `tech-debt-tracker` | `engineering/tech-debt-tracker/SKILL.md`              | ⚠️ FILE NOT FOUND — apply as mental lens; reinstall from claude-skills repo |
-
-Only `.claude/skills/karpathy-guidelines/SKILL.md` is confirmed on disk (loaded via `@` above).
-All other skill paths are missing. Apply them as reasoning frameworks, not file loads.
+| `karpathy-coder`    | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/karpathy-coder/SKILL.md`                 |
+| `senior-architect`  | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/senior-architect/SKILL.md`          |
+| `code-reviewer`     | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/code-reviewer/SKILL.md`             | 
+| `tech-debt-tracker` | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/tech-debt-tracker/SKILL.md`              | 
 
 ### Load When Relevant
 | Task                                       | Skill                    | Path                                              |
 |--------------------------------------------|--------------------------|---------------------------------------------------|
-| New feature design / roadmap               | `product-manager-toolkit`| `product-team/product-manager-toolkit/SKILL.md`  |
-| Level design, balance experiments          | `experiment-designer`    | `product-team/experiment-designer/SKILL.md`      |
-| Writing changelogs / release notes         | `changelog-generator`    | `engineering/changelog-generator/SKILL.md`       |
-| Cutting a release / version bump           | `release-manager`        | `engineering/release-manager/SKILL.md`           |
-| Scoping a fix to minimum change            | `focused-fix`            | `engineering/focused-fix/SKILL.md`               |
-| Performance profiling / FPS drops          | `performance-profiler`   | `engineering/performance-profiler/SKILL.md`      |
-| Scope / cut / ship decisions               | `founder-coach`          | `c-level-advisor/founder-coach/SKILL.md`         |
-| Brain dump → roadmap / tasks               | `capture`                | `productivity/capture/SKILL.md`                  |
-| Prompt engineering for tooling             | `senior-prompt-engineer` | `engineering-team/senior-prompt-engineer/SKILL.md`|
+| New feature design / roadmap               | `product-manager-toolkit`| `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/product-team/product-manager-toolkit/SKILL.md`  |
+| Level design, balance experiments          | `experiment-designer`    | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/product-team/experiment-designer/SKILL.md`      |
+| Writing changelogs / release notes         | `changelog-generator`    | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/changelog-generator/SKILL.md`       |
+| Cutting a release / version bump           | `release-manager`        | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/release-manager/SKILL.md`           |
+| Scoping a fix to minimum change            | `focused-fix`            | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/focused-fix/SKILL.md`               |
+| Performance profiling / FPS drops          | `performance-profiler`   | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/performance-profiler/SKILL.md`      |
+| Scope / cut / ship decisions               | `founder-coach`          | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/c-level-advisor/founder-coach/SKILL.md`         |
+| Brain dump → roadmap / tasks               | `capture`                | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/productivity/capture/SKILL.md`                  |
+| Prompt engineering for tooling             | `senior-prompt-engineer` | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/senior-prompt-engineer/SKILL.md`|
 
 ### Obsidian Mind Plugin
 Loaded from `breferrari/obsidian-mind`. Vault root: check `brain/North Star.md` for current location.
@@ -115,7 +112,18 @@ Scripts/
                              (compat.py extraction still TODO).
                              _exit_play_mode: sets game.state=MAIN_MENU before try block;
                              except ImportError only (not bare except).
+                             ALL persistent editor UI entities (panels, tray tiles, gizmo axes/tips,
+                             toolbar buttons, model_preview, spawn marker, ground, hint Text) use
+                             eternal=True so scene teardown during play-in-editor cannot destroy them.
+                             Level blocks/enemies in self.blocks/self.enemies do NOT use eternal=True —
+                             they must be destroyable. _restore_editor_level() rebuilds them from
+                             _play_level_snapshot when play mode exits.
                              Standalone runnable: `python Scripts/level_editor.py`
+                             SessionLogger (module-level singleton) writes structured log to
+                             logs/session_YYYYMMDD_HHMMSS.log on exit (atexit). Log dir auto-created.
+  session_logger.py        — SessionLogger: stdlib-only; logger.log(level, msg) / logger.flush().
+                             Levels: INFO | WARN | ERROR. Format: [HH:MM:SS.mmm] [LEVEL] message.
+                             Instantiated once at module level in level_editor.py as `logger`.
   undo_redo.py             — Command pattern: UndoRedoStack (depth 50) + 6 command types:
                              PlaceEntityCommand, DeleteEntityCommand, MoveEntityCommand,
                              ChangeTextureCommand, ChangeColourCommand, ChangePropertyCommand.
@@ -232,10 +240,15 @@ The same shader patch is duplicated in `level_editor.py` for standalone runs.
 | `start_game()` duplicates player teardown from `_clear_gameplay_entities` | `main.py:212-220` | Medium | Inline teardown block repeats logic already in `_clear_gameplay_entities`. Should call `game.return_to_menu()` before respawning, not repeat teardown inline |
 | `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:76` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
 | `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:129-130` | Low | `left mouse down` fires `weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
+| `level_editor.py`: `_save_prefs()` has no error handling | `Scripts/level_editor.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
 
 ### Confirmed Fixed (for reference — do not reopen unless code evidence)
 | ~~Issue~~ | ~~Location~~ | ~~Notes~~ |
 |---|---|---|
+| ~~F5 play-in-editor crash — snapshot empty + `_set_editor_ui_visible` AssertionError on dead NodePath~~ | ~~`Scripts/level_editor.py`~~ | **FIXED v1.2.3** — `eternal=True` on all persistent editor UI (panels, tray, gizmo, buttons, preview, spawn marker); snapshot taken first; `_restore_editor_level()` rebuilds editor blocks/enemies from snapshot on play-mode exit; `_set_editor_ui_visible` guarded against destroyed entities |
+| ~~Gizmo handles visible through blocks but clicks select the block instead~~ | ~~`Scripts/level_editor.py`~~ | **FIXED v1.2.3** — explicit gizmo raycast in `input()` before selection logic; consumes `left mouse down` and sets `_gizmo_drag_axis` directly |
+| ~~Inspector labels not rendering (z-order behind panel background)~~ | ~~`Scripts/level_editor.py`~~ | **FIXED v1.2.3** — `z=-1` added to all label `Text` and `InputField` children of inspector panel so they render in front of the quad |
+| ~~Asset tray drag-and-drop places ghost on gizmo/editor entities~~ | ~~`Scripts/level_editor.py`~~ | **FIXED v1.2.3** — `_update_ghost()` now rejects `hovered.name.startswith('editor_')` as a valid placement surface |
 | ~~HealthBar uses `eternal=True` on sub-entities~~ | ~~`health_bar.py`~~ | **FIXED 2026-05-22** — all `eternal=True` removed; `on_destroy()` handles camera.ui text explicitly; `_registry` added |
 | ~~Crosshair visibility not restored on non-Esc pause paths~~ | ~~`main.py`~~ | **FIXED v1.3** — PlayerHUD.show()/hide() called by PauseMenu; all paths covered |
 | ~~`swept_cast()` is dead code~~ | ~~`collision_system.py`~~ | **FIXED v1.3** — deleted |
