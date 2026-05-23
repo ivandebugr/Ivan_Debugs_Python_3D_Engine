@@ -1,0 +1,66 @@
+---
+description: "Central map of all work notes — active projects, completed work by quarter, decisions log"
+tags:
+  - index
+  - moc
+---
+
+# Work Notes
+
+Central map of content. All work notes and decisions link back here. For quick navigation, use [[Home]] or open `bases/Work Dashboard.base`.
+
+**Folder structure**: `active/` = current projects, `archive/` = completed (by year), `incidents/` = incident docs, `1-1/` = meetings.
+
+## Incidents
+
+Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
+
+-
+
+## Active Projects
+
+- [[work/active/v1.3-asset-import-pipeline]] — Asset browser, drag-drop import, texture/model pickers, hot-reload | Planned | Blocked on: v1.2 ✓
+- [[work/active/v1.3-asset-import-pipeline]] — Asset browser, drag-drop import, texture/model pickers, hot-reload | Planned | Blocked on: v1.2
+- [[work/active/v1.4-enemy-behaviour-trees]] — Patrol/attack/flee/idle behaviour tree system | Planned | Blocked on: v1.3
+- [[work/active/v1.5-gameplay-systems]] — Trigger/zone system, weapon inventory API | Planned | Blocked on: v1.4
+- [[work/active/v2.0-release]] — Modding, packaged runtime, gamepad input, procedural level gen — PUBLIC RELEASE | Planned | Blocked on: v1.5
+
+## Review Prep
+
+-
+
+## Recently Completed
+
+- [[work/active/v1.2-level-editor-overhaul]] — Shipped 2026-05-20. Game state machine, canonical teardown, JSON schema, 8 Unity-feel editor features.
+
+## Completed
+
+### Current Quarter
+-
+
+### Previous Quarters
+-
+
+## Audits
+
+- [[work/audits/2026-v1.2.3-full-audit]] — v1.2.3 full-project audit (2026-05-20), 12 findings (0 critical, 2 high, 6 medium, 4 low) — hierarchy scroll zooms EditorCamera, drag-and-drop ghost math wrong, enemy origin_y mismatch, bookmark/InputField collision
+- [[work/audits/2026-v1.2-audit]] — v1.2 audit (2026-05-20), 19 findings (0 critical, 4 high, 9 medium, 6 low) — PlaceEntityCommand redo no-op, game.state stuck after editor play exit, enemy Y offset mismatch, 201 eternal debug entities per player
+- [[work/audits/2026-05-20-full-audit]] — Full project audit (2026-05-20), 14 issues found (0 critical, 4 high, 5 medium, 5 low) — all 14 FIXED
+
+## Reference
+
+-
+
+## Decisions Log
+
+| Date | Decision | Status | Link |
+|------|----------|--------|------|
+|      |          |        |      |
+
+## Open Questions
+
+-
+
+## Archive
+
+- [[work/archive/version-map]] — Canonical version history, internal tag↔public semver mapping, versioning policy
