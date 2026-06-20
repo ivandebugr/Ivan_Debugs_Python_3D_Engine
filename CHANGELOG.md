@@ -5,6 +5,144 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.5] - 2026-06-20
+
+WIN/GAME_OVER → R return-to-menu crash fix. Root-caused against the installed Ursina 8.3.0 /
+Panda3D source and a faithful repro (the real `__main__` wiring driven by `app.input('r',
+is_raw=True)` + `app.step()`), not from memory. Prior sessions framed this as a Python exception
+and added `except Exception` guards that could never work — the failure is a **C++ NodePath
+assertion**, which Python `except` cannot catch.
+
+### Fixed
+- **Pressing R on the WIN or GAME_OVER screen flooded the console with
+  `Assertion failed: !is_empty() at line 2102 of nodePath.I` and never returned to the menu**
+  (`main.py` `_clear_gameplay_entities` / `main_menu` / `load_level`). `nodePath.I:2102` is
+  Panda3D's `getName()`. Ursina's `destroy()` empties an entity's NodePath **synchronously**
+  (`removeNode()`) but defers removal from `scene.entities` to the *next* frame's
+  `Ursina._update()` flush. The teardown runs entirely inside one synchronous R-dispatch (no
+  frame boundary), so its `scene.entities[:]` sweeps still contained the entities it had just
+  destroyed — and reading `e.name` on those empty NodePaths asserted. A diagnostic proved
+  **7 of 150** entities in `scene.entities` had empty NodePaths at the sweep point. Fixed with a
+  NodePath-level guard `_is_live(e)` (`not e.is_empty()`) applied **before** any `.name` read in
+  all three sweep loops — replacing the ineffective `try/except Exception` wrappers.
+- **`Player.input('r')` ran on the just-destroyed player, raising
+  `Exception: entity has been destroyed by: _clear_gameplay_entities`**
+  (`Scripts/player_controller.py` `Player.input`). Surfaced once the assertion flood was gone.
+  Ursina dispatches `__main__.input('r')` first (which tears down the player), then continues the
+  **same** input call into the per-entity loop and calls `Player.input('r')` →
+  `self.position = (0, 2, 0)` on the destroyed NodePath. Fixed by early-returning from
+  `Player.input()` when `game.state != Game.PLAYING`; after R the state is already MAIN_MENU, so
+  the player's R-reset and the global R-to-menu handlers are now mutually exclusive.
+
+### Changed
+- **Teardown is now logged step-by-step** (`main.py`, `Scripts/session_logger.py`). Each step of
+  `_clear_gameplay_entities()` / `main_menu()` writes `logger.log('INFO', 'teardown: …')` so a
+  future crash shows exactly how far teardown got. `SessionLogger` gained an `open_message`
+  param and a shared `get_game_logger()` singleton — `main.py` is imported as both `__main__`
+  and `main` (via `game.py`'s `from main import`), which would otherwise create two log files
+  per run; the singleton keeps the whole session in one log.
+
+### Verified
+- WIN → R, GAME_OVER → R, and pause → Main Menu all complete with **0 Panda3D assertions and
+  0 Python exceptions**, land on `state=MAIN_MENU`, and a brand-new game restarts with all
+  enemies present. Session log shows the full ordered INFO teardown sequence for each path.
+
+---
+
+## [1.2.4] - 2026-06-10
+
+Level-editor targeted fix pass. Phase 2 fixes 1A (gizmo depth render), 2 (2× handles),
+and 3 (Move/Place tool) had already landed in the prior "massive refactoring" commit and were
+verified intact. This release fixes the four genuinely-broken items found in deep review, each
+diagnosed against the installed Ursina 8.3.0 source rather than from memory.
+
+### Fixed
+- **Inspector field Enter applied nothing (FIX 4 — third attempt, now root-caused)**
+  (`Scripts/level_editor.py` `_build_inspector` / `_apply_inspector_value`). Two real causes,
+  verified against `ursina/prefabs/input_field.py`: (1) `InputField.submit_on` **defaults to `[]`**
+  and was never set, so `on_submit` could never fire on Enter; (2) Ursina calls `self.on_submit()`
+  with **no arguments**, but the prior callback was `lambda val, k=key:` — wrong arity, so it would
+  have raised `TypeError` the instant it ever fired. Fixed by setting `field.submit_on = ['enter']`
+  and using a no-arg `lambda k=key, f=field: self._apply_inspector_value(k, f.text)` that reads the
+  field text at call time. HP now casts to `int`. Verified end-to-end via the real
+  `InputField.input('enter')` path: the value applies and a `ChangePropertyCommand` lands on the
+  undo stack; clicking a field no longer clears selection (existing `_is_over_panel` guard).
+- **Gizmo handle could not be grabbed (FIX 1B — persistent bug, real cause found)**
+  (`Scripts/level_editor.py` `input()` + new `_cursor_ray()`). The gizmo pick raycast used
+  `camera.world_position, camera.forward` — a **screen-centre** ray — but the editor cursor is
+  free, so it never tested where the user actually clicked. Replaced with a world-space ray cast
+  through the **mouse cursor** (`camera.lens.extrude`, mirroring Ursina's own `mouse.update`
+  picker). Ignoring every non-`editor_gizmo_tip` entity lets the handle win even when a block
+  overlaps it on screen — verified: the tip ray hits the handle while a full ray hits the block
+  in front.
+- **Editor asset colours rendered white and corrupted `level.json` on save**
+  (`Scripts/level_editor.py` `ASSETS`). `color.rgb()` is an alias for `rgba()` and builds
+  `Color(r,g,b,a)` with **no /255** (verified in `ursina/color.py`). The `ASSETS` table used
+  0–255 tuples, so tray tiles, drag ghosts, and placed blocks clamped to white, and saving a
+  tray-placed block wrote colour components > 1.0 into `level.json`. Converted the table to 0–1
+  floats (same unit as `level.json`). One-off heal divided the 3 remaining inflated `level.json`
+  entries (the Cube/Metal/Wood asset colours) back into range; file now has 0 components > 1.0.
+- **Move/Place buttons and spawn marker stayed visible during play-in-editor** (`Scripts/level_editor.py`
+  `_set_editor_ui_visible`) — added `_move_button`, `_place_button`, and `_spawn_marker` to the
+  hide list so play mode hides all editor chrome; verified re-enabled on exit.
+
+### Notes
+- Deferred items (cosmetic 0–255 UI-chrome colours, unused `position_valid()`, `_load_prefs`
+  coupling, the `↖` U+2196 glyph missing from the default font) are logged in
+  `docs/audit_v1.2.3.md` under **Deferred (post-1.2.3)**.
+
+---
+
+## [1.2.3] - 2026-05-22
+
+### Added
+- **WIN / GAME_OVER states wired** (`Scripts/game.py`, `main.py`, `Scripts/player_controller.py`).
+  `Game.trigger_win()` and `Game.trigger_game_over()` are idempotent — they only fire from
+  `PLAYING`, set the state, freeze `application.time_scale`, surface the mouse cursor, hide the
+  HUD, and build an `EndScreen` overlay. WIN is detected in the global `update()` via the new
+  `CollisionManager.count_layer(Layers.ENEMY) == 0` check (does not allocate a list and reads
+  from `_tracked`, which `AliveEntity.die()` prunes — `game.enemies` still holds dead refs so
+  `len(game.enemies)` would lie). GAME_OVER fires from `Player.update` when `health <= 0`,
+  replacing the silent teleport-to-origin. Pressing `R` on either end screen calls
+  `game.return_to_menu()` then `main_menu()`. Esc during WIN/GAME_OVER is a no-op (the existing
+  guard only branches on PLAYING/PAUSED). Both screens are tracked as `game.win_screen` /
+  `game.game_over_screen` and torn down by `_clear_gameplay_entities()`.
+- **`EndScreen(title)`** (`main.py`) — single `Entity(parent=camera.ui)` with a semi-transparent
+  black quad background and two `Text` children (title + "Press R to return to menu" hint). All
+  children are parented to `self` so `destroy(self)` cascades — no manual sub-entity teardown.
+- **`CollisionManager.count_layer(layer)`** (`Scripts/collision_system.py`) — allocation-free
+  alternative to `len(query_layer(...))`.
+
+### Fixed
+- **`level.json` colour-channel inflation (65025.0 = 255²)** — save path wrote 0–1 floats; all
+  four loaders multiplied by 255 on read, squaring the value across each save/load cycle until
+  all blocks rendered white (Ursina clamped). Removed `[int(c * 255) for c in …]` from every
+  loader (`main.py:load_level`, `Scripts/level_editor.py:load_existing_level`, `_restore_editor_level`,
+  `_spawn_gameplay_from_snapshot`); they now spread the 0–1 list directly into `color.rgb()`,
+  which accepts floats. A one-off `level.json` migration deflated 79 entries (any component
+  > 1.0 divided by 255 until in range). Verified: post-migration sample colour is
+  `(0.313725, 0.470588, 0.784314)` and no component exceeds 1.0.
+- **Block `scale` dropped in play-in-editor** (`Scripts/level_editor.py:_spawn_gameplay_from_snapshot`).
+  The `Entity(…)` ctor was missing `scale=`, so every block reverted to 1×1×1 in F5 play mode
+  even though the snapshot carried the value. Added `scale=tuple(entry.get('scale', [1, 1, 1]))`
+  to match the rotation pattern.
+
+### Changed
+- **Single source of truth for level loading**: extracted `Scripts/level_io.py::load_level_data(path_or_list)`.
+  All four loader sites (`load_level`, `load_existing_level`, `_restore_editor_level`,
+  `_spawn_gameplay_from_snapshot`) now call it. Defaults (scale `[1,1,1]`, rotation `[0,0,0]`,
+  colour `[1,1,1]`, hp `100`, enemy_type `'default'`) live in one place. Entity construction
+  stays at call sites — each builds a different shape (placeholder vs. editor entity vs. real
+  `Enemy`/`Player`).
+
+### Removed
+- **`Scripts/color.py`** — dead module (confirmed unused via `grep -r "from Scripts.color"`)
+  with HSV values passed to `color.rgb()` (e.g. `red = color.rgb(0, 1, 1)` actually renders
+  cyan). Removing it eliminates a class of future foot-gun without losing any consumer. Use
+  `ursina.color` directly.
+
+---
+
 ## [1.2.2] - 2026-05-20
 
 ### Fixed

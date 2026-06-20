@@ -2,9 +2,36 @@ from ursina import *
 from Scripts.player_controller import Player
 from Scripts.enemy import Enemy
 from Scripts.health_bar import HealthBar
-from Scripts.collision_system import collision_manager
+from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
-import json, pyglet
+from Scripts.level_io import load_level_data
+from Scripts.session_logger import get_game_logger
+import pyglet
+
+# Shared game-session logger. Writes logs/session_*.log on exit (atexit).
+# get_game_logger() returns a single cached instance even though main.py is loaded
+# as both __main__ and `main` (via game.py's `from main import`), so teardown from
+# both module objects lands in one log. Used by _clear_gameplay_entities()/main_menu()
+# to record how far teardown got — the WIN/GAME_OVER → R crash was a C++ NodePath
+# assertion (not a Python exception), so step-by-step INFO logging is how future
+# sessions trace it.
+logger = get_game_logger()
+
+
+def _is_live(entity) -> bool:
+    """True if `entity`'s NodePath is still attached (not already destroyed).
+
+    Ursina's destroy() empties the NodePath synchronously (removeNode()) but defers
+    removal from scene.entities to the next frame's flush. Within one synchronous
+    teardown, scene.entities[:] therefore still contains just-destroyed entities whose
+    NodePaths are empty. Reading e.name on those calls Panda3D getName() →
+    'Assertion failed: !is_empty() at nodePath.I:2102'. Filter with this BEFORE touching
+    .name or any NodePath property. This guards the C++ layer, not just Python attrs.
+    """
+    try:
+        return not entity.is_empty()
+    except Exception:
+        return False
 
 
 class PlayerHUD:
@@ -69,43 +96,81 @@ class PlayerHUD:
         # health_bar lifetime is owned by Player — do not destroy here
         self.health_bar = None
 
+
+class EndScreen(Entity):
+    """Fullscreen overlay shown on WIN or GAME_OVER. R key returns to menu.
+
+    Children parented to self so `destroy(self)` cascades — no manual sub-entity teardown.
+    Lifetime owned by game.win_screen / game.game_over_screen; cleared in
+    _clear_gameplay_entities() via game.return_to_menu().
+    """
+
+    def __init__(self, title: str):
+        super().__init__(parent=camera.ui)
+        self.background = Entity(
+            parent=self,
+            model='quad',
+            color=color.rgba(0, 0, 0, 0.7),
+            scale=(2, 2),
+            z=1,
+        )
+        self.title_text = Text(
+            text=title,
+            parent=self,
+            origin=(0, 0),
+            scale=4,
+            y=0.1,
+            z=-1,
+        )
+        self.hint_text = Text(
+            text='Press R to return to menu',
+            parent=self,
+            origin=(0, 0),
+            scale=1.5,
+            y=-0.1,
+            z=-1,
+        )
+
+
 def load_level():
     try:
-        with open('level.json', 'r') as f:
-            entities = json.load(f)
-
-        for e in scene.entities[:]:
-            try:
-                if e.name in ['level_block', 'level_enemy']:
-                    destroy(e)
-            except Exception:
-                pass
-
-        for entity_data in entities:
-            if entity_data.get('type') == 'enemy':
-                enemy_placeholder = Entity(
-                    position=tuple(entity_data['position']),
-                    model='cube',
-                    color=color.red,
-                    scale=(1.5, 3, 1.5),
-                    name='level_enemy'
-                )
-                enemy_placeholder.enemy_hp       = entity_data.get('hp', 100)
-                enemy_placeholder.enemy_type     = entity_data.get('enemy_type', 'default')
-                enemy_placeholder.enemy_rotation = entity_data.get('rotation_y', 0)
-            else:
-                block = Entity(
-                    model='cube',
-                    collider='box',
-                    texture=entity_data['texture'],
-                    position=tuple(entity_data['position']),
-                    color=color.rgb(*[int(c * 255) for c in entity_data.get('colour', [1, 1, 1])]),
-                    rotation=tuple(entity_data.get('rotation', [0, 0, 0])),
-                    scale=tuple(entity_data.get('scale', [1, 1, 1])),
-                    name='level_block'
-                )
+        entities = load_level_data('level.json')
     except FileNotFoundError:
         print("No level file found. Create one using the level editor.")
+        return
+
+    # main_menu() calls load_level() in the same synchronous frame after its own
+    # destroys, so scene.entities can still hold emptied-but-unflushed NodePaths.
+    # _is_live() guards e.name against the getName()-on-empty assertion.
+    for e in scene.entities[:]:
+        if not _is_live(e):
+            continue
+        if e.name in ['level_block', 'level_enemy']:
+            destroy(e)
+
+    for entry in entities:
+        if entry['type'] == 'enemy':
+            enemy_placeholder = Entity(
+                position=tuple(entry['position']),
+                model='cube',
+                color=color.red,
+                scale=(1.5, 3, 1.5),
+                name='level_enemy'
+            )
+            enemy_placeholder.enemy_hp       = entry['hp']
+            enemy_placeholder.enemy_type     = entry['enemy_type']
+            enemy_placeholder.enemy_rotation = entry['rotation_y']
+        else:
+            Entity(
+                model='cube',
+                collider='box',
+                texture=entry['texture'],
+                position=tuple(entry['position']),
+                color=color.rgb(*entry['colour']),
+                rotation=tuple(entry['rotation']),
+                scale=tuple(entry['scale']),
+                name='level_block'
+            )
 
 
 def _clear_gameplay_entities():
@@ -123,25 +188,29 @@ def _clear_gameplay_entities():
     # sweeps scene.entities and destroys parked bullets; without reset(), _free still
     # holds dead NodePaths and the next acquire() crashes on _reset() position assignment.
     # reset() clears _free and _built so the pool rebuilds from scratch next session.
+    logger.log('INFO', 'teardown: begin _clear_gameplay_entities')
     from Scripts.weapon import reset_bullet_pools
     reset_bullet_pools()
+    logger.log('INFO', 'teardown: bullet pools reset')
 
     if game.hud:
         game.hud.destroy()
         game.hud = None
+    logger.log('INFO', 'teardown: hud destroyed')
 
     if game.win_screen:
         destroy(game.win_screen)
         game.win_screen = None
-
     if game.game_over_screen:
         destroy(game.game_over_screen)
         game.game_over_screen = None
+    logger.log('INFO', 'teardown: end screens destroyed')
 
     for e in list(game.enemies):
         if getattr(e, 'alive', False):
             e.die()
     game.enemies.clear()
+    logger.log('INFO', 'teardown: enemies cleared')
 
     if game.player:
         if hasattr(game.player, 'weapon') and game.player.weapon:
@@ -153,32 +222,41 @@ def _clear_gameplay_entities():
         collision_manager.remove(game.player)
         destroy(game.player)
         game.player = None
+    logger.log('INFO', 'teardown: player destroyed')
 
+    # Filter dead refs (empty NodePaths) BEFORE reading e.name — the destroys above
+    # emptied their NodePaths synchronously but they linger in scene.entities until the
+    # next frame's flush. _is_live() avoids the getName()-on-empty NodePath assertion.
     for e in scene.entities[:]:
-        try:
-            if e.name in ('level_block', 'level_enemy', 'ground',
-                          'main_sky', 'camera_pivot'):
-                destroy(e)
-        except Exception:
-            pass
+        if not _is_live(e):
+            continue
+        if e.name in ('level_block', 'level_enemy', 'ground',
+                      'main_sky', 'camera_pivot'):
+            destroy(e)
+    logger.log('INFO', 'teardown: scene entities swept')
 
     camera.parent = scene
     camera.position = (0, 0, 0)
     camera.rotation = (0, 0, 0)
     application.time_scale = 1
+    logger.log('INFO', 'teardown: _clear_gameplay_entities complete')
 
 
 def main_menu():
     from Scripts.collision_system import AliveEntity
+    logger.log('INFO', 'main_menu: begin scene rebuild')
     for e in scene.entities[:]:
-        if isinstance(e, AliveEntity) and e.alive:
+        if isinstance(e, AliveEntity) and e.alive and _is_live(e):
             e.die()
+    # _is_live() filters entities destroyed earlier in this same synchronous teardown
+    # (empty NodePath, not yet flushed from scene.entities) before reading e.name —
+    # otherwise getName() on the empty NodePath asserts (nodePath.I:2102).
     for e in scene.entities[:]:
-        try:
-            if e.name not in ['main_camera']:
-                destroy(e)
-        except Exception:
-            pass
+        if not _is_live(e):
+            continue
+        if e.name not in ['main_camera']:
+            destroy(e)
+    logger.log('INFO', 'main_menu: old scene swept')
 
     sky = Sky()
     sky.name = 'main_sky'
@@ -509,6 +587,11 @@ if __name__ == '__main__':
 
     def update():
         collision_manager.update()
+        # WIN condition: PLAYING with no live enemies left on the layer.
+        # count_layer reads from collision_manager._tracked (which AliveEntity.die() prunes),
+        # not game.enemies (which still holds dead refs). State guard makes this idempotent.
+        if game.state == Game.PLAYING and collision_manager.count_layer(Layers.ENEMY) == 0:
+            game.trigger_win()
 
     def input(key):
         if key == 'f':
@@ -537,6 +620,13 @@ if __name__ == '__main__':
             elif game.state == Game.PAUSED:
                 if game.pause_menu:
                     game.pause_menu.resume_game()
+
+        if key == 'r' and game.state in (Game.WIN, Game.GAME_OVER):
+            application.time_scale = 1
+            game.return_to_menu()
+            main_menu()
+            mouse.visible = True
+            mouse.locked = False
 
         if key == 'left mouse' and not window.fullscreen and game.state == Game.PLAYING:
             mouse.locked = True

@@ -35,6 +35,34 @@ class Game:
         """Transition back to PLAYING from PAUSED."""
         self.state = Game.PLAYING
 
+    def trigger_win(self):
+        """Show WIN overlay, freeze time, surface cursor. Idempotent — only fires from PLAYING."""
+        if self.state != Game.PLAYING:
+            return
+        self.state = Game.WIN
+        self._show_end_screen('YOU WIN', is_win=True)
+
+    def trigger_game_over(self):
+        """Show GAME OVER overlay, freeze time, surface cursor. Idempotent — only fires from PLAYING."""
+        if self.state != Game.PLAYING:
+            return
+        self.state = Game.GAME_OVER
+        self._show_end_screen('GAME OVER', is_win=False)
+
+    def _show_end_screen(self, title: str, is_win: bool):
+        from ursina import application, mouse
+        from main import EndScreen
+        application.time_scale = 0
+        mouse.visible = True
+        mouse.locked = False
+        if self.hud:
+            self.hud.hide()
+        screen = EndScreen(title)
+        if is_win:
+            self.win_screen = screen
+        else:
+            self.game_over_screen = screen
+
     def return_to_menu(self):
         """Tear down gameplay entities and land on MAIN_MENU regardless of errors."""
         self.state = Game.RETURNING_TO_MENU

@@ -3,6 +3,7 @@ from ursina.prefabs.first_person_controller import FirstPersonController
 from Scripts.weapon import Weapon
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import Layers, collision_manager
+from Scripts.game import game, Game
 
 # 5 swept-ray heights: feet → knee → waist → shoulder → forehead (entity.y-0.4 to entity.y+1.9)
 # True only for debugging swept collision — creates 200 eternal entities, never enable in production
@@ -121,11 +122,18 @@ class Player(FirstPersonController):
 
         self.health_bar.value = self.health
         if self.health <= 0:
-            # TODO: call game.trigger_game_over() once wired in main.py
-            self.position = (0, 2, 0)
-            self.health = 100
+            game.trigger_game_over()
 
     def input(self, key):
+        # Only act on gameplay input while actually PLAYING. During WIN/GAME_OVER the
+        # global input() handler presses R to return to the menu, which destroys this
+        # Player synchronously — but Ursina then continues the SAME input dispatch into
+        # the per-entity loop and calls this Player.input('r'). Without the guard,
+        # self.position = (...) runs on the just-destroyed NodePath and raises
+        # 'entity has been destroyed by: _clear_gameplay_entities'. Gating on PLAYING
+        # makes the R-to-menu and R-to-reset handlers mutually exclusive.
+        if game.state != Game.PLAYING:
+            return
         if key == 'left mouse down':
             self.weapon.shoot()
         if key == 'space' and self.grounded:

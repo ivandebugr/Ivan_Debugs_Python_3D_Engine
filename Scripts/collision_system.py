@@ -160,6 +160,11 @@ class CollisionManager:
         return [e for e in self._tracked
                 if getattr(e, '_collision_layer', 0) == layer]
 
+    def count_layer(self, layer: int) -> int:
+        """Count live tracked entities on `layer` without allocating a list."""
+        return sum(1 for e in self._tracked
+                   if getattr(e, '_collision_layer', 0) == layer)
+
     def query_near(self, position, radius: float, layer: int) -> list:
         """Return entities on `layer` within `radius` of `position`."""
         cell = self._cell(position)
