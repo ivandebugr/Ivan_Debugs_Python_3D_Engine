@@ -1,9 +1,11 @@
 from ursina import *
 
 # TUNE: named color constants — swap these to experiment with bar appearance
-BAR_COLOR_FULL  = color.rgb(50, 200, 50)
-BAR_COLOR_MID   = color.rgb(220, 150, 0)
-BAR_COLOR_LOW   = color.rgb(200, 50, 50)
+# Ursina 8.3.0 color.rgb() takes 0–1 floats (same bug class as the level.json
+# colour-inflation fix in v1.2.3). Out-of-range channels clamp to 1.0 → white.
+BAR_COLOR_FULL  = color.rgb(50/255, 200/255, 50/255)
+BAR_COLOR_MID   = color.rgb(220/255, 150/255, 0)
+BAR_COLOR_LOW   = color.rgb(200/255, 50/255, 50/255)
 BAR_BG_COLOR    = color.dark_gray
 
 
@@ -90,7 +92,7 @@ class HealthBar(Entity):
             self.bar.color = BAR_COLOR_FULL
         elif health_ratio > 0.3:
             self.bar.color = BAR_COLOR_MID
-        else:
+        else:   
             self.bar.color = BAR_COLOR_LOW
 
         if self.is_3d:

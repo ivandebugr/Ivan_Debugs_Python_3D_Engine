@@ -14,6 +14,7 @@ from Scripts.undo_redo import (
     ChangePropertyCommand
 )
 from Scripts.session_logger import SessionLogger
+from Scripts.level_io import load_level_data
 
 logger = SessionLogger()
 
@@ -24,12 +25,17 @@ EDITOR_GRID_SNAPS = (1.0, 0.5, 0.25, None)
 
 
 class LevelEditor(Entity):
+    # FIXED (v1.2.4, BUG): colours are 0–1 floats. Ursina's color.rgb() is an alias for
+    # rgba() and does Color(r,g,b,a) with NO /255 (verified against ursina/color.py). The
+    # old 0–255 tuples made color.rgb(80,120,200) -> Color(80,120,200,1) which clamps to
+    # white for tiles/ghosts/placed blocks AND wrote colour values >1.0 into level.json on
+    # save (the canonical schema is 0–1). Same unit as level.json now.
     ASSETS = [
-        {'name': 'Cube',  'model': 'cube', 'color': (80, 120, 200),  'scale': (1, 1, 1),     'type': 'block'},
-        {'name': 'Stone', 'model': 'cube', 'color': (110, 110, 110), 'scale': (1, 1, 1),     'type': 'block'},
-        {'name': 'Metal', 'model': 'cube', 'color': (160, 160, 180), 'scale': (1, 1, 1),     'type': 'block'},
-        {'name': 'Wood',  'model': 'cube', 'color': (160, 100, 60),  'scale': (1, 1, 1),     'type': 'block'},
-        {'name': 'Enemy', 'model': 'cube', 'color': (200, 60, 60),   'scale': (1.5, 3, 1.5), 'type': 'enemy'},
+        {'name': 'Cube',  'model': 'cube', 'color': (0.314, 0.471, 0.784), 'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Stone', 'model': 'cube', 'color': (0.431, 0.431, 0.431), 'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Metal', 'model': 'cube', 'color': (0.627, 0.627, 0.706), 'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Wood',  'model': 'cube', 'color': (0.627, 0.392, 0.235), 'scale': (1, 1, 1),     'type': 'block'},
+        {'name': 'Enemy', 'model': 'cube', 'color': (0.784, 0.235, 0.235), 'scale': (1.5, 3, 1.5), 'type': 'enemy'},
     ]
 
     def __init__(self):
@@ -45,6 +51,9 @@ class LevelEditor(Entity):
         self._editor_camera = None
         self._saved_cam_pos = None
         self._saved_cam_rot = None
+
+        # Tool mode: 'move' selects/deselects entities; 'place' left-click places new blocks
+        self._tool = 'move'
 
         # Selection state
         self.selected = set()
@@ -88,6 +97,10 @@ class LevelEditor(Entity):
         self._tray_scroll = 0
 
         # Build toolbar buttons
+        # DEBT (deferred to docs/audit_v1.2.3.md): editor UI chrome below (button/panel/tray
+        # colours) still passes 0–255 values to color.rgb/rgba, which clamp to white/full.
+        # Cosmetic only — never serialised — so deferred. The ASSETS colour fix above was the
+        # in-scope one because those colours get written to level.json.
         self.texture_button = Button(
             parent=camera.ui,
             text='Texture: White',
@@ -119,6 +132,31 @@ class LevelEditor(Entity):
             position=(.35, .35),
             on_click=self.toggle_play,
             color=color.rgb(120, 60, 100),
+            text_scale=1.2,
+            z=-1,
+            eternal=True,
+        )
+
+        # Move/Place tool toggle buttons — mutually exclusive; _set_tool() updates highlight
+        self._move_button = Button(
+            parent=camera.ui,
+            text='↖ Move',
+            scale=(.18, .05),
+            position=(.35, .29),
+            on_click=lambda: self._set_tool('move'),
+            color=color.rgb(60, 130, 60),   # highlighted — default active mode
+            text_scale=1.2,
+            z=-1,
+            eternal=True,
+        )
+
+        self._place_button = Button(
+            parent=camera.ui,
+            text='+ Place',
+            scale=(.18, .05),
+            position=(.35, .23),
+            on_click=lambda: self._set_tool('place'),
+            color=color.dark_gray,
             text_scale=1.2,
             z=-1,
             eternal=True,
@@ -157,7 +195,91 @@ class LevelEditor(Entity):
             eternal=True,
         )
 
+        # Top-left overlay (hint text). Assigned by __main__ after construction.
+        self._hint_text = None
+
         self.load_existing_level()
+
+        # Apply border-anchored layout now, and again whenever the window resizes.
+        self._apply_layout()
+        _prev_on_resize = getattr(window, 'on_resize', None)
+        def _on_resize():
+            if callable(_prev_on_resize):
+                try:
+                    _prev_on_resize()
+                except Exception as e:
+                    logger.log('ERROR', f"_on_resize prev hook {type(e).__name__}: {e}")
+            try:
+                self._apply_layout()
+            except Exception as e:
+                logger.log('ERROR', f"_on_resize _apply_layout {type(e).__name__}: {e}")
+        window.on_resize = _on_resize
+
+    # -------------------------------------------------------------------------
+    # Layout (border-anchored UI repositioning on window resize)
+    # -------------------------------------------------------------------------
+
+    # Panel widths (camera.ui units). Kept constant so labels/fields inside
+    # the panels retain their proportions; only x-position changes with aspect.
+    _LAYOUT_HIER_W = 0.20
+    _LAYOUT_INSP_W = 0.22
+    _LAYOUT_PANEL_H = 0.9
+    _LAYOUT_TOOLBAR_BTN_W = 0.18
+
+    def _apply_layout(self):
+        """Reposition border-anchored UI to match current window aspect ratio.
+
+        Ursina UI height is fixed at 1 (camera.ui spans y in [-0.5, 0.5]);
+        width = aspect_ratio. Only x for left/right panels and width of the
+        full-bleed tray need to follow aspect on resize.
+        """
+        aspect = getattr(window, 'aspect_ratio', 16 / 9)
+        if not aspect or aspect <= 0:
+            return
+        half_w = aspect * 0.5
+
+        hier_w = self._LAYOUT_HIER_W
+        insp_w = self._LAYOUT_INSP_W
+        btn_w = self._LAYOUT_TOOLBAR_BTN_W
+
+        # Hierarchy — flush left
+        if self._hier_panel is not None:
+            self._hier_panel.x = -half_w + hier_w * 0.5
+            self._hier_panel.y = 0
+            self._hier_panel.scale_x = hier_w
+            self._hier_panel.scale_y = self._LAYOUT_PANEL_H
+
+        # Inspector — flush right
+        if self._inspector is not None:
+            self._inspector.x = half_w - insp_w * 0.5
+            self._inspector.y = 0
+            self._inspector.scale_x = insp_w
+            self._inspector.scale_y = self._LAYOUT_PANEL_H
+
+        # Asset tray — flush bottom, full viewport width
+        if self._tray_panel is not None:
+            self._tray_panel.x = 0
+            self._tray_panel.y = self._TRAY_Y
+            self._tray_panel.scale_x = aspect
+            self._tray_panel.scale_y = self._TRAY_H
+
+        # Toolbar buttons — stacked top-right, just left of the inspector
+        toolbar_x = half_w - insp_w - btn_w * 0.5 - 0.01
+        for btn, y in (
+            (self.texture_button, .47),
+            (self.snap_button, .41),
+            (self.play_button, .35),
+            (self._move_button, .29),
+            (self._place_button, .23),
+        ):
+            if btn is not None:
+                btn.x = toolbar_x
+                btn.y = y
+
+        # Hint text — top-left overlay
+        if self._hint_text is not None:
+            self._hint_text.x = -half_w + 0.01
+            self._hint_text.y = 0.48
 
     # -------------------------------------------------------------------------
     # Grid snap
@@ -168,6 +290,12 @@ class LevelEditor(Entity):
         self.grid_snap = self.snap_values[self.snap_index]
         label = str(self.grid_snap) if self.grid_snap is not None else 'Off'
         self.snap_button.text = f'Snap: {label}'
+
+    def _set_tool(self, mode):
+        """Switch between 'move' (select/deselect) and 'place' (left-click places) modes."""
+        self._tool = mode
+        self._move_button.color  = color.rgb(60, 130, 60) if mode == 'move'  else color.dark_gray
+        self._place_button.color = color.rgb(60, 60, 130) if mode == 'place' else color.dark_gray
 
     def _snap(self, position):
         if self.grid_snap is None:
@@ -239,13 +367,13 @@ class LevelEditor(Entity):
         y0, y1 = sorted([self._box_start.y, mouse.y])
         for e in self.blocks + self.enemies:
             try:
-                screen_pos = camera.world_to_screen(e.world_position)
-                if screen_pos and x0 <= screen_pos.x <= x1 and y0 <= screen_pos.y <= y1:
+                screen_pos = e.screen_position
+                if x0 <= screen_pos.x <= x1 and y0 <= screen_pos.y <= y1:
                     self._snapshot_color(e)
                     self.selected.add(e)
                     e.color = color.orange
-            except Exception as e:
-                logger.log('ERROR', f"_finish_box_select {type(e).__name__}: {e}")
+            except Exception as exc:
+                logger.log('ERROR', f"_finish_box_select {type(e).__name__}: {exc}")
         self._update_inspector()
         self._update_hierarchy_highlight()
         if self._box_rect:
@@ -276,6 +404,10 @@ class LevelEditor(Entity):
             z=-1,
             eternal=True,
         )
+        try:
+            self._insp_title.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin title {type(e).__name__}: {e}")
         # 8 rows distributed evenly in the usable area below the title.
         # Usable: from +0.38 to -0.43  →  height = 0.81 units (in panel-local space).
         # Transform group: rows 0-6 (pos x/y/z, rot y, scale x/y/z)
@@ -308,7 +440,7 @@ class LevelEditor(Entity):
                     z=-1,
                     eternal=True,
                 )
-            Text(
+            label_text = Text(
                 parent=self._inspector,
                 text=label,
                 position=(-.45, y_pos + .01),
@@ -318,6 +450,10 @@ class LevelEditor(Entity):
                 z=-1,
                 eternal=True,
             )
+            try:
+                label_text.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_inspector setBin label {type(e).__name__}: {e}")
             field = InputField(
                 parent=self._inspector,
                 position=(.1, y_pos),
@@ -326,7 +462,18 @@ class LevelEditor(Entity):
                 z=-1,
                 eternal=True,
             )
-            field.on_submit = lambda v, k=key: self._inspector_commit(k, v)
+            try:
+                field.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_inspector setBin field {type(e).__name__}: {e}")
+            # FIXED (v1.2.4, FIX 4): Enter applied nothing because (1) Ursina's InputField
+            # only fires on_submit when the key is in submit_on, which defaults to [] and was
+            # never set, and (2) Ursina calls self.on_submit() with NO arguments, so the prior
+            # `lambda val, k=key:` raised TypeError the instant it ever did fire. Fix both:
+            # enable Enter via submit_on, and use a no-arg callback that reads field.text at
+            # call time. k=key/f=field bind the loop variables (no live-entity capture).
+            field.submit_on = ['enter']
+            field.on_submit = lambda k=key, f=field: self._apply_inspector_value(k, f.text)
             self._insp_fields[key] = field
 
     def _update_inspector(self):
@@ -352,13 +499,18 @@ class LevelEditor(Entity):
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
         self._insp_fields['hp'].text    = shared_or_multi(lambda e: getattr(e, 'enemy_hp', 100))
 
-    def _inspector_commit(self, key, value_str):
+    def _apply_inspector_value(self, key, value_str):
+        # Read current selection at call time (not capture time) so the lambda
+        # always operates on whatever is selected when Enter is pressed.
         if not self.selected or value_str in ('---', ''):
             return
         try:
             value = float(value_str)
-        except ValueError:
+        except (ValueError, TypeError):
             return
+        # FIXED (v1.2.4, FIX 4): HP is an integer attribute — keep enemy_hp an int.
+        if key == 'hp':
+            value = int(value)
         attr_map = {
             'pos_x': 'x', 'pos_y': 'y', 'pos_z': 'z',
             'rot_y': 'rotation_y',
@@ -368,13 +520,22 @@ class LevelEditor(Entity):
         attr = attr_map.get(key)
         if not attr:
             return
-        for e in self.selected:
+        for e in list(self.selected):
+            # FIXED: guard against stale destroyed entity refs in selection set
+            if getattr(e, 'destroy_source', None) is not None:
+                continue
             old = getattr(e, attr, 0)
             logger.log('INFO', f"Inspector property changed: entity@{[round(p,3) for p in e.position]} field={key} {old} -> {value}")
             cmd = ChangePropertyCommand(e, attr, old, value)
             cmd.execute()
             self._history.push(cmd)
-        self._update_inspector()
+        # Update only this field in-place; do not clear selection or rebuild
+        # the inspector (which would steal focus and prevent further edits).
+        field = self._insp_fields.get(key)
+        if field is not None:
+            field.text = str(round(value, 3))
+        if self._gizmo_root is not None:
+            self._update_gizmo()
 
     # -------------------------------------------------------------------------
     # Hierarchy panel
@@ -518,12 +679,19 @@ class LevelEditor(Entity):
         bg = Entity(
             parent=camera.ui,
             model='quad',
-            color=color.rgba(50, 50, 60, 200),
             scale=(self._TILE_SIZE, self._TILE_SIZE),
             position=(tx, self._TRAY_Y),
             z=-0.6,
             eternal=True,
         )
+        bg.texture = None
+        try:
+            from ursina.shaders.unlit_shader import unlit_shader as _us
+            bg.shader = _us
+        except Exception as e:
+            logger.log('ERROR', f"_create_tray_tile bg shader {type(e).__name__}: {e}")
+        bg.color = color.rgba(50, 50, 60, 200)
+
         icon = Entity(
             parent=camera.ui,
             model='quad',
@@ -533,6 +701,13 @@ class LevelEditor(Entity):
             z=-0.7,
             eternal=True,
         )
+        icon.texture = None
+        try:
+            from ursina.shaders.unlit_shader import unlit_shader as _us
+            icon.shader = _us
+        except Exception as e:
+            logger.log('ERROR', f"_create_tray_tile icon shader {type(e).__name__}: {e}")
+        icon.color = asset_color
         label = Text(
             parent=camera.ui,
             text=asset['name'],
@@ -583,20 +758,32 @@ class LevelEditor(Entity):
         self._drag_ghost = None   # created lazily when mouse moves over viewport
 
     def _update_ghost(self):
-        """Move ghost to snapped hit position under cursor; create it if needed."""
+        """Move ghost to snapped hit position under cursor; create it if needed.
+
+        Only hide the ghost when the ray definitively misses all surfaces
+        (hovered is None). For partial/stale results (hovering the ghost
+        itself, a UI panel, or any editor-internal entity), keep the ghost
+        at its last position — toggling visibility every frame on these
+        intermittent results causes flicker.
+        """
         asset = self._drag_asset
         if asset is None:
             return
 
         hovered = mouse.hovered_entity
-        # Reject UI parents, the ghost itself, and any editor-internal entity
-        # (gizmo handles, spawn marker, etc.) that should not act as placement surfaces.
-        if (hovered is None
-                or hovered is self._drag_ghost
+
+        # Definitive miss — nothing under the cursor at all. Hide.
+        if hovered is None:
+            if self._drag_ghost is not None:
+                self._drag_ghost.visible = False
+            return
+
+        # Stale / invalid placement surface (ghost itself, UI, editor gizmo,
+        # spawn marker, etc.). Do not place here, but keep the existing
+        # ghost steady at its last good position — do not toggle visibility.
+        if (hovered is self._drag_ghost
                 or getattr(hovered, 'parent', None) is camera.ui
                 or (hovered.name and hovered.name.startswith('editor_'))):
-            if self._drag_ghost:
-                self._drag_ghost.visible = False
             return
 
         pos = list(hovered.position + mouse.normal)
@@ -710,21 +897,40 @@ class LevelEditor(Entity):
             (Vec3(0, shaft_len, 0), color.green, 'editor_gizmo_tip_y'),
             (Vec3(0, 0, shaft_len), color.blue,  'editor_gizmo_tip_z'),
         ]:
+            # FIXED: scale 0.12 → 0.24 (2× larger for easier clicking)
             tip = Entity(
                 parent=self._gizmo_root,
                 model='cube',
                 color=col,
-                scale=.12,
+                scale=.24,
                 position=offset,
                 name=gname,
                 collider='box',
                 eternal=True,
             )
-            # Always draw on top of scene geometry so handles are clickable
-            # even when they overlap another block.
+            # FIXED: bin 100 (was 40) + depth test/write off so handles always render
+            # on top of scene geometry and are clickable even when overlapped by blocks.
+            # Entity IS a NodePath (Ursina subclasses NodePath) — call setBin directly.
             tip.setDepthTest(False)
             tip.setDepthWrite(False)
-            tip.setBin('fixed', 40)
+            tip.setBin('fixed', 100)
+
+    def _cursor_ray(self):
+        """Return a world-space (origin, direction) ray through the mouse cursor.
+
+        Mirrors Ursina's own picker (mouse.update): lens.extrude with the cursor in
+        normalised film coords (mouse.x*2/aspect, mouse.y*2). Needed for gizmo picking —
+        camera.forward only rays through the screen centre, but the editor cursor is free,
+        so a screen-centre ray never tested where the user actually clicked.
+        """
+        from panda3d.core import Point2, Point3
+        near_p, far_p = Point3(), Point3()
+        camera.lens.extrude(
+            Point2(mouse.x * 2 / window.aspect_ratio, mouse.y * 2), near_p, far_p
+        )
+        origin = Vec3(*render.get_relative_point(camera, near_p))
+        far_w  = Vec3(*render.get_relative_point(camera, far_p))
+        return origin, (far_w - origin).normalized()
 
     def _update_gizmo(self):
         """Position gizmo at centroid of selection; hide when nothing selected or in play mode."""
@@ -808,21 +1014,37 @@ class LevelEditor(Entity):
                 logger.log('ERROR', f"_load_prefs {type(e).__name__}: {e}")
 
     def _save_prefs(self):
+        # FIXED: unguarded write failure silently dropped prefs and unwound Ctrl+S
         prefs = {
             'bookmarks': self._bookmarks,
             'grid_snap': self.grid_snap,
         }
-        with open('editor_prefs.json', 'w') as f:
-            json.dump(prefs, f, indent=4)
+        try:
+            with open('editor_prefs.json', 'w') as f:
+                json.dump(prefs, f, indent=4)
+        except Exception as e:
+            logger.log('ERROR', f"_save_prefs failed: {type(e).__name__}: {e}")
 
     # -------------------------------------------------------------------------
     # Play-in-editor
     # -------------------------------------------------------------------------
 
     def _build_level_data(self):
-        """Serialize current blocks and enemies to a list of dicts for save or play snapshot."""
+        """Serialize current blocks and enemies to a list of dicts for save or play snapshot.
+
+        Defensive filter: skip entities that have already been destroyed (destroy_source set).
+        Accessing .color on a dead NodePath raises an assertion in development_mode.
+        Drop dead refs from the live lists too so the editor state stays consistent.
+        """
         data = []
-        for block in self.blocks:
+        live_blocks = [b for b in self.blocks if getattr(b, 'destroy_source', None) is None]
+        live_enemies = [e for e in self.enemies if getattr(e, 'destroy_source', None) is None]
+        dropped = (len(self.blocks) - len(live_blocks)) + (len(self.enemies) - len(live_enemies))
+        if dropped:
+            logger.log('WARN', f'_build_level_data: dropped {dropped} destroyed entity refs')
+            self.blocks[:] = live_blocks
+            self.enemies[:] = live_enemies
+        for block in live_blocks:
             actual_color = getattr(block, '_original_color', block.color)
             tex_name = ''
             if hasattr(block, 'texture') and block.texture:
@@ -835,7 +1057,7 @@ class LevelEditor(Entity):
                 'rotation': [round(block.rotation_x, 2), round(block.rotation_y, 2), round(block.rotation_z, 2)],
                 'scale': [round(block.scale_x, 4), round(block.scale_y, 4), round(block.scale_z, 4)],
             })
-        for enemy in self.enemies:
+        for enemy in live_enemies:
             data.append({
                 'type': 'enemy',
                 'position': [enemy.x, enemy.y, enemy.z],
@@ -846,9 +1068,12 @@ class LevelEditor(Entity):
         return data
 
     def _set_editor_ui_visible(self, visible):
+        # FIXED (v1.2.4, BUG-4): also toggle the Move/Place buttons and the spawn marker —
+        # they previously stayed on screen during play-in-editor.
         for widget in [self._inspector, self._hier_panel, self._insp_title,
                        self.texture_button, self.snap_button,
-                       self.play_button, self._tray_panel]:
+                       self.play_button, self._move_button, self._place_button,
+                       self._tray_panel, self._spawn_marker]:
             if widget:
                 if getattr(widget, 'destroy_source', None) is not None:
                     logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed widget {widget}')
@@ -877,6 +1102,10 @@ class LevelEditor(Entity):
                                        self._editor_camera.rotation_z)
         self._set_editor_ui_visible(False)
         self._gizmo_root.enabled = False
+        # Disable EditorCamera so it stops driving camera position/rotation.
+        # FirstPersonController's __init__ sets camera.parent = self, taking over.
+        if self._editor_camera:
+            self._editor_camera.enabled = False
         self._play_mode = True
         self._spawn_gameplay_from_snapshot(self._play_level_snapshot)
         mouse.locked = True
@@ -905,6 +1134,9 @@ class LevelEditor(Entity):
         self._update_gizmo()
         mouse.locked = False
         mouse.visible = True
+        # Re-enable EditorCamera; on_enable reparents camera back to the editor rig.
+        if self._editor_camera:
+            self._editor_camera.enabled = True
         if self._saved_cam_pos is not None and self._editor_camera:
             self._editor_camera.position = self._saved_cam_pos
             self._editor_camera.rotation_x = self._saved_cam_rot.x
@@ -929,29 +1161,29 @@ class LevelEditor(Entity):
         self.enemies.clear()
         self.selected.clear()
 
-        for entry in self._play_level_snapshot:
+        for entry in load_level_data(self._play_level_snapshot):
             if entry['type'] == 'enemy':
                 new_entity = Entity(
                     model='cube',
                     color=color.red,
                     scale=(1.5, 3, 1.5),
                     position=tuple(entry['position']),
-                    rotation_y=entry.get('rotation_y', 0),
+                    rotation_y=entry['rotation_y'],
                     collider='box',
                     origin_y=-0.5,
                 )
-                new_entity.enemy_hp   = entry.get('hp', 100)
-                new_entity.enemy_type = entry.get('enemy_type', 'default')
+                new_entity.enemy_hp   = entry['hp']
+                new_entity.enemy_type = entry['enemy_type']
                 new_entity._original_color = color.red
                 self.enemies.append(new_entity)
             else:
                 new_entity = Entity(
                     model='cube',
-                    texture=entry.get('texture', 'white_cube'),
+                    texture=entry['texture'],
                     position=tuple(entry['position']),
-                    rotation=tuple(entry.get('rotation', [0, 0, 0])),
-                    scale=tuple(entry.get('scale', [1, 1, 1])),
-                    color=color.rgb(*[int(c * 255) for c in entry.get('colour', [1, 1, 1])]),
+                    rotation=tuple(entry['rotation']),
+                    scale=tuple(entry['scale']),
+                    color=color.rgb(*entry['colour']),
                     collider='box',
                 )
                 new_entity._original_color = new_entity.color
@@ -965,28 +1197,31 @@ class LevelEditor(Entity):
         from Scripts.enemy import Enemy
         from Scripts.game import game
 
-        for entry in level_data:
+        entries = load_level_data(level_data)
+
+        for entry in entries:
             if entry['type'] == 'block':
                 Entity(
                     model='cube',
                     collider='box',
-                    texture=entry.get('texture', 'white_cube'),
-                    position=entry['position'],
-                    color=color.rgb(*[int(c * 255) for c in entry.get('colour', [1, 1, 1])]),
-                    rotation=tuple(entry.get('rotation', [0, 0, 0])),
+                    texture=entry['texture'],
+                    position=tuple(entry['position']),
+                    color=color.rgb(*entry['colour']),
+                    rotation=tuple(entry['rotation']),
+                    scale=tuple(entry['scale']),
                     name='level_block'
                 )
 
         game.player = Player(position=(0, 2, 0))
         game.enemies = []
-        for entry in level_data:
+        for entry in entries:
             if entry['type'] == 'enemy':
                 e = Enemy(
                     spawn_position=tuple(entry['position']),
                     player=game.player,
-                    hp=entry.get('hp', 100),
-                    enemy_type=entry.get('enemy_type', 'default'),
-                    rotation_y=entry.get('rotation_y', 0),
+                    hp=entry['hp'],
+                    enemy_type=entry['enemy_type'],
+                    rotation_y=entry['rotation_y'],
                 )
                 game.enemies.append(e)
         game.start()
@@ -1068,7 +1303,9 @@ class LevelEditor(Entity):
 
         # Camera bookmarks — recall (only when not in a control combo)
         if not held_keys['control']:
-            if isinstance(getattr(scene, 'focused_entity', None), InputField):
+            # FIXED: scene.focused_entity is never set by Ursina — bookmark keys fired
+            # while typing numbers in inspector fields. Check InputField.active instead.
+            if any(f.active for f in self._insp_fields.values()):
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -1098,14 +1335,7 @@ class LevelEditor(Entity):
             self._cancel_drag()
             return
 
-        # Asset tray: begin drag on left mouse down over a tile
-        if key == 'left mouse down':
-            tile_asset = self._tile_at_mouse()
-            if tile_asset is not None:
-                self._drag_origin = Vec2(mouse.x, mouse.y)
-                self._dragging = True
-                self._begin_drag(tile_asset)
-                return
+        # Tray drag begin is now folded into the unified left mouse down block below.
 
         # Commit or cancel drag on left mouse up
         if key == 'left mouse up' and self._dragging:
@@ -1119,24 +1349,35 @@ class LevelEditor(Entity):
                 self._commit_drag()
             return
 
-        # Place / select with left mouse (only when not dragging from tray)
+        # Unified left mouse down handler: tray drag → gizmo → panels → tool action
+        # FIXED: merged two separate 'left mouse down' blocks (was audit DEBT item #12).
+        # FIXED (FIX 1B): gizmo hit check is now step 1 — before panels and drag guard.
         if key == 'left mouse down':
-            # Guard: ignore clicks while a gizmo drag or box-select is in progress
-            if self._gizmo_drag_axis is not None or self._box_selecting:
+            # Step 0: tray drag begin — must stay first so tile clicks don't fall through
+            tile_asset = self._tile_at_mouse()
+            if tile_asset is not None:
+                self._drag_origin = Vec2(mouse.x, mouse.y)
+                self._dragging = True
+                self._begin_drag(tile_asset)
                 return
 
-            # Gizmo handles use setDepthTest(False) so they render on top, but the
-            # pick ray still hits whatever geometry is behind them.  Explicitly raycast
-            # against known gizmo handle names so a click that visually lands on a
-            # handle is consumed before the scene-selection branch runs.
-            if self._gizmo_root and self._gizmo_root.enabled:
+            # Step 1: gizmo handle hit — raycast against tip cubes BEFORE any panel check.
+            # setDepthTest(False)/setBin(100) make handles visible through blocks, but the
+            # pick ray still hits geometry behind them; explicit raycast takes priority.
+            if self._gizmo_root and self._gizmo_root.enabled and self._gizmo_drag_axis is None:
                 _axis_map = {
                     'editor_gizmo_tip_x': 'x',
                     'editor_gizmo_tip_y': 'y',
                     'editor_gizmo_tip_z': 'z',
                 }
-                _hit = raycast(camera.world_position,
-                               camera.forward,
+                # FIXED (v1.2.4, FIX 1B): pick through the MOUSE CURSOR, not camera.forward.
+                # camera.forward rays through the screen centre, but the editor cursor is
+                # free, so the old ray never tested where the user actually clicked — the
+                # gizmo could not be grabbed. Ignoring every non-tip entity lets the handle
+                # win even when a block overlaps it on screen (verified against a block-in-front).
+                _origin, _direction = self._cursor_ray()
+                _hit = raycast(_origin,
+                               _direction,
                                distance=200,
                                ignore=[e for e in scene.entities
                                        if not e.name.startswith('editor_gizmo_tip')])
@@ -1146,26 +1387,27 @@ class LevelEditor(Entity):
                     self._gizmo_drag_start_pos = {e: Vec3(e.position) for e in self.selected}
                     return
 
+            # Step 2: panel guards — _is_over_panel uses mouse.x/y, no hovered needed.
+            # Buttons inside panels are grandchildren of camera.ui; _is_over_panel is
+            # more reliable than checking hovered.parent for nested widgets.
+            if self._hier_panel and self._is_over_panel(self._hier_panel):
+                return
+            if self._inspector and self._is_over_panel(self._inspector):
+                return
+
             hovered = mouse.hovered_entity
 
-            # Skip if cursor is over any editor panel (hierarchy or inspector).
-            # Buttons inside panels are grandchildren of camera.ui, so checking
-            # hovered.parent == camera.ui would miss them — use _is_over_panel instead.
-            if (self._hier_panel and self._is_over_panel(self._hier_panel)):
-                return
-            if (self._inspector and self._is_over_panel(self._inspector)):
-                return
-
             # Skip direct camera.ui children (toolbar buttons, tray panel, etc.)
-            if hovered and getattr(hovered, 'parent', None) == camera.ui:
+            if hovered and getattr(hovered, 'parent', None) is camera.ui:
                 return
 
-            # Gizmo drag is handled in _handle_gizmo_drag(); skip placement if on gizmo
-            if hovered and hovered.name.startswith('editor_gizmo'):
+            # Step 3: active drag or box-select guard (after gizmo and panel steps)
+            if self._gizmo_drag_axis is not None or self._box_selecting:
                 return
 
+            # Step 4/5: selection (shift) or tool-mode action
             if held_keys['shift']:
-                # Shift+click: add/remove from selection
+                # Shift+click: add/remove from selection — same in both tool modes
                 if hovered in (self.blocks + self.enemies):
                     if hovered in self.selected:
                         self.selected.discard(hovered)
@@ -1175,26 +1417,25 @@ class LevelEditor(Entity):
                     else:
                         self._select(hovered, additive=True)
                 elif hovered and hovered.collider:
-                    # shift-click on a non-tracked surface (e.g. ground) — no-op
-                    pass
+                    pass  # shift-click on non-tracked surface (e.g. ground) — no-op
                 else:
                     self._deselect_all()
-            else:
-                # Priority: clicking an entity selects it
+            elif self._tool == 'move':
+                # FIXED (FIX 3 Move mode): select/deselect entities; clicking a surface
+                # never places a new block in Move mode.
                 if hovered in (self.blocks + self.enemies):
                     self._select(hovered)
                     return
-
-                # Priority: first click on empty space when something is selected = deselect only
                 if self.selected:
                     self._deselect_all()
                     return
-
-                # Nothing selected and clicking a collidable surface = place new block
-                if hovered and hovered.collider:
+            else:
+                # FIXED (FIX 3 Place mode): left-click on any collidable non-editor
+                # surface places a new block from the current texture. Shift+click
+                # (handled above) selects without placing.
+                if hovered and hovered.collider and not getattr(hovered, 'name', '').startswith('editor_'):
                     position = hovered.position + mouse.normal
                     position = self._snap(position)
-
                     new_entity = Entity(
                         model='cube',
                         texture=self.current_texture,
@@ -1251,6 +1492,8 @@ class LevelEditor(Entity):
     # Position validity
     # -------------------------------------------------------------------------
 
+    # DEBT (pre-existing): position_valid() is never called. Left in place per surgical-change
+    # rule; remove if a placement-overlap guard is wired in. See docs/audit_v1.2.3.md Deferred.
     def position_valid(self, position):
         for y_offset in [0, 1]:
             check_pos = (position[0], position[1] + y_offset, position[2])
@@ -1289,36 +1532,35 @@ class LevelEditor(Entity):
         self.selected.clear()
 
         try:
-            with open(self.filename, 'r') as f:
-                entities = json.load(f)
-            for entity_data in entities:
-                if entity_data.get('type') == 'enemy':
+            entries = load_level_data(self.filename)
+            for entry in entries:
+                if entry['type'] == 'enemy':
                     new_entity = Entity(
                         model='cube',
                         color=color.red,
                         scale=(1.5, 3, 1.5),
-                        position=entity_data['position'],
-                        rotation_y=entity_data.get('rotation_y', 0),
+                        position=tuple(entry['position']),
+                        rotation_y=entry['rotation_y'],
                         collider='box',
                         origin_y=-0.5
                     )
-                    new_entity.enemy_hp   = entity_data.get('hp', 100)
-                    new_entity.enemy_type = entity_data.get('enemy_type', 'default')
+                    new_entity.enemy_hp   = entry['hp']
+                    new_entity.enemy_type = entry['enemy_type']
                     new_entity._original_color = color.red
                     self.enemies.append(new_entity)
                 else:
                     new_entity = Entity(
                         model='cube',
-                        texture=entity_data.get('texture', 'white_cube'),
-                        position=entity_data['position'],
-                        rotation=tuple(entity_data.get('rotation', [0, 0, 0])),
-                        scale=tuple(entity_data.get('scale', [1, 1, 1])),
-                        color=color.rgb(*[int(c * 255) for c in entity_data.get('colour', [1, 1, 1])]),
+                        texture=entry['texture'],
+                        position=tuple(entry['position']),
+                        rotation=tuple(entry['rotation']),
+                        scale=tuple(entry['scale']),
+                        color=color.rgb(*entry['colour']),
                         collider='box'
                     )
                     new_entity._original_color = new_entity.color
                     self.blocks.append(new_entity)
-            logger.log('INFO', f"Level loaded: {os.path.abspath(self.filename)} ({len(entities)} entries)")
+            logger.log('INFO', f"Level loaded: {os.path.abspath(self.filename)} ({len(entries)} entries)")
         except FileNotFoundError:
             logger.log('INFO', f"Level file not found: {self.filename} — starting empty")
             print("No level file found")
@@ -1480,6 +1722,16 @@ if __name__ == '__main__':
     _patch_shaders_to_glsl120()
     app = Ursina(title="Level Editor")
 
+    # Ursina's HotReloader binds F5 to scene.clear() + reload. That fires BEFORE
+    # LevelEditor.input('f5'), wiping self.blocks/self.enemies and making the
+    # snapshot read destroyed entities. Disable it — we use F5 for play-in-editor.
+    try:
+        from ursina import application as _ursina_app
+        if getattr(_ursina_app, 'hot_reloader', None) is not None:
+            _ursina_app.hot_reloader.enabled = False
+    except Exception as e:
+        logger.log('WARN', f'hot_reloader disable failed: {type(e).__name__}: {e}')
+
     window.color = color.rgb(50, 50, 60)
     render.setAntialias(AntialiasAttrib.MAuto)
     render2d.setAntialias(AntialiasAttrib.MAuto)
@@ -1503,7 +1755,7 @@ if __name__ == '__main__':
     editor_cam = EditorCamera()
     editor._editor_camera = editor_cam
 
-    Text(
+    editor._hint_text = Text(
         text="Drag tile from tray: Place block/enemy | Shift+LClick: Select | RDrag: Box-select\n"
              "Delete: Remove selected | Ctrl+Z: Undo | Ctrl+Y/Shift+Z: Redo | Esc: Cancel drag\n"
              "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor | Scroll over tray: scroll tiles\n"
@@ -1515,5 +1767,6 @@ if __name__ == '__main__':
         z=-1,
         eternal=True,
     )
+    editor._apply_layout()
 
     app.run()
