@@ -7,6 +7,7 @@ from ursina.prefabs.editor_camera import EditorCamera
 from panda3d.core import loadPrcFileData, AntialiasAttrib
 import json
 import os
+import time as _time   # wall-clock for double-click timing (ursina `time` is Panda3D's clock)
 
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
@@ -15,6 +16,7 @@ from Scripts.undo_redo import (
 )
 from Scripts.session_logger import SessionLogger
 from Scripts.level_io import load_level_data
+from Scripts.asset_registry import asset_registry
 
 logger = SessionLogger()
 
@@ -96,6 +98,23 @@ class LevelEditor(Entity):
         # Asset tray scroll offset (number of tile widths shifted left)
         self._tray_scroll = 0
 
+        # Asset browser (read-only, v1.3 Step 2) — panel/tab/card state.
+        # Apply logic (double-click → apply), hot-reload, and drag-drop are later steps.
+        self._browser_panel = None
+        self._browser_tab = 'texture'          # active tab: 'texture' | 'model' | 'sound'
+        self._browser_tab_buttons = {}         # {category: Button}
+        self._browser_cards = {}               # {category: list[(bg, icon, label, name)]}
+        self._browser_empty_labels = {}        # {category: Text} shown when a category is empty
+        self._browser_scroll = {'texture': 0, 'model': 0, 'sound': 0}
+        self._selected_asset = None            # (category, name) of the highlighted card
+        self._browser_last_click = (None, 0.0)  # ((category, name), wall-clock t) for dbl-click
+
+        # Texture hot-reload (v1.3 Step 3). subscribe_texture()/unsubscribe_texture()
+        # are the hooks Step 4 (texture picker) calls to wire blocks into live reload.
+        self._texture_subscribers = {}   # {texture_name: [entity, ...]}
+        # Reusable bottom-of-screen toast (created lazily by _show_status_notice).
+        self._status_notice = None
+
         # Build toolbar buttons
         # DEBT (deferred to docs/audit_v1.2.3.md): editor UI chrome below (button/panel/tray
         # colours) still passes 0–255 values to color.rgb/rgba, which clamp to white/full.
@@ -175,6 +194,7 @@ class LevelEditor(Entity):
         self._build_hierarchy()
         self._build_gizmo()
         self._build_asset_tray()
+        self._build_asset_browser()
 
         self._spawn_marker = Entity(
             name='editor_player_spawn',
@@ -214,6 +234,14 @@ class LevelEditor(Entity):
             except Exception as e:
                 logger.log('ERROR', f"_on_resize _apply_layout {type(e).__name__}: {e}")
         window.on_resize = _on_resize
+
+        # Asset hot-reload (v1.3 Step 3). Register callbacks BEFORE the first poll.
+        # Texture is the only category with live-reload logic; model/sound just log
+        # (per spec — models are flagged dirty for next placement, not live-replaced).
+        asset_registry.register_callback('texture', self._on_texture_changed)
+        asset_registry.register_callback('model', self._on_model_changed)
+        asset_registry.register_callback('sound', self._on_sound_changed)
+        self._poll_assets()
 
     # -------------------------------------------------------------------------
     # Layout (border-anchored UI repositioning on window resize)
@@ -262,6 +290,14 @@ class LevelEditor(Entity):
             self._tray_panel.y = self._TRAY_Y
             self._tray_panel.scale_x = aspect
             self._tray_panel.scale_y = self._TRAY_H
+
+        # Asset browser — full-width strip just above the tray; cards/tabs are
+        # centred about x=0 so only the panel quad's width tracks aspect.
+        if self._browser_panel is not None:
+            self._browser_panel.x = 0
+            self._browser_panel.y = self._BROWSER_Y
+            self._browser_panel.scale_x = aspect
+            self._browser_panel.scale_y = self._BROWSER_H
 
         # Toolbar buttons — stacked top-right, just left of the inspector
         toolbar_x = half_w - insp_w - btn_w * 0.5 - 0.01
@@ -731,6 +767,10 @@ class LevelEditor(Entity):
         my = mouse.y
         return (self._TRAY_Y - self._TRAY_H * 0.5) <= my <= (self._TRAY_Y + self._TRAY_H * 0.5)
 
+    def _is_over_browser(self):
+        my = mouse.y
+        return (self._BROWSER_Y - self._BROWSER_H * 0.5) <= my <= (self._BROWSER_Y + self._BROWSER_H * 0.5)
+
     def _tile_at_mouse(self):
         """Return asset dict for the tile the mouse is over, or None."""
         mx, my = mouse.x, mouse.y
@@ -752,6 +792,346 @@ class LevelEditor(Entity):
             mx, my = mouse.x, mouse.y
             hovered = (tx - hw) <= mx <= (tx + hw) and (self._TRAY_Y - hw) <= my <= (self._TRAY_Y + hw)
             bg.color = color.rgba(80, 80, 100, 220) if hovered else color.rgba(50, 50, 60, 200)
+
+    # -------------------------------------------------------------------------
+    # Asset browser (read-only — v1.3 Step 2)
+    #
+    # Three tabs (Textures | Models | Sounds) over a horizontally scrollable row
+    # of 64x64 thumbnail cards sourced from asset_registry. Click selects a card;
+    # double-click only logs a placeholder (apply lands in a later v1.3 step).
+    # Hot-reload (Step 3), apply-to-entity (Steps 4-5) and drag-drop (Step 6) are
+    # intentionally NOT implemented here.
+    # -------------------------------------------------------------------------
+
+    # Browser layout constants (camera.ui units). Sits just above the v1.2 tray.
+    _BROWSER_Y      = -0.275   # centre y of the browser panel
+    _BROWSER_H      =  0.15    # panel height
+    _CARD_SIZE      =  0.085   # 64x64-ish card on a 720px-tall window (64/720 ~= 0.089)
+    _CARD_PITCH     =  0.105   # card-to-card horizontal spacing
+    _CARD_Y         = -0.275   # centre y of the card row
+    _TAB_Y          = -0.215   # y of the tab buttons (top of the panel)
+    _BROWSER_CATEGORIES = ('texture', 'model', 'sound')
+    # FIXED (Item 8): named the double-click window (was a bare 0.4 literal in
+    # _handle_browser_click) so the next step's maintainer can find/tune it.
+    _DOUBLE_CLICK_SEC = 0.4    # max wall-clock gap between the two clicks of a double-click
+
+    def _build_asset_browser(self):
+        """Build the read-only asset browser panel, tabs, and per-category card rows."""
+        # Reflect current disk state at editor startup (Step 2 spec point 8).
+        try:
+            asset_registry.rebuild()
+        except Exception as e:
+            logger.log('ERROR', f"_build_asset_browser rebuild {type(e).__name__}: {e}")
+
+        self._browser_panel = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(20, 20, 26, 220),
+            scale=(2.0, self._BROWSER_H),
+            position=(0, self._BROWSER_Y),
+            z=-0.5,
+            eternal=True,
+        )
+
+        tab_specs = (('texture', 'Textures'), ('model', 'Models'), ('sound', 'Sounds'))
+        for i, (category, label) in enumerate(tab_specs):
+            btn = Button(
+                parent=camera.ui,
+                text=label,
+                scale=(0.12, 0.035),
+                position=(-0.20 + i * 0.13, self._TAB_Y),
+                text_scale=0.85,
+                z=-0.7,
+                eternal=True,
+            )
+            btn.on_click = lambda c=category: self._set_browser_tab(c)
+            self._browser_tab_buttons[category] = btn
+
+        for category in self._BROWSER_CATEGORIES:
+            self._build_browser_cards(category)
+
+        self._set_browser_tab('texture')   # default tab (spec point 3)
+
+    def _browser_manifest(self, category):
+        """Return the {name: path} manifest dict for a browser category."""
+        return {
+            'texture': asset_registry.textures,
+            'model':   asset_registry.models,
+            'sound':   asset_registry.sounds,
+        }[category]
+
+    def _build_browser_cards(self, category):
+        """Build (and remember) the card row + empty-state label for one category."""
+        manifest = self._browser_manifest(category)
+        cards = []
+        for index, (name, path) in enumerate(sorted(manifest.items())):
+            cards.append(self._create_browser_card(category, index, name, path))
+        self._browser_cards[category] = cards
+
+        empty = {'texture': 'No textures found',
+                 'model':   'No models found',
+                 'sound':   'No sounds found'}[category]
+        self._browser_empty_labels[category] = Text(
+            parent=camera.ui,
+            text=empty,
+            position=(0, self._CARD_Y),
+            origin=(0, 0),
+            scale=0.85,
+            color=color.light_gray,
+            z=-0.7,
+            eternal=True,
+        )
+
+    def _create_browser_card(self, category, index, name, path):
+        """Create one thumbnail card (bg quad + icon + name label). Returns the tuple."""
+        cx = self._card_x(index)
+        bg = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=color.rgba(50, 50, 60, 200),
+            scale=(self._CARD_SIZE, self._CARD_SIZE),
+            position=(cx, self._CARD_Y),
+            z=-0.6,
+            eternal=True,
+        )
+
+        icon = Entity(
+            parent=camera.ui,
+            model='quad',
+            scale=(self._CARD_SIZE * 0.78, self._CARD_SIZE * 0.78),
+            position=(cx, self._CARD_Y + 0.008),
+            z=-0.7,
+            eternal=True,
+        )
+        try:
+            from ursina.shaders.unlit_shader import unlit_shader as _us
+            icon.shader = _us
+        except Exception as e:
+            logger.log('ERROR', f"_create_browser_card icon shader {type(e).__name__}: {e}")
+
+        if category == 'texture':
+            # Texture cards show the actual image (spec point 4).
+            try:
+                icon.texture = path
+                icon.color = color.white
+                # Auto-subscribe the card's icon so it hot-reloads (Step 3). This
+                # is the first testable proof of the reload mechanism without the
+                # Step 4 texture picker.
+                self.subscribe_texture(name, icon)
+            except Exception as e:
+                logger.log('ERROR', f"_create_browser_card texture {name} {type(e).__name__}: {e}")
+                icon.texture = None
+                icon.color = color.magenta
+        elif category == 'model':
+            # Placeholder cube icon — live 3D thumbnails deferred (spec point 4).
+            icon.texture = None
+            icon.color = color.rgba(120, 140, 170, 255)
+        else:
+            # Generic speaker/audio glyph for sounds.
+            icon.texture = None
+            icon.color = color.rgba(150, 150, 90, 255)
+            Text(parent=icon, text='\U0001F50A', origin=(0, 0), scale=4, z=-1,
+                 color=color.white, eternal=True)
+
+        label = Text(
+            parent=camera.ui,
+            text=name,
+            position=(cx, self._CARD_Y - self._CARD_SIZE * 0.62),
+            origin=(0, 0),
+            scale=0.5,
+            color=color.light_gray,
+            z=-0.7,
+            eternal=True,
+        )
+        return (bg, icon, label, name)
+
+    def _card_x(self, index):
+        """Camera.ui x of a card centre at the given index for the active tab."""
+        first_x = -0.20
+        return first_x + index * self._CARD_PITCH - self._browser_scroll[self._browser_tab] * self._CARD_PITCH
+
+    def _refresh_browser_card_positions(self):
+        """Reposition the active tab's cards to reflect the current scroll offset."""
+        for index, (bg, icon, label, name) in enumerate(self._browser_cards.get(self._browser_tab, [])):
+            cx = self._card_x(index)
+            bg.x = cx
+            icon.x = cx
+            label.x = cx
+
+    def _set_browser_tab(self, category):
+        """Switch the active tab: show that category's cards, hide the others."""
+        self._browser_tab = category
+        for cat in self._BROWSER_CATEGORIES:
+            cards = self._browser_cards.get(cat, [])
+            visible = (cat == category)
+            for bg, icon, label, name in cards:
+                bg.enabled = visible
+                icon.enabled = visible
+                label.enabled = visible
+            empty_label = self._browser_empty_labels.get(cat)
+            if empty_label:
+                empty_label.enabled = visible and not cards
+        # Tab button highlight
+        for cat, btn in self._browser_tab_buttons.items():
+            btn.color = color.azure if cat == category else color.dark_gray
+        self._refresh_browser_card_positions()
+        self._apply_browser_selection_highlight()
+
+    def _apply_browser_selection_highlight(self):
+        """Tint the selected card's background; reset all others on the active tab."""
+        for bg, icon, label, name in self._browser_cards.get(self._browser_tab, []):
+            selected = self._selected_asset == (self._browser_tab, name)
+            bg.color = color.rgba(90, 130, 200, 230) if selected else color.rgba(50, 50, 60, 200)
+
+    def _card_at_mouse(self):
+        """Return (category, name) for the card under the cursor on the active tab, or None."""
+        if self._browser_panel is None or not self._browser_panel.enabled:
+            return None
+        mx, my = mouse.x, mouse.y
+        hh = self._CARD_SIZE * 0.5
+        for index, (bg, icon, label, name) in enumerate(self._browser_cards.get(self._browser_tab, [])):
+            cx = self._card_x(index)
+            if (cx - hh) <= mx <= (cx + hh) and (self._CARD_Y - hh) <= my <= (self._CARD_Y + hh):
+                return (self._browser_tab, name)
+        return None
+
+    def _handle_browser_click(self):
+        """Click selects a card; a second click within 0.4s on the same card is a double-click.
+
+        Returns True if the click landed on a card (so the caller can stop routing it).
+        """
+        target = self._card_at_mouse()
+        if target is None:
+            return False
+
+        now = _time.time()
+        last_target, last_t = self._browser_last_click
+        is_double = (target == last_target) and (now - last_t) <= self._DOUBLE_CLICK_SEC
+
+        self._selected_asset = target
+        self._apply_browser_selection_highlight()
+
+        if is_double:
+            category, name = target
+            # FIXED (Item 3): reset the click tracker after firing a double-click so a
+            # rapid triple-click does not register the 3rd click as a second double-click.
+            self._browser_last_click = (None, 0.0)
+            # Apply not yet implemented — hook point for the next v1.3 step.
+            logger.log('INFO', f"Asset double-clicked: {category}/{name} (apply not yet implemented)")
+        else:
+            self._browser_last_click = (target, now)
+        return True
+
+    # -------------------------------------------------------------------------
+    # Asset hot-reload (v1.3 Step 3)
+    #
+    # asset_registry.poll() (driven by _poll_assets on a 2s invoke timer) fires
+    # the registered callbacks below when a tracked file's mtime changes. Only
+    # textures live-reload; model/sound callbacks log at INFO (per spec).
+    #
+    # subscribe_texture()/unsubscribe_texture() are the hook points for Step 4
+    # (the texture picker): it registers each block under the texture name it
+    # applies, and _on_texture_changed re-uploads the new image to every
+    # subscriber. The browser's own thumbnail cards auto-subscribe in
+    # _create_browser_card, which is what makes hot-reload testable in this step.
+    # -------------------------------------------------------------------------
+
+    def _poll_assets(self):
+        """Poll the asset registry for on-disk changes every 2s; re-arm the timer.
+
+        Hot-reload is fully disabled while play-in-editor is active — the game
+        simulation owns those assets. Play-in-editor is tracked by the editor-
+        local self._play_mode flag (set in _enter_play_mode/_exit_play_mode);
+        the editor never sets game.state to PLAYING, so that is the right flag.
+        """
+        if self._play_mode:
+            invoke(self._poll_assets, delay=2)
+            return
+        asset_registry.poll()
+        invoke(self._poll_assets, delay=2)
+
+    def subscribe_texture(self, name, entity):
+        """Register `entity` to receive live texture updates for texture `name`.
+
+        Step 4 (texture picker) calls this when a texture is applied to a block.
+        """
+        self._texture_subscribers.setdefault(name, [])
+        if entity not in self._texture_subscribers[name]:
+            self._texture_subscribers[name].append(entity)
+
+    def unsubscribe_texture(self, name, entity):
+        """Stop sending live texture updates for `name` to `entity`.
+
+        Step 4 calls this when a block's texture is changed/removed.
+        """
+        if name in self._texture_subscribers:
+            if entity in self._texture_subscribers[name]:
+                self._texture_subscribers[name].remove(entity)
+
+    def _on_texture_changed(self, name, path):
+        """Re-upload a changed texture from disk and push it to every subscriber."""
+        try:
+            # Force a fresh disk read. Ursina's texture setter does value._texture
+            # on non-string values, so a raw loader.loadTexture() (a Panda3D
+            # Texture with no ._texture) would crash — wrap in ursina.Texture.
+            # .reload() re-reads the file into the (pooled) handle, bypassing any
+            # stale cached upload.
+            fresh = Texture(Path(path))
+            fresh._texture.reload()
+            updated = 0
+            for entity in list(self._texture_subscribers.get(name, [])):
+                if getattr(entity, 'destroy_source', None) is not None:
+                    continue   # dead entity guard — don't touch destroyed refs
+                entity.texture = fresh
+                updated += 1
+            self._show_status_notice(f'Texture reloaded: {name}')
+            logger.log('INFO', f'Texture hot-reload: {name} ({updated} entities updated)')
+        except Exception as e:
+            logger.log('ERROR', f'_on_texture_changed: {type(e).__name__}: {e}')
+
+    def _on_model_changed(self, name, path):
+        """Model live-reload is not implemented (per spec) — log only."""
+        logger.log('INFO', f'Model changed on disk: {name} (live reload not implemented)')
+
+    def _on_sound_changed(self, name, path):
+        """Sound live-reload is not implemented (per spec) — log only."""
+        logger.log('INFO', f'Sound changed on disk: {name} (live reload not implemented)')
+
+    def _show_status_notice(self, text, duration=2.0):
+        """Show a single reusable bottom-of-screen toast; reset its timer if re-shown.
+
+        Created once and reused (not per-call). Reused by drag-and-drop (Step 6)
+        for its success/error toast, so it's built generically here. A re-show
+        before the previous timer expires just updates the text and restarts the
+        timer — notices never stack.
+        """
+        if self._status_notice is None:
+            self._status_notice = Text(
+                text='',
+                parent=camera.ui,
+                origin=(0, 0),
+                # Just below the asset browser strip (centre y -0.275, half-height
+                # 0.075 → bottom edge -0.35), clear of the browser and tray.
+                position=(0, -0.40),
+                scale=0.9,
+                color=color.white,
+                z=-1,
+                eternal=True,
+            )
+        self._status_notice.text = text
+        self._status_notice.enabled = True
+        # Monotonically rising token: only the latest timer is allowed to hide the
+        # notice, so a rapid re-show doesn't get cut short by an earlier timer.
+        self._status_notice_token = getattr(self, '_status_notice_token', 0) + 1
+        token = self._status_notice_token
+        invoke(self._hide_status_notice, token, delay=duration)
+
+    def _hide_status_notice(self, token):
+        """Hide the toast only if no newer notice has been shown since `token`."""
+        if token != getattr(self, '_status_notice_token', 0):
+            return
+        if self._status_notice is not None and getattr(self._status_notice, 'destroy_source', None) is None:
+            self._status_notice.enabled = False
 
     def _begin_drag(self, asset):
         self._drag_asset = asset
@@ -1086,6 +1466,25 @@ class LevelEditor(Entity):
                     continue
                 e.enabled = visible
 
+        # Asset browser (panel + tab buttons). Card / empty-label visibility is
+        # delegated to _set_browser_tab so only the active tab shows on restore.
+        browser_widgets = [self._browser_panel] + list(self._browser_tab_buttons.values())
+        for widget in browser_widgets:
+            if widget:
+                if getattr(widget, 'destroy_source', None) is not None:
+                    logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed browser widget {widget}')
+                    continue
+                widget.enabled = visible
+        if visible:
+            self._set_browser_tab(self._browser_tab)
+        else:
+            for cards in self._browser_cards.values():
+                for bg, icon, label, name in cards:
+                    bg.enabled = icon.enabled = label.enabled = False
+            for empty_label in self._browser_empty_labels.values():
+                if empty_label:
+                    empty_label.enabled = False
+
     def toggle_play(self):
         if self._play_mode:
             self._exit_play_mode()
@@ -1395,6 +1794,14 @@ class LevelEditor(Entity):
             if self._inspector and self._is_over_panel(self._inspector):
                 return
 
+            # FIXED (Item 1): asset browser card click is a panel-class guard and must
+            # run with the other panels (AFTER the gizmo hit-test), not at Step 0b before
+            # it. A gizmo handle can render over the bottom browser strip; per the v1.2.4
+            # gizmo-fix priority chain the handle must win. Cards are camera.ui children,
+            # so this stays before the "skip direct camera.ui children" guard below.
+            if self._handle_browser_click():
+                return
+
             hovered = mouse.hovered_entity
 
             # Skip direct camera.ui children (toolbar buttons, tray panel, etc.)
@@ -1454,9 +1861,20 @@ class LevelEditor(Entity):
                 (self._hier_panel and self._is_over_panel(self._hier_panel))
                 or (self._inspector and self._is_over_panel(self._inspector))
                 or self._is_over_tray()
+                or self._is_over_browser()
             )
             if self._editor_camera:
                 self._editor_camera.zoom_speed = 0 if over_ui else 1.25
+
+            # Asset browser horizontal scroll — same panel-hover guard as the tray
+            if self._is_over_browser():
+                cards = self._browser_cards.get(self._browser_tab, [])
+                max_scroll = max(0, len(cards) - 1)
+                delta = -1 if key == 'scroll up' else 1
+                self._browser_scroll[self._browser_tab] = max(
+                    0, min(self._browser_scroll[self._browser_tab] + delta, max_scroll))
+                self._refresh_browser_card_positions()
+                return
 
             if self._hier_panel and self._is_over_panel(self._hier_panel):
                 total = len(self.blocks) + len(self.enemies)

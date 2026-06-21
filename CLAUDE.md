@@ -120,11 +120,38 @@ Scripts/
                              collidable non-editor surface places a new block; Shift+click selects.
                              Buttons [↖ Move] and [+ Place] in toolbar toggle _set_tool(mode).
                              _apply_layout() repositions border-anchored UI (hierarchy left,
-                             inspector right, tray bottom, toolbar top-right, hint top-left)
-                             from window.aspect_ratio; chained onto window.on_resize so the
-                             layout follows window size changes. Panel widths are constants
-                             (_LAYOUT_HIER_W/_LAYOUT_INSP_W/_LAYOUT_PANEL_H); children of each
-                             panel use panel-local space and inherit the move automatically.
+                             inspector right, tray bottom, asset-browser above-tray, toolbar
+                             top-right, hint top-left) from window.aspect_ratio; chained onto
+                             window.on_resize so the layout follows window size changes. Panel
+                             widths are constants (_LAYOUT_HIER_W/_LAYOUT_INSP_W/_LAYOUT_PANEL_H);
+                             children of each panel use panel-local space and inherit the move
+                             automatically.
+                             **Asset browser (v1.3 Step 2 — READ-ONLY):** _build_asset_browser()
+                             renders a full-width strip just above the v1.2 tray (centre y
+                             _BROWSER_Y=-0.275, _BROWSER_H=0.15; parent=camera.ui, eternal=True).
+                             Three tabs (Textures|Models|Sounds via _set_browser_tab; default
+                             Textures) over a horizontally scrollable row of ~64px cards built
+                             from `asset_registry` (rebuild() called once at panel construction).
+                             Texture cards show the real image; model cards a placeholder cube
+                             tint; sound cards a speaker glyph. Empty category → "No X found"
+                             label, not a blank grid. Click highlights + sets self._selected_asset
+                             =(category,name); double-click (≤ _DOUBLE_CLICK_SEC=0.4s, wall-clock
+                             via `import time as _time`) only logs "Asset double-clicked: …(apply
+                             not yet implemented)" — the hook point for the next step. The
+                             double-click tracker (_browser_last_click) is reset to (None,0.0)
+                             after a double-click fires, so a rapid triple-click does NOT register
+                             the 3rd click as a second double-click. Card-click handling
+                             (_handle_browser_click) runs in the left-mouse-down chain as a
+                             PANEL-class guard — AFTER the gizmo hit-test, alongside the
+                             hierarchy/inspector guards, and BEFORE the "skip direct camera.ui
+                             children" guard (cards are camera.ui children). A gizmo handle
+                             overlapping the bottom strip therefore wins the click. Scroll over the
+                             panel scrolls its row and suppresses EditorCamera zoom (y-only
+                             _is_over_browser() guard, matching the full-width tray's _is_over_tray()
+                             — not the x+y _is_over_panel() used for the side panels). Hidden
+                             (enabled=False), not destroyed, during F5 play mode via
+                             _set_editor_ui_visible; restore re-shows only the active tab. NO apply /
+                             hot-reload / drag-drop yet — those land in later v1.3 steps (4–6).
                              _patch_shaders_to_glsl120() duplicated here for standalone runs
                              (compat.py extraction still TODO).
                              _exit_play_mode: sets game.state=MAIN_MENU before try block;
@@ -151,6 +178,19 @@ Scripts/
                              Single source of truth — replaces 4 duplicate parsers in main.py
                              and level_editor.py. Owns parsing only; Entity construction stays
                              at call sites (placeholder vs editor entity vs real Enemy/Player).
+  asset_registry.py        — v1.3 asset pipeline Step 1. Pure I/O layer, ZERO framework
+                             dependencies (no Ursina, no Panda3D, no main/level_editor imports).
+                             AssetRegistry scans assets/textures|models|sounds → {name: path}
+                             manifests (self.textures/models/sounds); persists assets/manifest.json
+                             on every rebuild(). Startup loads from manifest.json cache when recorded
+                             mtimes still match disk (skips full rescan), else rebuilds.
+                             get_texture_path/get_model_path/get_sound_path(name) -> str|None.
+                             register_callback(category, fn) + poll() drive hot-reload: poll()
+                             diffs os.stat().st_mtime per tracked file, fires fn(name, path) on change
+                             (no background thread — editor calls poll() on a 2s invoke timer in a
+                             later step). Module-level singleton `asset_registry`. All file I/O wrapped
+                             in `except Exception` — a single bad file is skipped, never crashes.
+                             assets/manifest.json is gitignored; folders kept via .gitkeep.
 level.json                 — Saved level data (blocks + enemies); schema v1.2 with colour/rotation/hp
 editor_prefs.json          — Camera bookmarks (slots 1–5) + grid snap, persisted across editor sessions
 ```
