@@ -32,11 +32,14 @@ All tracks complete. Game state machine live. Canonical teardown functional. Lev
 
 See: [[work/active/v1.2-level-editor-overhaul]] (Resolution section), [[work/archive/version-map]]
 
+## v1.2.6 Shipped — 2026-06-24
+Startup crash fixed (`Text(text='')` → `IndexError` in `Text.align()`), window resize + camera lens aspect ratio fix, texture thumbnail rendering fix, standalone placement tray merged into the Models tab of the asset browser. Closed out — no longer "next," fully verified per `CHANGELOG.md` [1.2.6].
+
 ## Current Focus
 
 _What am I working toward right now?_
 
--
+- v1.3 Asset Import Pipeline, Steps 4–7 of the Implementation Order in [[work/active/v1.3-asset-import-pipeline]]: texture picker in the inspector (Step 4, next up), then model picker (Step 5), drag-and-drop import (Step 6), and the `level.json` model field (Step 7). Steps 1–3 (AssetRegistry, read-only asset browser, texture hot-reload) are done.
 
 ## Goals
 
@@ -86,4 +89,5 @@ Record when focus changes, with date and reason.
 |------|-------|--------|
 | 2026-05-20 | v1.2 shipped — focus moves to v1.3 asset import pipeline | All 4 tracks complete; editor is now Unity-feel |
 | 2026-05-20 | Full v1.2–v2.0 roadmap planned | Post-audit; engine in clean state, unblocked for feature work |
+| 2026-06-24 | v1.2.6 cleanup closed out — focus moves to active v1.3 work (Steps 4–7) | Startup crash, resize/camera, texture thumbnail, and tray-merge fixes all verified; [[work/active/v1.3-asset-import-pipeline]] Steps 1–3 already done, picking up at the texture picker |
 |      | Created North Star | Initial setup |

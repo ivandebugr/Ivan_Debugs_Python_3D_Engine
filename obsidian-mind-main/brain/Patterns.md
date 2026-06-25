@@ -62,3 +62,9 @@ Recurring patterns discovered across work.
 **Solution:** Before any blanket `destroy()` loop, iterate `scene.entities[:]` and call `e.die()` on any entity that `isinstance(e, AliveEntity) and e.alive`. This fires cleanup and unregistration before Ursina's deferred destroy queue processes them.
 **Used in:** `main.py:main_menu()`
 **Source:** [[work/audits/2026-05-20-full-audit]]
+
+## Call setBin/setDepthTest/setDepthWrite on the Entity, never on .node() — 2026-06-24
+**Problem:** Ursina's `Entity` subclasses Panda3D's `NodePath` directly, but it's easy to assume render-bin/depth-test calls belong on the underlying Panda node instead.
+**Solution:** Call `setBin`, `setDepthTest`, and `setDepthWrite` on the `Entity` instance itself — `entity.node()` returns a `PandaNode`, which has no `setBin`. Pattern: `tip.setBin('fixed', 100); tip.setDepthTest(False); tip.setDepthWrite(False)`. Bin 100 renders 3D gizmo handles above all other 3D geometry.
+**Used in:** `level_editor.py` (gizmo axis tips)
+**Source:** CLAUDE.md Hard Constraint 11

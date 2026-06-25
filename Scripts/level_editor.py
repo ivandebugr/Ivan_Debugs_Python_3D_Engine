@@ -70,6 +70,13 @@ class LevelEditor(Entity):
         self._inspector = None
         self._insp_title = None
         self._insp_fields = {}
+        self._insp_tex_swatch = None
+        self._insp_tex_name = None
+
+        # Texture picker overlay (v1.3 Step 4)
+        self._texpick_panel = None
+        self._texpick_cells = []
+        self.texture_picker_open = False
         self._hier_panel = None
         self._hier_buttons = []
         self._hier_scroll_bar = None
@@ -121,17 +128,6 @@ class LevelEditor(Entity):
         # Build toolbar buttons
         # Compact labels so each button fits in the horizontal strip; positions are
         # set by _apply_layout (the construction-time positions are placeholders).
-        self.texture_button = Button(
-            parent=camera.ui,
-            text='Tex: White',
-            scale=(self._TOOLBAR_BTN_W_BASE['texture_button'], self._TOOLBAR_BTN_H),
-            position=(.35, self._TOOLBAR_Y),
-            on_click=self.toggle_texture,
-            color=color.dark_gray,
-            text_scale=0.9,
-            z=-1,
-            eternal=True,
-        )
 
         self.snap_button = Button(
             parent=camera.ui,
@@ -311,7 +307,6 @@ class LevelEditor(Entity):
     # Baseline button widths at the reference aspect ratio (16:9). _apply_layout
     # scales these proportionally when the viewport is narrower.
     _TOOLBAR_BTN_W_BASE = {
-        'texture_button': 0.15,
         'snap_button':    0.12,
         'play_button':    0.10,
         '_move_button':   0.10,
@@ -389,7 +384,6 @@ class LevelEditor(Entity):
         # multiplied by min(1, aspect / ref_aspect), so buttons shrink at
         # narrow widths but never grow beyond their designed size.
         toolbar_order = (
-            ('texture_button', self.texture_button),
             ('snap_button',    self.snap_button),
             ('play_button',    self.play_button),
             ('_move_button',   self._move_button),
@@ -524,19 +518,6 @@ class LevelEditor(Entity):
         if self.grid_snap is None:
             return value
         return round(value / self.grid_snap) * self.grid_snap
-
-    # -------------------------------------------------------------------------
-    # Texture toggle
-    # -------------------------------------------------------------------------
-
-    def toggle_texture(self):
-        if self.current_texture == 'white_cube':
-            self.current_texture = 'grass'
-            self.texture_button.text = 'Tex: Grass'
-        else:
-            self.current_texture = 'white_cube'
-            self.texture_button.text = 'Tex: White'
-        self.model_preview.texture = self.current_texture
 
     # -------------------------------------------------------------------------
     # Selection
@@ -690,10 +671,62 @@ class LevelEditor(Entity):
                 field.on_submit = lambda k=key, f=field: self._apply_inspector_value(k, f.text)
                 self._insp_fields[key] = field
 
+        # Texture thumbnail (v1.3 Step 4) — click opens the texture picker overlay.
+        # Sits below the Pos/Scale grid, panel-local space.
+        self._insp_tex_label = Text(
+            parent=self._inspector,
+            text='Texture',
+            position=(-.33, -.30),
+            color=color.light_gray,
+            origin=(0, 0),
+            z=-1,
+            eternal=True,
+        )
+        self._insp_tex_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._insp_tex_label.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin tex label {type(e).__name__}: {e}")
+
+        self._insp_tex_swatch = Entity(
+            parent=self._inspector,
+            model='quad',
+            color=color.white,
+            scale=(.12, .08),
+            position=(.05, -.30),
+            z=-1,
+            eternal=True,
+        )
+        try:
+            from ursina.shaders.unlit_shader import unlit_shader as _us
+            self._insp_tex_swatch.shader = _us
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector swatch shader {type(e).__name__}: {e}")
+        try:
+            self._insp_tex_swatch.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin swatch {type(e).__name__}: {e}")
+
+        self._insp_tex_name = Text(
+            parent=self._inspector,
+            text='---',
+            position=(.20, -.30),
+            color=color.white,
+            origin=(0, 0),
+            z=-1,
+            eternal=True,
+        )
+        self._insp_tex_name.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._insp_tex_name.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin tex name {type(e).__name__}: {e}")
+
     def _update_inspector(self):
         if not self.selected:
             for f in self._insp_fields.values():
                 f.text = ' '
+            self._update_inspector_texture_swatch()
             return
         entities = list(self.selected)
 
@@ -710,6 +743,49 @@ class LevelEditor(Entity):
         self._insp_fields['scl_x'].text = shared_or_multi(lambda e: e.scale_x)
         self._insp_fields['scl_y'].text = shared_or_multi(lambda e: e.scale_y)
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
+        self._update_inspector_texture_swatch()
+
+    def _entity_texture_name(self, e):
+        """Best-effort texture name for an entity, '' if none/unreadable."""
+        if not getattr(e, 'texture', None):
+            return ''
+        return getattr(e.texture, 'name', str(e.texture))
+
+    def _update_inspector_texture_swatch(self):
+        """Refresh the inspector's texture swatch/name from the current selection.
+
+        Shows the shared texture preview when every selected entity uses the
+        same texture, '---' (no preview) on a mixed selection or empty selection.
+        """
+        if getattr(self, '_insp_tex_swatch', None) is None:
+            return
+        entities = list(self.selected)
+        if not entities:
+            self._insp_tex_swatch.texture = None
+            self._insp_tex_swatch.color = color.dark_gray
+            self._insp_tex_name.text = '---'
+            return
+        names = {self._entity_texture_name(e) for e in entities}
+        if len(names) != 1:
+            self._insp_tex_swatch.texture = None
+            self._insp_tex_swatch.color = color.dark_gray
+            self._insp_tex_name.text = '---'
+            return
+        name = next(iter(names))
+        path = asset_registry.get_texture_path(name) if name else None
+        if path:
+            try:
+                self._insp_tex_swatch.texture = Texture(Path(path))
+                self._insp_tex_swatch.color = color.white
+            except Exception as e:
+                logger.log('ERROR', f"_update_inspector_texture_swatch {type(e).__name__}: {e}")
+                self._insp_tex_swatch.texture = None
+                self._insp_tex_swatch.color = color.magenta
+        else:
+            # Built-in texture (e.g. 'white_cube') — not in the registry; flat colour preview.
+            self._insp_tex_swatch.texture = None
+            self._insp_tex_swatch.color = color.white
+        self._insp_tex_name.text = name or '---'
 
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
@@ -743,6 +819,143 @@ class LevelEditor(Entity):
             field.text = str(round(value, 3))
         if self._gizmo_root is not None:
             self._update_gizmo()
+
+    # -------------------------------------------------------------------------
+    # Texture picker overlay (v1.3 Step 4)
+    #
+    # A floating grid of texture thumbnails from asset_registry, opened by
+    # clicking the inspector's texture swatch. Built lazily on first open and
+    # reused afterwards (entities just toggle .enabled). self.texture_picker_open
+    # tracks visibility; input() consults it to swallow the next click so a
+    # dismiss-click never also reaches scene selection/placement underneath.
+    # -------------------------------------------------------------------------
+
+    _TEXPICK_COLS = 4
+    _TEXPICK_CELL = 0.09
+    _TEXPICK_GAP = 0.015
+    _TEXPICK_PAD = 0.03
+
+    def _build_texture_picker(self):
+        """Build the overlay panel + thumbnail grid once, sized to the current manifest."""
+        names = sorted(asset_registry.textures.keys())
+        cols = self._TEXPICK_COLS
+        rows = max(1, (len(names) + cols - 1) // cols) if names else 1
+        cell = self._TEXPICK_CELL
+        gap = self._TEXPICK_GAP
+        pad = self._TEXPICK_PAD
+        title_strip = 0.05   # panel_h-units reserved for the title row, below the top edge
+        panel_w = cols * cell + (cols - 1) * gap + pad * 2
+        panel_h = rows * cell + (rows - 1) * gap + pad * 2 + title_strip
+
+        self._texpick_panel = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=self._THEME_PANEL_BG,
+            scale=(panel_w, panel_h),
+            z=-2,
+            enabled=False,
+            eternal=True,
+        )
+        title = Text(
+            parent=self._texpick_panel,
+            text='Choose Texture',
+            position=(0, 0.5 - (title_strip * 0.5) / panel_h),
+            origin=(0, 0),
+            color=color.white,
+            z=-1,
+            eternal=True,
+        )
+        title.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+
+        self._texpick_cells = []  # [(bg_entity, name)]
+        top_y = 0.5 - title_strip / panel_h - (pad * 0.5 + cell * 0.5) / panel_h
+        left_x = -0.5 + pad / panel_w + (cell / panel_w) * 0.5
+        for i, name in enumerate(names):
+            r, c = divmod(i, cols)
+            cx = left_x + c * (cell + gap) / panel_w
+            cy = top_y - r * (cell + gap) / panel_h
+            bg = Entity(
+                parent=self._texpick_panel,
+                model='quad',
+                color=self._THEME_TILE_BG,
+                scale=(cell / panel_w, cell / panel_h),
+                position=(cx, cy),
+                z=-1,
+                eternal=True,
+            )
+            icon = Entity(
+                parent=bg,
+                model='quad',
+                scale=(0.85, 0.85),
+                z=-1,
+                eternal=True,
+            )
+            try:
+                from ursina.shaders.unlit_shader import unlit_shader as _us
+                icon.shader = _us
+            except Exception as e:
+                logger.log('ERROR', f"_build_texture_picker icon shader {type(e).__name__}: {e}")
+            path = asset_registry.get_texture_path(name)
+            try:
+                icon.texture = Texture(Path(path))
+                icon.color = color.white
+            except Exception as e:
+                logger.log('ERROR', f"_build_texture_picker texture {name} {type(e).__name__}: {e}")
+                icon.texture = None
+                icon.color = color.magenta
+            cell_label = Text(
+                parent=bg,
+                text=name,
+                position=(0, -0.46),
+                origin=(0, 0),
+                color=color.light_gray,
+                z=-1,
+                eternal=True,
+            )
+            cell_label.world_scale = Vec3(self._INSP_LABEL_WS * 0.6, self._INSP_LABEL_WS * 0.6, 1)
+            self._texpick_cells.append((bg, name))
+
+    def open_texture_picker(self):
+        """Open the texture picker overlay near the inspector's texture swatch."""
+        if not self.selected:
+            return
+        if getattr(self, '_texpick_panel', None) is None:
+            self._build_texture_picker()
+        if getattr(self, '_insp_tex_swatch', None) is not None:
+            swatch_x, swatch_y, _, _ = self._camera_ui_pos_and_scale(self._insp_tex_swatch)
+            self._texpick_panel.x = swatch_x - self._texpick_panel.scale_x * 0.5 - 0.02
+            self._texpick_panel.y = swatch_y
+        self._texpick_panel.enabled = True
+        self.texture_picker_open = True
+
+    def close_texture_picker(self):
+        """Hide the overlay without applying anything."""
+        if getattr(self, '_texpick_panel', None) is not None:
+            self._texpick_panel.enabled = False
+        self.texture_picker_open = False
+
+    def _texpick_cell_at_mouse(self):
+        """Return the texture name under the cursor in the open picker, or None."""
+        if not self.texture_picker_open or self._texpick_panel is None:
+            return None
+        for bg, name in self._texpick_cells:
+            if self._is_over_world_panel(bg):
+                return name
+        return None
+
+    def _apply_texture_pick(self, name):
+        """Apply `name`'s texture to every selected entity as one undo step, then close."""
+        entities = [e for e in self.selected if getattr(e, 'destroy_source', None) is None]
+        if entities:
+            old_textures = [self._entity_texture_name(e) or 'white_cube' for e in entities]
+            cmd = ChangeTextureCommand(entities, old_textures, name)
+            cmd.execute()
+            self._history.push(cmd)
+            for e in entities:
+                self.subscribe_texture(name, e)
+            self._update_inspector_texture_swatch()
+            logger.log('INFO', f"Texture picker applied: {name} to {len(entities)} entities")
+        self.close_texture_picker()
 
     # -------------------------------------------------------------------------
     # Hierarchy panel
@@ -967,6 +1180,33 @@ class LevelEditor(Entity):
         px, py = panel.x, panel.y
         hw = panel.scale_x * 0.5
         hh = panel.scale_y * 0.5
+        return (px - hw) <= mx <= (px + hw) and (py - hh) <= my <= (py + hh)
+
+    def _camera_ui_pos_and_scale(self, entity):
+        """Resolve `entity`'s position/scale into camera.ui-local units by walking
+        its parent chain, compounding each ancestor's scale/position. Needed because
+        Ursina's world_x/world_y are true Panda3D world-space (a different unit
+        system than camera.ui's own local space that mouse.x/mouse.y are in) — so
+        they can't be compared against mouse coordinates for nested camera.ui widgets."""
+        x, y = entity.x, entity.y
+        sx, sy = entity.scale_x, entity.scale_y
+        node = entity.parent
+        while node is not None and node is not camera.ui:
+            sx *= node.scale_x
+            sy *= node.scale_y
+            x = node.x + x * node.scale_x
+            y = node.y + y * node.scale_y
+            node = node.parent
+        return x, y, sx, sy
+
+    def _is_over_world_panel(self, panel):
+        """Same as _is_over_panel but for entities nested under another camera.ui
+        panel (e.g. the inspector's texture swatch, or texture-picker cells nested
+        under the picker panel), whose local .x/.y are relative to their parent."""
+        mx, my = mouse.x, mouse.y
+        px, py, sx, sy = self._camera_ui_pos_and_scale(panel)
+        hw = sx * 0.5
+        hh = sy * 0.5
         return (px - hw) <= mx <= (px + hw) and (py - hh) <= my <= (py + hh)
 
     def _hier_typing(self):
@@ -1688,7 +1928,7 @@ class LevelEditor(Entity):
 
     def _set_editor_ui_visible(self, visible):
         for widget in [self._inspector, self._hier_panel, self._insp_title,
-                       self.texture_button, self.snap_button,
+                       self.snap_button,
                        self.play_button, self._move_button, self._place_button,
                        self._stats_text,
                        self._spawn_marker]:
@@ -1907,6 +2147,23 @@ class LevelEditor(Entity):
                 self._exit_play_mode()
             return
 
+        # Texture picker overlay — while open, it owns input. Escape or a click
+        # anywhere are both explicit dismiss/apply paths (no fall-through to the
+        # scene below); this is the click-outside guard the picker needs because
+        # Ursina broadcasts input() to every entity, not just the topmost one.
+        if self.texture_picker_open:
+            if key == 'escape':
+                self.close_texture_picker()
+                return
+            if key == 'left mouse down':
+                name = self._texpick_cell_at_mouse()
+                if name is not None:
+                    self._apply_texture_pick(name)
+                else:
+                    self.close_texture_picker()
+                return
+            return
+
         if key == 'f5':
             self._enter_play_mode()
             return
@@ -2031,6 +2288,12 @@ class LevelEditor(Entity):
             # Buttons inside panels are grandchildren of camera.ui; _is_over_panel is
             # more reliable than checking hovered.parent for nested widgets.
             if self._hier_panel and self._is_over_panel(self._hier_panel):
+                return
+            # Texture swatch click opens the picker — must be checked before the
+            # blanket inspector-panel guard below swallows the click silently.
+            if (self._insp_tex_swatch and self.selected
+                    and self._is_over_world_panel(self._insp_tex_swatch)):
+                self.open_texture_picker()
                 return
             if self._inspector and self._is_over_panel(self._inspector):
                 return

@@ -117,3 +117,24 @@ Things that have bitten before and will bite again.
 **Root cause:** Editor placeholder uses `origin_y=-0.5` (base-anchored); runtime `Enemy` uses default `0` (center-anchored). With `scale_y=3`, the live enemy renders 1.5 units lower than the placeholder.
 **Fix:** Add `origin_y=-0.5` to `Enemy.__init__()`'s `super().__init__()` call — one line. Aligns editor and runtime conventions.
 **Source:** [[work/audits/2026-v1.2.3-full-audit]]
+
+## `Text(text='')` triggers IndexError in Ursina's align() — 2026-06-24
+**Context:** `_build_asset_browser()`'s scroll-arrow `Text` entities (and two latent sites in `_update_inspector`/`_show_status_notice`) constructed or mutated a `Text` entity's `.text` to an empty string to hide it.
+**Symptom:** Editor startup crash — `IndexError: list index out of range` in `Text.align()` at `ursina/text.py:408`.
+**Root cause:** Ursina's `Text.start_tag`/`end_tag` default to `'<'`/`'>'` with `use_tags=True`. A literal `'<'` or `'>'` parses as an empty tag pair with zero content lines, and an empty string also produces zero lines — either case leaves `Text.align()` indexing `linewidths[-1]` into an empty list.
+**Fix:** Never construct or set a `Text` entity's `.text` to `''`. Use `enabled=False`/`True` to hide/show a `Text` instead. For literal `<`/`>` glyphs, pass `use_tags=False` to the constructor (read from kwargs before the initial `self.text = text` assignment, so it takes effect immediately).
+**Source:** CLAUDE.md Hard Constraint 17; CHANGELOG [1.2.6]
+
+## `window.on_resize` is dead code in Ursina 8.3.0 — 2026-06-24
+**Context:** Level editor window resize broke the 3D viewport + toolbar overlap; root-cause investigation during the v1.2.6 fix session.
+**Symptom:** Resize-driven layout logic never runs on an actual window resize.
+**Root cause:** Ursina never invokes `window.on_resize` (detail unconfirmed beyond CLAUDE.md's statement that it is dead code in this version).
+**Fix:** Wrap `window.update_aspect_ratio` instead — Panda3D's `aspectRatioChanged` event invokes it. The wrapped version calls the original (which rescales `camera.ui` children's x-positions) then calls `_apply_layout()` to reset all managed elements to correct absolute positions.
+**Source:** CLAUDE.md Hard Constraint 16; CHANGELOG [1.2.6]
+
+## Camera lens aspect ratio is not auto-refreshed on resize — 2026-06-24
+**Context:** Same v1.2.6 resize fix session — UI panels were repositioned correctly via `_apply_layout()`, but the 3D viewport itself remained distorted.
+**Symptom:** 3D viewport stays stretched/squashed after a window resize even once UI panel positions are corrected.
+**Root cause:** Panda3D's automatic lens update via `base.camLens` is unreliable on some macOS resize paths (per CLAUDE.md; underlying Panda3D mechanism unconfirmed beyond this).
+**Fix:** `_apply_layout()` explicitly calls `camera.perspective_lens.set_aspect_ratio(aspect)` (and the orthographic equivalent) every time it runs — UI repositioning alone is insufficient.
+**Source:** CLAUDE.md Hard Constraint 15; CHANGELOG [1.2.6]

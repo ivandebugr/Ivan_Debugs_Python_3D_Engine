@@ -5,6 +5,74 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.2.6] - 2026-06-22 (wip, see [1.2.7])
+
+### Fixed
+- Editor startup crash: `IndexError: list index out of range` in `Text.align()` at
+  `ursina/text.py:408` (`Scripts/level_editor.py` `_build_asset_browser` scroll arrows,
+  `_update_inspector`, `_show_status_notice`). Root cause: `Text.start_tag`/`end_tag` default to
+  `'<'`/`'>'` with `use_tags=True`, so a literal `text='<'`/`'>'` parses as an empty tag pair with
+  zero content lines (same failure mode as `text=''`) → `Text.align()` indexes `linewidths[-1]`
+  into an empty list. Fixed scroll arrows with `use_tags=False` in the constructor; fixed two
+  latent empty-string sites in the same sweep (`_update_inspector` deselected fields now use
+  `' '`; `_show_status_notice` passes the real text directly instead of `text=''` + mutation).
+  See Hard Constraint 17 in CLAUDE.md.
+- Window resize broke 3D viewport + toolbar overlap. Two root causes: (A) `window.on_resize` is
+  never invoked by Ursina (dead code) — wrapped `window.update_aspect_ratio` instead, calling
+  `_apply_layout()` after Ursina's own work, plus an explicit
+  `camera.perspective_lens.set_aspect_ratio(aspect)` refresh. (B) toolbar button widths were
+  fixed constants sized for 16:9 — renamed to `_TOOLBAR_BTN_W_BASE`, scaled by
+  `min(1, aspect / _TOOLBAR_REF_ASPECT)` in `_apply_layout()`.
+- Texture thumbnail cards failed to render (raw path strings fail silently in Ursina's texture
+  setter) — load via `Texture(Path(path))`.
+- Crosshair visibility not restored on non-Esc pause paths — `PlayerHUD.show()`/`hide()` now
+  called by `PauseMenu` on every path.
+
+### Removed
+- Standalone placement tray (replaced by built-in model cards prepended to the Models tab via
+  `BUILTIN_MODELS`/`_browser_card_assets` — same drag-to-place flow).
+- `swept_cast()` dead code from `collision_system.py` (never had any callers).
+- `_pooled` dead param from `PlayerBullet`/`EnemyBullet.__init__` and `BulletPool.acquire`.
+
+### Changed
+- `_exit_play_mode` exception handling narrowed from bare `except Exception` to `except ImportError`.
+
+---
+
+## [Unreleased housekeeping] - 2026-05-22
+
+Batch of small fixes/cleanups from a single audit-driven session, landed between 1.2.2 and 1.2.3.
+
+### Fixed
+- Ghost preview entity flickered every frame during drag — `_update_ghost()` now only hides on a
+  definitive miss; stale/invalid hits leave the ghost at its last good position.
+- `_exit_play_mode` set `game.state` after the try/except — not set if teardown raised. Moved
+  `game.state = Game.MAIN_MENU` before the try block.
+- `PlaceEntityCommand.execute()` / `DeleteEntityCommand.undo()` omitted `origin_y=-0.5` for enemy
+  redo — extracted `_restore_entity()` helper in `undo_redo.py` that sets it.
+- `game.enemies` (and other refs) not reset on teardown exception — `return_to_menu()` `finally`
+  block now resets all ref attrs.
+- `game.win_screen`/`game.game_over_screen` not tracked for teardown — initialized to `None` in
+  `Game.__init__`, cleared in the `return_to_menu()` finally block.
+
+### Changed
+- `HealthBar` — removed `eternal=True` from all sub-entities; `on_destroy()` now explicitly
+  destroys `camera.ui` text; added `_registry` class list for O(registry) iteration instead of a
+  per-frame `isinstance(e, HealthBar)` scan over `scene.entities`.
+- `player_controller.py`: extracted inline magic-number swept-test offsets to module-level
+  `SWEPT_OFFSETS` constant; removed duplicate per-frame `health_bar.value` assignment; added
+  `on_destroy()` calling `collision_manager.remove(self)`; removed dead
+  `generate_raycast_points`/`draw_raycast_visuals` machinery.
+- `weapon.py`: extracted hardcoded pool sizes to `POOL_SIZE_PLAYER = 30`, `POOL_SIZE_ENEMY = 60`;
+  added `BulletPool.active_count()`.
+- `level_editor.py`: extracted inline snap tuple to module-level `EDITOR_GRID_SNAPS = (1.0, 0.5,
+  0.25, None)`; removed dead unused r/g/b_val variables in `_build_level_data()`.
+- `main.py`: removed `time_scale=1` delayed-invoke race on rapid re-pause (immediate assignment
+  is sufficient).
+- `collision_system.py`: added `__all__`, docstrings, audit header.
+
+---
+
 ## [1.2.5] - 2026-06-20
 
 WIN/GAME_OVER → R return-to-menu crash fix. Root-caused against the installed Ursina 8.3.0 /
