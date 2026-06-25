@@ -23,13 +23,13 @@ HOW TO EXTEND:
        occurred, or self.capture_crash() to record one for the orchestrator
     4. Return a CrashReport (or None if the scenario passed clean)
 
-NOTE FOR CLAUDE CODE: the scenario bodies below use the state names and
-function names established in CLAUDE.md and prior session logs (Game.WIN,
-Game.GAME_OVER, game.return_to_menu(), _clear_gameplay_entities(),
-_enter_play_mode() in level_editor.py). Verify each against the actual
-current source before trusting it — names may have shifted across fix
-sessions. Update the TODO-marked lines to match reality, then remove the
-TODO comment.
+NOTE FOR CLAUDE CODE: every state/function name and source line referenced
+in the scenario bodies below was verified against the actual current source
+(main.py, Scripts/game.py, Scripts/player_controller.py, Scripts/level_editor.py).
+The win/gameover scenarios start a real game and reach WIN/GAME_OVER through
+the real triggers (enemy kills / player HP 0) so the R-teardown actually
+sweeps live player + enemy + EndScreen entities — the v1.2.5 NodePath crash
+path. Re-verify the cited line numbers if those files change.
 """
 
 from __future__ import annotations
@@ -191,6 +191,35 @@ class GameTestHarness:
             PROJECT_ROOT / "Scripts" / "level_editor.py"
         )
 
+    def start_real_game(self):
+        """Click the main-menu Play button to enter a real PLAYING session
+        (spawns the Player + all level enemies), the same way a human does.
+
+        WIN/GAME_OVER are reached via the real triggers (trigger_win fires from
+        the global update() when count_layer(ENEMY)==0; trigger_game_over fires
+        from Player.update when health<=0), and BOTH only fire from PLAYING
+        (Scripts/game.py:40,47). So the R-teardown scenarios must actually be in
+        a live game first — otherwise return_to_menu()/_clear_gameplay_entities()
+        sweeps an empty scene and never touches the player/enemy/EndScreen
+        teardown that the v1.2.5 NodePath crash lived in. start_game() is a
+        closure inside main_menu() (main.py:290) so it can't be called directly;
+        invoking play_button.on_click() is the faithful equivalent."""
+        if self.app is None:
+            raise RuntimeError("launch_main() before start_real_game()")
+        from ursina import scene
+        play_button = next(
+            (e for e in scene.entities if getattr(e, "text", None) == "Play"),
+            None,
+        )
+        if play_button is None or not callable(getattr(play_button, "on_click", None)):
+            raise RuntimeError(
+                "main-menu Play button not found after launch — main_menu() "
+                "wiring may have changed (main.py:287)"
+            )
+        with contextlib.redirect_stdout(self._stdout_buf), \
+             contextlib.redirect_stderr(self._stdout_buf):
+            play_button.on_click()
+
     # ------------------------------------------------------------------
     # Drive input / frames
     # ------------------------------------------------------------------
@@ -259,48 +288,58 @@ def scenario_load_and_close() -> Optional[CrashReport]:
 
 
 def scenario_win_then_r() -> Optional[CrashReport]:
-    """Kill all enemies -> WIN state -> press R -> must return to
-    MAIN_MENU with zero Panda3D assertions and zero Python exceptions.
+    """Start a real game -> kill every enemy (the real win condition) -> WIN
+    overlay appears -> press R -> must return to MAIN_MENU with zero Panda3D
+    assertions and zero Python exceptions.
 
-    Win-trigger mechanism (confirmed against Scripts/game.py + main.py):
-    main.py's global update() fires game.trigger_win() once
-    collision_manager.count_layer(Layers.ENEMY) == 0 while state == PLAYING.
-    trigger_win() then sets state = Game.WIN (Scripts/game.py:38). main.py's
-    global input() only honours R when game.state in (Game.WIN, Game.GAME_OVER)
-    (main.py:624). The harness imports the same Scripts.game singleton the
-    running __main__ uses (shared via sys.modules), so setting game.state =
-    Game.WIN here lands the app in exactly the WIN/R branch we want to exercise.
-    We set it directly rather than playing through combat — the R teardown path
-    (return_to_menu -> _clear_gameplay_entities -> main_menu -> load_level) is
-    what this scenario guards, and it runs regardless of how WIN was reached."""
-    from Scripts.game import game, Game
-
+    Reaches WIN faithfully (confirmed against current source): enemies are
+    killed via Enemy.die() (the AliveEntity path the real game uses); the global
+    update() in main.py:593-594 then sees collision_manager.count_layer(
+    Layers.ENEMY) == 0 while state == PLAYING and calls game.trigger_win(),
+    which sets state = Game.WIN (Scripts/game.py:42) AND builds the EndScreen
+    overlay via _show_end_screen (Scripts/game.py:43,52). main.py:624 then
+    honours R for WIN/GAME_OVER -> return_to_menu() -> _clear_gameplay_entities()
+    -> main_menu(). Starting a real game first is required: _clear_gameplay_
+    entities() only exercises the crash-prone player/enemy/EndScreen teardown
+    (the v1.2.5 NodePath assertion) when those entities actually exist —
+    forcing game.state directly from MAIN_MENU would sweep an empty scene and
+    skip exactly what this scenario guards."""
     h = GameTestHarness()
     h.launch_main()
     h.step(5)
-    game.state = Game.WIN
-    h.step(2)
+    h.start_real_game()
+    h.step(3)
+
+    from Scripts.game import game
+    for enemy in list(game.enemies):
+        if getattr(enemy, "alive", False):
+            enemy.die()
+    h.step(3)  # let global update() detect zero enemies and fire trigger_win()
     h.press("r")
     h.step(5)
     return h.capture_crash("win_then_r")
 
 
 def scenario_gameover_then_r() -> Optional[CrashReport]:
-    """Player dies -> GAME_OVER state -> press R -> must return to
-    MAIN_MENU cleanly. Mirrors scenario_win_then_r.
+    """Start a real game -> drop player HP to 0 (the real death condition) ->
+    GAME OVER overlay appears -> press R -> must return to MAIN_MENU cleanly.
+    Mirrors scenario_win_then_r.
 
-    GAME_OVER is the real-game equivalent of WIN: trigger_game_over()
-    (Scripts/game.py:45) sets state = Game.GAME_OVER, fired from Player.update
-    when health <= 0. main.py's global input() honours R for both WIN and
-    GAME_OVER via the same branch (main.py:624), so forcing the state on the
-    shared Scripts.game singleton exercises the identical R teardown path."""
-    from Scripts.game import game, Game
-
+    Reaches GAME_OVER faithfully: setting game.player.health = 0 makes
+    Player.update fire game.trigger_game_over() (player_controller.py:124-125),
+    which sets state = Game.GAME_OVER (Scripts/game.py:49) and builds the
+    EndScreen overlay. R is honoured for both WIN and GAME_OVER via the same
+    branch (main.py:624), so this exercises the identical R-teardown path on a
+    real player + EndScreen."""
     h = GameTestHarness()
     h.launch_main()
     h.step(5)
-    game.state = Game.GAME_OVER
-    h.step(2)
+    h.start_real_game()
+    h.step(3)
+
+    from Scripts.game import game
+    game.player.health = 0
+    h.step(3)  # let Player.update see health<=0 and fire trigger_game_over()
     h.press("r")
     h.step(5)
     return h.capture_crash("gameover_then_r")

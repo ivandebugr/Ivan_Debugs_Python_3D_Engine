@@ -27,12 +27,9 @@ EDITOR_GRID_SNAPS = (1.0, 0.5, 0.25, None)
 
 
 class LevelEditor(Entity):
-    # FIXED (v1.2.4, BUG): colours are 0–1 floats. Ursina's color.rgb() is an alias for
-    # rgba() and does Color(r,g,b,a) with NO /255 (verified against ursina/color.py). The
-    # old 0–255 tuples made color.rgb(80,120,200) -> Color(80,120,200,1) which clamps to
-    # white for tiles/ghosts/placed blocks AND wrote colour values >1.0 into level.json on
-    # save (the canonical schema is 0–1). Same unit as level.json now.
-    ASSETS = [
+    # Built-in primitive types displayed in the Models tab alongside real scanned assets.
+    # Colours are 0–1 floats (color.rgb() does NOT divide by 255 — see Ursina footgun).
+    BUILTIN_MODELS = [
         {'name': 'Cube',  'model': 'cube', 'color': (0.314, 0.471, 0.784), 'scale': (1, 1, 1),     'type': 'block'},
         {'name': 'Stone', 'model': 'cube', 'color': (0.431, 0.431, 0.431), 'scale': (1, 1, 1),     'type': 'block'},
         {'name': 'Metal', 'model': 'cube', 'color': (0.627, 0.627, 0.706), 'scale': (1, 1, 1),     'type': 'block'},
@@ -77,6 +74,12 @@ class LevelEditor(Entity):
         self._hier_buttons = []
         self._hier_scroll_bar = None
         self.hierarchy_scroll = 0
+        # Hierarchy search/filter + collapsible sections (Change B).
+        self._hier_search_field = None     # InputField pinned above the list
+        self._hier_filter = ''             # lower-cased substring; '' = show all
+        self._hier_collapsed = {'block': False, 'enemy': False}  # per-section fold state
+        self._hier_header_buttons = {}     # {'block': Button, 'enemy': Button}
+        self._hier_swatches = []           # per-row colour swatch quads (parallel to _hier_buttons)
 
         # Grid snap
         self.snap_values = list(EDITOR_GRID_SNAPS)
@@ -95,11 +98,7 @@ class LevelEditor(Entity):
         self._dragging = False     # True once mouse moves after tile click
         self._drag_origin = None   # Vec2 mouse pos when tile was pressed
 
-        # Asset tray scroll offset (number of tile widths shifted left)
-        self._tray_scroll = 0
-
-        # Asset browser (read-only, v1.3 Step 2) — panel/tab/card state.
-        # Apply logic (double-click → apply), hot-reload, and drag-drop are later steps.
+        # Asset browser — panel/tab/card state.
         self._browser_panel = None
         self._browser_tab = 'texture'          # active tab: 'texture' | 'model' | 'sound'
         self._browser_tab_buttons = {}         # {category: Button}
@@ -108,6 +107,10 @@ class LevelEditor(Entity):
         self._browser_scroll = {'texture': 0, 'model': 0, 'sound': 0}
         self._selected_asset = None            # (category, name) of the highlighted card
         self._browser_last_click = (None, 0.0)  # ((category, name), wall-clock t) for dbl-click
+        self._browser_card_assets = {}         # {(category, name): asset_dict} for draggable built-in models
+        # Scroll indicators (left/right arrows) — created by _build_asset_browser.
+        self._browser_scroll_left = None
+        self._browser_scroll_right = None
 
         # Texture hot-reload (v1.3 Step 3). subscribe_texture()/unsubscribe_texture()
         # are the hooks Step 4 (texture picker) calls to wire blocks into live reload.
@@ -116,18 +119,16 @@ class LevelEditor(Entity):
         self._status_notice = None
 
         # Build toolbar buttons
-        # DEBT (deferred to docs/audit_v1.2.3.md): editor UI chrome below (button/panel/tray
-        # colours) still passes 0–255 values to color.rgb/rgba, which clamp to white/full.
-        # Cosmetic only — never serialised — so deferred. The ASSETS colour fix above was the
-        # in-scope one because those colours get written to level.json.
+        # Compact labels so each button fits in the horizontal strip; positions are
+        # set by _apply_layout (the construction-time positions are placeholders).
         self.texture_button = Button(
             parent=camera.ui,
-            text='Texture: White',
-            scale=(.18, .05),
-            position=(.35, .47),
+            text='Tex: White',
+            scale=(self._TOOLBAR_BTN_W_BASE['texture_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
             on_click=self.toggle_texture,
             color=color.dark_gray,
-            text_scale=1.2,
+            text_scale=0.9,
             z=-1,
             eternal=True,
         )
@@ -135,36 +136,45 @@ class LevelEditor(Entity):
         self.snap_button = Button(
             parent=camera.ui,
             text='Snap: 1.0',
-            scale=(.18, .05),
-            position=(.35, .41),
+            scale=(self._TOOLBAR_BTN_W_BASE['snap_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
             on_click=self.cycle_snap,
             color=color.dark_gray,
-            text_scale=1.2,
+            text_scale=0.9,
             z=-1,
             eternal=True,
         )
 
         self.play_button = Button(
             parent=camera.ui,
-            text='Play (F5)',
-            scale=(.18, .05),
-            position=(.35, .35),
+            text='Play',
+            scale=(self._TOOLBAR_BTN_W_BASE['play_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
             on_click=self.toggle_play,
             color=color.rgb(120, 60, 100),
-            text_scale=1.2,
+            # color.rgb takes 0-1 floats in Ursina 8.3.0; these 0-255 values clamp to
+            # white, so the label needs black text (default white would be invisible).
+            text_color=color.black,
+            highlight_text_color=color.black,
+            text_scale=0.9,
             z=-1,
             eternal=True,
         )
 
         # Move/Place tool toggle buttons — mutually exclusive; _set_tool() updates highlight
+        # Active background (color.rgb(...)) clamps to white in Ursina 8.3.0, so the
+        # active button needs black text; the inactive (dark_gray) one keeps white.
+        # _set_tool() keeps both in sync when the mode toggles.
         self._move_button = Button(
             parent=camera.ui,
             text='↖ Move',
-            scale=(.18, .05),
-            position=(.35, .29),
+            scale=(self._TOOLBAR_BTN_W_BASE['_move_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
             on_click=lambda: self._set_tool('move'),
             color=color.rgb(60, 130, 60),   # highlighted — default active mode
-            text_scale=1.2,
+            text_color=color.black,
+            highlight_text_color=color.black,
+            text_scale=0.9,
             z=-1,
             eternal=True,
         )
@@ -172,14 +182,32 @@ class LevelEditor(Entity):
         self._place_button = Button(
             parent=camera.ui,
             text='+ Place',
-            scale=(.18, .05),
-            position=(.35, .23),
+            scale=(self._TOOLBAR_BTN_W_BASE['_place_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
             on_click=lambda: self._set_tool('place'),
             color=color.dark_gray,
-            text_scale=1.2,
+            text_color=color.white,
+            highlight_text_color=color.white,
+            text_scale=0.9,
             z=-1,
             eternal=True,
         )
+
+        # Stats strip — a legible, labelled entity/collider readout beside the toolbar
+        # (replaces Ursina's tiny corner window.entity_counter/collider_counter, which
+        # are disabled in __main__). Counts the editor's own blocks/enemies so the
+        # labels can stay verbose; updated once a second from update() (see _STATS_*).
+        self._stats_text = Text(
+            text='entities: 0   colliders: 0',
+            parent=camera.ui,
+            origin=(0.5, 0),          # right-aligned: grows leftward from the toolbar's left edge
+            position=(0.3, self._TOOLBAR_Y),
+            scale=0.9,
+            color=color.white,
+            z=-1,
+            eternal=True,
+        )
+        self._stats_accum = 0.0       # seconds since last stats refresh
 
         self.model_preview = Entity(
             model='cube',
@@ -193,7 +221,6 @@ class LevelEditor(Entity):
         self._build_inspector()
         self._build_hierarchy()
         self._build_gizmo()
-        self._build_asset_tray()
         self._build_asset_browser()
 
         self._spawn_marker = Entity(
@@ -215,25 +242,31 @@ class LevelEditor(Entity):
             eternal=True,
         )
 
-        # Top-left overlay (hint text). Assigned by __main__ after construction.
+        # Top-left overlay (hint text + its backing panel). Assigned/built by __main__
+        # after construction via _attach_hint_background().
         self._hint_text = None
+        self._hint_bg = None
 
         self.load_existing_level()
+        self._refresh_stats()   # show real counts immediately, not 0 until the first tick
 
         # Apply border-anchored layout now, and again whenever the window resizes.
+        # Ursina fires `aspectRatioChanged` → window.update_aspect_ratio() which
+        # rescales camera.ui children's x positions automatically.  The old
+        # `window.on_resize` attribute was never invoked by Ursina, so _apply_layout
+        # only ran once.  Fix: wrap update_aspect_ratio so _apply_layout runs AFTER
+        # Ursina's own x-rescaling, resetting every managed element to the correct
+        # absolute position/size for the new aspect ratio.
         self._apply_layout()
-        _prev_on_resize = getattr(window, 'on_resize', None)
-        def _on_resize():
-            if callable(_prev_on_resize):
-                try:
-                    _prev_on_resize()
-                except Exception as e:
-                    logger.log('ERROR', f"_on_resize prev hook {type(e).__name__}: {e}")
+        _orig_update_ar = window.update_aspect_ratio
+        _editor = self
+        def _patched_update_aspect_ratio():
+            _orig_update_ar()
             try:
-                self._apply_layout()
+                _editor._apply_layout()
             except Exception as e:
-                logger.log('ERROR', f"_on_resize _apply_layout {type(e).__name__}: {e}")
-        window.on_resize = _on_resize
+                logger.log('ERROR', f"resize _apply_layout {type(e).__name__}: {e}")
+        window.update_aspect_ratio = _patched_update_aspect_ratio
 
         # Asset hot-reload (v1.3 Step 3). Register callbacks BEFORE the first poll.
         # Texture is the only category with live-reload logic; model/sound just log
@@ -244,31 +277,77 @@ class LevelEditor(Entity):
         self._poll_assets()
 
     # -------------------------------------------------------------------------
+    # Theme (one consistent dark palette across all editor chrome)
+    # -------------------------------------------------------------------------
+    # All editor chrome shares one dark palette via 0–1 float rgba values.
+    # Built-in model card colours stay in BUILTIN_MODELS (asset previews, not chrome).
+    _THEME_PANEL_BG   = color.rgba(0.0,  0.0,  0.0,  0.75)   # main panel background
+    _THEME_TILE_BG    = color.rgba(0.16, 0.16, 0.20, 1.0)    # card/tile backing (dark)
+    _THEME_TILE_HOVER = color.rgba(0.31, 0.31, 0.39, 1.0)    # card/tile hover
+    _THEME_TILE_SEL   = color.rgba(0.35, 0.51, 0.78, 1.0)    # selected card highlight
+    _THEME_TAB_ACTIVE = color.azure                          # active tab button
+    _THEME_TAB_IDLE   = color.dark_gray                      # inactive tab button
+    _THEME_TEXT       = color.light_gray                     # body text on dark bg
+
+    # -------------------------------------------------------------------------
     # Layout (border-anchored UI repositioning on window resize)
     # -------------------------------------------------------------------------
 
     # Panel widths (camera.ui units). Kept constant so labels/fields inside
     # the panels retain their proportions; only x-position changes with aspect.
     _LAYOUT_HIER_W = 0.20
-    _LAYOUT_INSP_W = 0.22
+    _LAYOUT_INSP_W = 0.30   # ~17% of a 16:9 window — wide enough for the 3-column grid
     _LAYOUT_PANEL_H = 0.9
-    _LAYOUT_TOOLBAR_BTN_W = 0.18
+
+    # Horizontal toolbar (Texture/Snap/Play/Move/Place) — a single Unity/Blender-style
+    # strip that sits in the thin band ABOVE the inspector (inspector top edge is y=0.45
+    # at PANEL_H 0.9, so the row lives in y∈[0.45,0.50]). Each button has its own compact
+    # width sized to its (shortened) label; heights are uniform. Right-anchored, growing
+    # leftward, with a small gap so it never reaches the fps counter in the corner.
+    _TOOLBAR_BTN_H   = 0.04
+    _TOOLBAR_Y       = 0.475          # row centre (band midpoint between 0.45 and 0.50)
+    _TOOLBAR_GAP     = 0.008          # gap between buttons
+    _TOOLBAR_RIGHT_PAD = 0.02         # gap from the right screen edge (clears fps counter)
+    # Baseline button widths at the reference aspect ratio (16:9). _apply_layout
+    # scales these proportionally when the viewport is narrower.
+    _TOOLBAR_BTN_W_BASE = {
+        'texture_button': 0.15,
+        'snap_button':    0.12,
+        'play_button':    0.10,
+        '_move_button':   0.10,
+        '_place_button':  0.11,
+    }
+    _TOOLBAR_REF_ASPECT = 16 / 9
 
     def _apply_layout(self):
         """Reposition border-anchored UI to match current window aspect ratio.
 
         Ursina UI height is fixed at 1 (camera.ui spans y in [-0.5, 0.5]);
-        width = aspect_ratio. Only x for left/right panels and width of the
-        full-bleed tray need to follow aspect on resize.
+        width = aspect_ratio.  Every dynamic element's position AND size is
+        computed here relative to the current aspect — nothing is hardcoded at
+        construction time.  Called on init and after every window resize (via
+        the wrapped window.update_aspect_ratio).
+
+        Camera lens aspect ratio is explicitly refreshed here so the 3D
+        perspective always matches the window, even if Panda3D's automatic
+        propagation is delayed or skipped on certain macOS resize paths.
         """
         aspect = getattr(window, 'aspect_ratio', 16 / 9)
         if not aspect or aspect <= 0:
             return
         half_w = aspect * 0.5
 
+        # --- Camera lens refresh (BUG A fix) ---
+        try:
+            camera.perspective_lens.set_aspect_ratio(aspect)
+            if camera.orthographic:
+                camera.orthographic_lens.set_film_size(
+                    camera.fov * aspect, camera.fov)
+        except Exception as e:
+            logger.log('ERROR', f"_apply_layout lens refresh {type(e).__name__}: {e}")
+
         hier_w = self._LAYOUT_HIER_W
         insp_w = self._LAYOUT_INSP_W
-        btn_w = self._LAYOUT_TOOLBAR_BTN_W
 
         # Hierarchy — flush left
         if self._hier_panel is not None:
@@ -284,14 +363,7 @@ class LevelEditor(Entity):
             self._inspector.scale_x = insp_w
             self._inspector.scale_y = self._LAYOUT_PANEL_H
 
-        # Asset tray — flush bottom, full viewport width
-        if self._tray_panel is not None:
-            self._tray_panel.x = 0
-            self._tray_panel.y = self._TRAY_Y
-            self._tray_panel.scale_x = aspect
-            self._tray_panel.scale_y = self._TRAY_H
-
-        # Asset browser — full-width strip just above the tray; cards/tabs are
+        # Asset browser — full-width strip near the bottom; cards/tabs are
         # centred about x=0 so only the panel quad's width tracks aspect.
         if self._browser_panel is not None:
             self._browser_panel.x = 0
@@ -299,23 +371,124 @@ class LevelEditor(Entity):
             self._browser_panel.scale_x = aspect
             self._browser_panel.scale_y = self._BROWSER_H
 
-        # Toolbar buttons — stacked top-right, just left of the inspector
-        toolbar_x = half_w - insp_w - btn_w * 0.5 - 0.01
-        for btn, y in (
-            (self.texture_button, .47),
-            (self.snap_button, .41),
-            (self.play_button, .35),
-            (self._move_button, .29),
-            (self._place_button, .23),
-        ):
-            if btn is not None:
-                btn.x = toolbar_x
-                btn.y = y
+        # Browser tab buttons — reposition to left edge, sized to fit.
+        self._layout_browser_tabs(half_w)
 
-        # Hint text — top-left overlay
+        # Browser scroll indicators — flush to left/right edges of the card area.
+        if self._browser_scroll_left is not None:
+            self._browser_scroll_left.x = -half_w + self._LAYOUT_HIER_W + 0.01
+            self._browser_scroll_left.y = self._CARD_Y
+        if self._browser_scroll_right is not None:
+            self._browser_scroll_right.x = half_w - 0.03
+            self._browser_scroll_right.y = self._CARD_Y
+        self._update_browser_scroll_indicators()
+
+        # --- Toolbar (BUG B fix) ---
+        # Scale button widths proportionally when the viewport is narrower
+        # than the 16:9 reference.  Each button's width is its baseline
+        # multiplied by min(1, aspect / ref_aspect), so buttons shrink at
+        # narrow widths but never grow beyond their designed size.
+        toolbar_order = (
+            ('texture_button', self.texture_button),
+            ('snap_button',    self.snap_button),
+            ('play_button',    self.play_button),
+            ('_move_button',   self._move_button),
+            ('_place_button',  self._place_button),
+        )
+        scale_factor = min(1.0, aspect / self._TOOLBAR_REF_ASPECT)
+        gap = self._TOOLBAR_GAP * scale_factor
+        cursor_right = half_w - self._TOOLBAR_RIGHT_PAD
+        for attr, btn in reversed(toolbar_order):
+            if btn is None:
+                continue
+            w = self._TOOLBAR_BTN_W_BASE[attr] * scale_factor
+            btn.scale_x = w
+            btn.scale_y = self._TOOLBAR_BTN_H
+            btn.x = cursor_right - w * 0.5
+            btn.y = self._TOOLBAR_Y
+            cursor_right -= (w + gap)
+        self._toolbar_left_x = cursor_right
+
+        # Stats strip — beside the toolbar, on the same row, to its left.
+        # Clamp so it stays within the viewport and doesn't overlap the hint
+        # text on the left.
+        if getattr(self, '_stats_text', None) is not None:
+            stats_x = self._toolbar_left_x - 0.02
+            self._stats_text.x = stats_x
+            self._stats_text.y = self._TOOLBAR_Y
+
+        # Hint text — top-left overlay.  Anchored to the hierarchy panel's
+        # right edge so it never overlaps the toolbar at narrow widths.
+        hint_left = -half_w + hier_w + 0.01
         if self._hint_text is not None:
-            self._hint_text.x = -half_w + 0.01
+            self._hint_text.x = hint_left
             self._hint_text.y = 0.48
+        if getattr(self, '_hint_bg', None) is not None and self._hint_text is not None:
+            self._position_hint_bg()
+
+    def _layout_browser_tabs(self, half_w):
+        """Reposition browser tab buttons relative to the current aspect ratio."""
+        tabs = getattr(self, '_browser_tab_buttons', None)
+        if not tabs:
+            return
+        tab_order = ('texture', 'model', 'sound')
+        tab_w = 0.12
+        tab_gap = 0.01
+        start_x = -half_w + self._LAYOUT_HIER_W + tab_w * 0.5 + 0.01
+        for i, cat in enumerate(tab_order):
+            btn = tabs.get(cat)
+            if btn is None:
+                continue
+            btn.x = start_x + i * (tab_w + tab_gap)
+            btn.y = self._TAB_Y
+            btn.scale_x = tab_w
+            btn.scale_y = 0.035
+
+    # -------------------------------------------------------------------------
+    # Hint-text background (Change D)
+    # -------------------------------------------------------------------------
+
+    _HINT_BG_PAD = 0.012   # padding around the hint text block, camera.ui units
+
+    def _attach_hint_background(self):
+        """Create a dark backing panel sized to the hint text, so the controls legend
+        stays readable over light geometry / sky. Follows the same panel pattern as the
+        Inspector/Hierarchy (quad, _THEME_PANEL_BG, parent=camera.ui, eternal). Sized to
+        the text — not full-width. Call once after self._hint_text exists."""
+        if self._hint_text is None or getattr(self, '_hint_bg', None) is not None:
+            return
+        self._hint_bg = Entity(
+            parent=camera.ui,
+            model='quad',
+            color=self._THEME_PANEL_BG,
+            z=0.01,          # behind the text (text is at z=-1)
+            eternal=True,
+        )
+        self._position_hint_bg()
+
+    def _position_hint_bg(self):
+        """Size/position the hint background to wrap the current hint text exactly.
+
+        Ursina's Text exposes .width/.height in camera.ui units once rendered. The hint
+        uses origin=(-.5,.5) (top-left anchor), so the block extends right and down from
+        its position; centre the quad over that rect and add a little padding.
+        """
+        t = self._hint_text
+        bg = getattr(self, '_hint_bg', None)
+        if t is None or bg is None:
+            return
+        # Text.width/height are in the text's local space; the Text entity's own scale
+        # brings them to camera.ui units. Our bg is parented to camera.ui (not the Text),
+        # so multiply by the Text scale ourselves.
+        w = (getattr(t, 'width', 0) or 0) * t.scale_x
+        h = (getattr(t, 'height', 0) or 0) * t.scale_y
+        if w <= 0 or h <= 0:
+            return
+        bg.scale_x = w + self._HINT_BG_PAD * 2
+        bg.scale_y = h + self._HINT_BG_PAD * 2
+        # origin (-.5,.5): text spans [t.x, t.x+w] in x and [t.y-h, t.y] in y.
+        bg.x = t.x + w * 0.5
+        bg.y = t.y - h * 0.5
 
     # -------------------------------------------------------------------------
     # Grid snap
@@ -332,6 +505,15 @@ class LevelEditor(Entity):
         self._tool = mode
         self._move_button.color  = color.rgb(60, 130, 60) if mode == 'move'  else color.dark_gray
         self._place_button.color = color.rgb(60, 60, 130) if mode == 'place' else color.dark_gray
+        # Active colour clamps to white (color.rgb 0-255 footgun) → black text reads on it;
+        # inactive dark_gray needs white text. Keep highlight_text_color in step so hover
+        # doesn't flip the label back to an invisible colour.
+        move_active = (mode == 'move')
+        place_active = (mode == 'place')
+        self._move_button.text_color = self._move_button.highlight_text_color = (
+            color.black if move_active else color.white)
+        self._place_button.text_color = self._place_button.highlight_text_color = (
+            color.black if place_active else color.white)
 
     def _snap(self, position):
         if self.grid_snap is None:
@@ -350,10 +532,10 @@ class LevelEditor(Entity):
     def toggle_texture(self):
         if self.current_texture == 'white_cube':
             self.current_texture = 'grass'
-            self.texture_button.text = 'Texture: Grass'
+            self.texture_button.text = 'Tex: Grass'
         else:
             self.current_texture = 'white_cube'
-            self.texture_button.text = 'Texture: White'
+            self.texture_button.text = 'Tex: White'
         self.model_preview.texture = self.current_texture
 
     # -------------------------------------------------------------------------
@@ -391,6 +573,7 @@ class LevelEditor(Entity):
             'texture': tex_name,
             'color': getattr(e, '_original_color', e.color),
             'rotation': (e.rotation_x, e.rotation_y, e.rotation_z),
+            'scale': (e.scale_x, e.scale_y, e.scale_z),
             'enemy_hp': getattr(e, 'enemy_hp', 100),
             'enemy_type': getattr(e, 'enemy_type', 'default'),
             'is_enemy': is_enemy,
@@ -421,13 +604,21 @@ class LevelEditor(Entity):
     # Inspector panel
     # -------------------------------------------------------------------------
 
+    # Absolute world_scale for inspector Text. A plain Text parented to the small
+    # (0.30 x 0.9) panel inherits that tiny scale and renders microscopically — the
+    # real reason inspector labels have always looked "invisible" here (the old
+    # setBin/z fixes only addressed z-order). Ursina's Button sidesteps this by
+    # forcing text_entity.world_scale ~= 20; we do the same so labels are legible.
+    _INSP_TITLE_WS = 22
+    _INSP_LABEL_WS = 15
+
     def _build_inspector(self):
         self._inspector = Entity(
             parent=camera.ui,
             model='quad',
             color=color.rgba(0, 0, 0, 0.75),
-            scale=(.22, .9),
-            position=(.769, 0),
+            scale=(.30, .9),
+            position=(.739, 0),
             z=-0.5,
             eternal=True,
         )
@@ -435,82 +626,69 @@ class LevelEditor(Entity):
             parent=self._inspector,
             text='Inspector',
             position=(0, .42),
-            scale=(.055, .055),
             color=color.white,
+            origin=(0, 0),
             z=-1,
             eternal=True,
         )
+        self._insp_title.world_scale = Vec3(self._INSP_TITLE_WS, self._INSP_TITLE_WS, 1)
         try:
             self._insp_title.setBin('fixed', 41)
         except Exception as e:
             logger.log('ERROR', f"_build_inspector setBin title {type(e).__name__}: {e}")
-        # 8 rows distributed evenly in the usable area below the title.
-        # Usable: from +0.38 to -0.43  →  height = 0.81 units (in panel-local space).
-        # Transform group: rows 0-6 (pos x/y/z, rot y, scale x/y/z)
-        # Entity group: rows 7+ (HP)
-        # Separator drawn between group boundary.
-        fields = [
-            ('pos_x', 'Pos X'), ('pos_y', 'Pos Y'), ('pos_z', 'Pos Z'),
-            ('rot_y', 'Rot Y'),
-            ('scl_x', 'Scale X'), ('scl_y', 'Scale Y'), ('scl_z', 'Scale Z'),
-            ('hp', 'HP'),
+        # Display-only 3-column x 2-row grid of the six transform fields:
+        #   Row 1: Pos X / Pos Y / Pos Z      Row 2: Scale X / Scale Y / Scale Z
+        # HP, rotation, colour, texture and enemy_type still live on the entity and
+        # round-trip through level.json (see _build_level_data); they are simply no
+        # longer editable here. Coordinates are panel-local (quad spans -0.5..0.5).
+        grid = [
+            [('pos_x', 'Pos X'), ('pos_y', 'Pos Y'), ('pos_z', 'Pos Z')],
+            [('scl_x', 'Scale X'), ('scl_y', 'Scale Y'), ('scl_z', 'Scale Z')],
         ]
-        _panel_top = 0.38
-        _panel_height = 0.81
-        _num_rows = len(fields)
-        # Index of first entity-group row (HP and beyond)
-        _entity_group_start = 7
+        col_x = (-.33, 0.0, .33)      # column centres
+        row_label_y = (.22, -.08)     # label y per row
+        row_field_y = (.13, -.17)     # input-field y per row
         self._insp_fields = {}
-        for i, (key, label) in enumerate(fields):
-            y_pos = _panel_top - (i + 0.5) * (_panel_height / _num_rows)
-            # Separator line between transform and entity groups
-            if i == _entity_group_start:
-                sep_y = _panel_top - i * (_panel_height / _num_rows)
-                Entity(
+        for r, row in enumerate(grid):
+            for c, (key, label) in enumerate(row):
+                label_text = Text(
                     parent=self._inspector,
-                    model=Mesh(
-                        vertices=[Vec3(-0.48, sep_y, 0), Vec3(0.48, sep_y, 0)],
-                        mode='line', thickness=1
-                    ),
-                    color=color.rgba(180, 180, 180, 80),
+                    text=label,
+                    position=(col_x[c], row_label_y[r]),
+                    color=color.light_gray,
+                    origin=(0, 0),
                     z=-1,
                     eternal=True,
                 )
-            label_text = Text(
-                parent=self._inspector,
-                text=label,
-                position=(-.45, y_pos + .01),
-                scale=(.045, .045),
-                color=color.light_gray,
-                origin=(-.5, 0),
-                z=-1,
-                eternal=True,
-            )
-            try:
-                label_text.setBin('fixed', 41)
-            except Exception as e:
-                logger.log('ERROR', f"_build_inspector setBin label {type(e).__name__}: {e}")
-            field = InputField(
-                parent=self._inspector,
-                position=(.1, y_pos),
-                scale=(.15, .04),
-                default_value='0',
-                z=-1,
-                eternal=True,
-            )
-            try:
-                field.setBin('fixed', 41)
-            except Exception as e:
-                logger.log('ERROR', f"_build_inspector setBin field {type(e).__name__}: {e}")
-            # FIXED (v1.2.4, FIX 4): Enter applied nothing because (1) Ursina's InputField
-            # only fires on_submit when the key is in submit_on, which defaults to [] and was
-            # never set, and (2) Ursina calls self.on_submit() with NO arguments, so the prior
-            # `lambda val, k=key:` raised TypeError the instant it ever did fire. Fix both:
-            # enable Enter via submit_on, and use a no-arg callback that reads field.text at
-            # call time. k=key/f=field bind the loop variables (no live-entity capture).
-            field.submit_on = ['enter']
-            field.on_submit = lambda k=key, f=field: self._apply_inspector_value(k, f.text)
-            self._insp_fields[key] = field
+                # world_scale so the label is readable (see _INSP_LABEL_WS note above).
+                label_text.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+                # Lift above the panel quad; setBin is a NodePath method — call it on the
+                # Entity, never entity.node() (PandaNode has no setBin).
+                try:
+                    label_text.setBin('fixed', 41)
+                except Exception as e:
+                    logger.log('ERROR', f"_build_inspector setBin label {type(e).__name__}: {e}")
+                field = InputField(
+                    parent=self._inspector,
+                    position=(col_x[c], row_field_y[r]),
+                    scale=(.27, .055),
+                    default_value='0',
+                    z=-1,
+                    eternal=True,
+                )
+                try:
+                    field.setBin('fixed', 41)
+                except Exception as e:
+                    logger.log('ERROR', f"_build_inspector setBin field {type(e).__name__}: {e}")
+                # FIXED (v1.2.4, FIX 4): Enter applied nothing because (1) Ursina's InputField
+                # only fires on_submit when the key is in submit_on, which defaults to [] and was
+                # never set, and (2) Ursina calls self.on_submit() with NO arguments, so the prior
+                # `lambda val, k=key:` raised TypeError the instant it ever did fire. Fix both:
+                # enable Enter via submit_on, and use a no-arg callback that reads field.text at
+                # call time. k=key/f=field bind the loop variables (no live-entity capture).
+                field.submit_on = ['enter']
+                field.on_submit = lambda k=key, f=field: self._apply_inspector_value(k, f.text)
+                self._insp_fields[key] = field
 
     def _update_inspector(self):
         if not self.selected:
@@ -529,11 +707,9 @@ class LevelEditor(Entity):
         self._insp_fields['pos_x'].text = shared_or_multi(lambda e: e.x)
         self._insp_fields['pos_y'].text = shared_or_multi(lambda e: e.y)
         self._insp_fields['pos_z'].text = shared_or_multi(lambda e: e.z)
-        self._insp_fields['rot_y'].text = shared_or_multi(lambda e: e.rotation_y)
         self._insp_fields['scl_x'].text = shared_or_multi(lambda e: e.scale_x)
         self._insp_fields['scl_y'].text = shared_or_multi(lambda e: e.scale_y)
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
-        self._insp_fields['hp'].text    = shared_or_multi(lambda e: getattr(e, 'enemy_hp', 100))
 
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
@@ -544,14 +720,9 @@ class LevelEditor(Entity):
             value = float(value_str)
         except (ValueError, TypeError):
             return
-        # FIXED (v1.2.4, FIX 4): HP is an integer attribute — keep enemy_hp an int.
-        if key == 'hp':
-            value = int(value)
         attr_map = {
             'pos_x': 'x', 'pos_y': 'y', 'pos_z': 'z',
-            'rot_y': 'rotation_y',
             'scl_x': 'scale_x', 'scl_y': 'scale_y', 'scl_z': 'scale_z',
-            'hp': 'enemy_hp'
         }
         attr = attr_map.get(key)
         if not attr:
@@ -577,10 +748,43 @@ class LevelEditor(Entity):
     # Hierarchy panel
     # -------------------------------------------------------------------------
 
-    # Hierarchy layout constants (panel-local space)
-    _HIER_TOP    = 0.36   # y of first row
-    _HIER_ROW_H  = 0.05   # row pitch
-    _HIER_MAX_VISIBLE = 14
+    # Hierarchy layout constants (panel-local space). One row pitch is shared by every
+    # visual slot — section headers AND entity rows — so the scroll thumb, swatches and
+    # rows are all placed by the SAME _hier_row_y() formula and cannot drift (Bug A).
+    _HIER_TOP    = 0.36   # y of the first visual slot (row index 0)
+    _HIER_ROW_H  = 0.05   # uniform pitch between consecutive visual slots
+    _HIER_MAX_VISIBLE = 13  # how many slots fit between the search field and the panel bottom
+    _HIER_SWATCH_X   = -.085  # panel-local x of a row's colour swatch (left edge of the row)
+    _HIER_SWATCH_SIZE = .022
+
+    def _hier_row_y(self, visual_index):
+        """THE shared row-index -> panel-local-y formula. Slot 0 is at _HIER_TOP and each
+        subsequent visual slot (header or entity row) steps down one _HIER_ROW_H. Rows,
+        colour swatches, section headers AND the scroll-thumb track all derive their y from
+        this single function so they can never diverge (Bug A consolidation)."""
+        return self._HIER_TOP - visual_index * self._HIER_ROW_H
+
+    def _hier_visual_rows(self):
+        """Ordered list of visual rows for the current filter + collapse state. Each entry is
+        ('header', section) or ('row', entity). Headers always appear; a section's entity rows
+        are present only when it is expanded AND match the (case-insensitive substring) filter.
+        Section counts shown in the header reflect the FILTERED visible entities, not the raw
+        totals — so the list reads honestly while searching."""
+        flt = self._hier_filter
+        rows = []
+        for section, members in (('block', self.blocks), ('enemy', self.enemies)):
+            if flt:
+                matched = [e for e in members if flt in self._hier_label(e).lower()]
+            else:
+                matched = list(members)
+            rows.append(('header', section))
+            if not self._hier_collapsed[section]:
+                rows.extend(('row', e) for e in matched)
+        return rows
+
+    def _hier_label(self, e):
+        is_enemy = e in self.enemies
+        return f"{'E' if is_enemy else 'B'} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
 
     def _build_hierarchy(self):
         self._hier_panel = Entity(
@@ -595,47 +799,132 @@ class LevelEditor(Entity):
         Text(
             parent=self._hier_panel,
             text='Hierarchy',
-            position=(0, .42),
+            position=(0, .45),
             scale=(.055, .055),
             color=color.white,
             eternal=True,
         )
+        # Search/filter box pinned above the list (Change B.1). Live filter-as-you-type via
+        # on_value_changed. Each keystroke re-runs _refresh_hierarchy, but that only ever
+        # instantiates the <=_HIER_MAX_VISIBLE rows in the viewport (not the full list), so it
+        # stays well under a frame even at 140+ entities (~9ms measured). Counted in the
+        # typing-guard so Delete/bookmark keys don't fire while editing here (see input()).
+        self._hier_search_field = InputField(
+            parent=self._hier_panel,
+            position=(0, .40),
+            scale=(.17, .03),
+            default_value='',
+            z=-1,
+            eternal=True,
+        )
+        try:
+            self._hier_search_field.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_hierarchy setBin search {type(e).__name__}: {e}")
+        self._hier_search_field.on_value_changed = self._on_hier_search_changed
         # Thin vertical scroll indicator — right edge of panel
         self._hier_scroll_bar = Entity(
             parent=self._hier_panel,
             model='quad',
-            color=color.rgba(200, 200, 200, 120),
+            color=color.rgba(0.78, 0.78, 0.78, 0.47),   # 0–1 floats — 0–255 clamps to white
             scale=(.018, .05),
             position=(.46, self._HIER_TOP),
             z=-1,
             eternal=True,
         )
         self._hier_buttons = []
+        self._hier_swatches = []
+        self._hier_header_buttons = {}
+
+    def _on_hier_search_changed(self):
+        if self._hier_search_field is None:
+            return
+        self._hier_filter = self._hier_search_field.text.strip().lower()
+        self.hierarchy_scroll = 0
+        self._refresh_hierarchy()
+        self._update_hierarchy_highlight()
+
+    def _toggle_hier_section(self, section):
+        self._hier_collapsed[section] = not self._hier_collapsed[section]
+        self.hierarchy_scroll = 0
+        self._refresh_hierarchy()
+        self._update_hierarchy_highlight()
 
     def _refresh_hierarchy(self):
         for b in self._hier_buttons:
             destroy(b)
         self._hier_buttons.clear()
-        all_entities = self.blocks + self.enemies
-        total = len(all_entities)
+        for s in self._hier_swatches:
+            destroy(s)
+        self._hier_swatches.clear()
+        for b in self._hier_header_buttons.values():
+            destroy(b)
+        self._hier_header_buttons.clear()
+
+        visual_rows = self._hier_visual_rows()
+        total = len(visual_rows)
         max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
         self.hierarchy_scroll = max(0, min(self.hierarchy_scroll, max_scroll))
 
-        visible_slice = all_entities[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
-        for row, e in enumerate(visible_slice):
-            is_enemy = e in self.enemies
-            label = f"{'E' if is_enemy else 'B'} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
-            btn = Button(
-                parent=self._hier_panel,
-                text=label,
-                scale=(.18, .038),
-                position=(-.01, self._HIER_TOP - row * self._HIER_ROW_H),
-                color=color.orange if e in self.selected else color.dark_gray,
-                text_scale=.75,
-                z=-1
-            )
-            btn.on_click = lambda entity=e: self._select(entity)
-            self._hier_buttons.append(btn)
+        # Filtered per-section counts for the header captions.
+        flt = self._hier_filter
+        def _count(members):
+            return sum(1 for e in members if not flt or flt in self._hier_label(e).lower())
+        section_count = {'block': _count(self.blocks), 'enemy': _count(self.enemies)}
+        section_name  = {'block': 'Blocks', 'enemy': 'Enemies'}
+
+        visible = visual_rows[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
+        for slot, (kind, payload) in enumerate(visible):
+            y = self._hier_row_y(slot)
+            if kind == 'header':
+                section = payload
+                # OpenSans (Ursina's default font) has NO triangle glyphs (▾▸▼▶ all render as
+                # missing-glyph boxes — verified against the .ttf cmap, same class as the ▶/↖
+                # gaps noted in CLAUDE.md). Use ASCII [+]/[-] (both glyphs present) for the
+                # collapse state instead.
+                tri = '[+]' if self._hier_collapsed[section] else '[-]'
+                hdr = Button(
+                    parent=self._hier_panel,
+                    text=f"{tri} {section_name[section]} ({section_count[section]})",
+                    scale=(.18, .038),
+                    position=(-.01, y),
+                    color=self._THEME_TILE_HOVER,
+                    text_origin=(-.5, 0),   # left-align the caption inside the wide button
+                    text_scale=.75,
+                    z=-1,
+                )
+                hdr.on_click = lambda s=section: self._toggle_hier_section(s)
+                self._hier_header_buttons[section] = hdr
+            else:
+                e = payload
+                btn = Button(
+                    parent=self._hier_panel,
+                    text=self._hier_label(e),
+                    scale=(.18, .038),
+                    position=(-.01, y),
+                    color=color.orange if e in self.selected else color.dark_gray,
+                    text_scale=.75,
+                    z=-1,
+                )
+                btn.on_click = lambda entity=e: self._select(entity)
+                self._hier_buttons.append(btn)
+                # Colour swatch matching the entity's real colour (Change B.2). Parented to the
+                # panel (not the button) and placed by the SAME _hier_row_y(slot) so it stays
+                # aligned. z below the button text so it reads as a separate chip. NOT eternal:
+                # like the row Buttons these are transient and destroyed/rebuilt every refresh —
+                # destroy() is a NO-OP on eternal entities (ursina/destroy.py:27), so an eternal
+                # swatch would leak and ghost on every rebuild. Hidden in F5 play mode via the
+                # panel's enabled cascade, not eternal. (Persistent chrome below stays eternal.)
+                swatch_color = getattr(e, '_original_color', e.color)
+                swatch = Entity(
+                    parent=self._hier_panel,
+                    model='quad',
+                    color=swatch_color,
+                    scale=(self._HIER_SWATCH_SIZE, self._HIER_SWATCH_SIZE),
+                    position=(self._HIER_SWATCH_X, y),
+                    z=-1.1,
+                )
+                self._hier_swatches.append(swatch)
 
         self._update_hier_scroll_bar(total)
 
@@ -646,9 +935,10 @@ class LevelEditor(Entity):
             self._hier_scroll_bar.enabled = False
             return
         self._hier_scroll_bar.enabled = True
-        # Track height spans from _HIER_TOP down to the last row bottom
-        track_top    = self._HIER_TOP
-        track_bottom = self._HIER_TOP - self._HIER_MAX_VISIBLE * self._HIER_ROW_H
+        # Track spans the same slots the rows occupy — bounds derived from _hier_row_y so the
+        # thumb can never drift from the rows (Bug A). Top of slot 0 down to bottom of the last.
+        track_top    = self._hier_row_y(0) + self._HIER_ROW_H * 0.5
+        track_bottom = self._hier_row_y(self._HIER_MAX_VISIBLE - 1) - self._HIER_ROW_H * 0.5
         track_h      = track_top - track_bottom  # positive
 
         thumb_ratio  = self._HIER_MAX_VISIBLE / total
@@ -663,9 +953,12 @@ class LevelEditor(Entity):
         self._hier_scroll_bar.y       = thumb_centre
 
     def _update_hierarchy_highlight(self):
-        all_entities = self.blocks + self.enemies
-        visible_slice = all_entities[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
-        for btn, e in zip(self._hier_buttons, visible_slice):
+        """Recolour the currently-built entity rows in place from the same visual-row slice the
+        buttons were built from — never rebuilds, so it stays cheap on scroll/select."""
+        visual_rows = self._hier_visual_rows()
+        visible = visual_rows[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
+        row_entities = [payload for kind, payload in visible if kind == 'row']
+        for btn, e in zip(self._hier_buttons, row_entities):
             btn.color = color.orange if e in self.selected else color.dark_gray
 
     def _is_over_panel(self, panel):
@@ -676,140 +969,33 @@ class LevelEditor(Entity):
         hh = panel.scale_y * 0.5
         return (px - hw) <= mx <= (px + hw) and (py - hh) <= my <= (py + hh)
 
-    # -------------------------------------------------------------------------
-    # Asset tray
-    # -------------------------------------------------------------------------
-
-    # Tray layout constants
-    _TRAY_Y       = -0.45   # centre y of the tray panel in camera.ui space
-    _TRAY_H       =  0.12   # panel height
-    _TILE_SIZE    =  0.09   # tile width and height in camera.ui space
-    _TILE_GAP     =  0.01   # horizontal gap between tiles
-    _TILE_PITCH   =  0.10   # _TILE_SIZE + _TILE_GAP
-
-    def _build_asset_tray(self):
-        self._tray_panel = Entity(
-            parent=camera.ui,
-            model='quad',
-            color=color.rgba(25, 25, 31, 220),
-            scale=(2.0, self._TRAY_H),
-            position=(0, self._TRAY_Y),
-            z=-0.5,
-            eternal=True,
-        )
-
-        self._tray_tiles = []   # list of (bg_entity, icon_entity, label_entity, asset_dict)
-        assets = LevelEditor.ASSETS
-        for i, asset in enumerate(assets):
-            self._create_tray_tile(i, asset)
-
-    def _tile_x(self, index):
-        """Camera.ui x-position of tile centre at given index, accounting for scroll."""
-        first_x = -(len(LevelEditor.ASSETS) - 1) * self._TILE_PITCH * 0.5
-        return first_x + index * self._TILE_PITCH - self._tray_scroll * self._TILE_PITCH
-
-    def _create_tray_tile(self, index, asset):
-        asset_color = color.rgb(*asset['color'])
-        tx = self._tile_x(index)
-
-        bg = Entity(
-            parent=camera.ui,
-            model='quad',
-            scale=(self._TILE_SIZE, self._TILE_SIZE),
-            position=(tx, self._TRAY_Y),
-            z=-0.6,
-            eternal=True,
-        )
-        bg.texture = None
-        try:
-            from ursina.shaders.unlit_shader import unlit_shader as _us
-            bg.shader = _us
-        except Exception as e:
-            logger.log('ERROR', f"_create_tray_tile bg shader {type(e).__name__}: {e}")
-        bg.color = color.rgba(50, 50, 60, 200)
-
-        icon = Entity(
-            parent=camera.ui,
-            model='quad',
-            color=asset_color,
-            scale=(self._TILE_SIZE * 0.65, self._TILE_SIZE * 0.65),
-            position=(tx, self._TRAY_Y + 0.01),
-            z=-0.7,
-            eternal=True,
-        )
-        icon.texture = None
-        try:
-            from ursina.shaders.unlit_shader import unlit_shader as _us
-            icon.shader = _us
-        except Exception as e:
-            logger.log('ERROR', f"_create_tray_tile icon shader {type(e).__name__}: {e}")
-        icon.color = asset_color
-        label = Text(
-            parent=camera.ui,
-            text=asset['name'],
-            position=(tx, self._TRAY_Y - self._TILE_SIZE * 0.42),
-            scale=0.55,
-            color=color.light_gray,
-            origin=(0, 0),
-            z=-0.7,
-            eternal=True,
-        )
-        self._tray_tiles.append((bg, icon, label, asset))
-
-    def _refresh_tray_positions(self):
-        for i, (bg, icon, label, asset) in enumerate(self._tray_tiles):
-            tx = self._tile_x(i)
-            bg.x    = tx
-            icon.x  = tx
-            label.x = tx
-
-    def _is_over_tray(self):
-        my = mouse.y
-        return (self._TRAY_Y - self._TRAY_H * 0.5) <= my <= (self._TRAY_Y + self._TRAY_H * 0.5)
+    def _hier_typing(self):
+        """True while the hierarchy search box is focused — so Delete/bookmark/backspace keys
+        edit the search text instead of deleting entities or recalling camera bookmarks."""
+        return bool(self._hier_search_field and self._hier_search_field.active)
 
     def _is_over_browser(self):
         my = mouse.y
         return (self._BROWSER_Y - self._BROWSER_H * 0.5) <= my <= (self._BROWSER_Y + self._BROWSER_H * 0.5)
 
-    def _tile_at_mouse(self):
-        """Return asset dict for the tile the mouse is over, or None."""
-        mx, my = mouse.x, mouse.y
-        if not self._is_over_tray():
-            return None
-        for i, (bg, icon, label, asset) in enumerate(self._tray_tiles):
-            tx = self._tile_x(i)
-            hw = self._TILE_SIZE * 0.5
-            hh = self._TILE_SIZE * 0.5
-            if (tx - hw) <= mx <= (tx + hw) and (self._TRAY_Y - hh) <= my <= (self._TRAY_Y + hh):
-                return asset
-        return None
-
-    def _highlight_hovered_tile(self):
-        """Brighten the tile the mouse is hovering over."""
-        for i, (bg, icon, label, asset) in enumerate(self._tray_tiles):
-            tx = self._tile_x(i)
-            hw = self._TILE_SIZE * 0.5
-            mx, my = mouse.x, mouse.y
-            hovered = (tx - hw) <= mx <= (tx + hw) and (self._TRAY_Y - hw) <= my <= (self._TRAY_Y + hw)
-            bg.color = color.rgba(80, 80, 100, 220) if hovered else color.rgba(50, 50, 60, 200)
-
     # -------------------------------------------------------------------------
-    # Asset browser (read-only — v1.3 Step 2)
+    # Asset browser
     #
     # Three tabs (Textures | Models | Sounds) over a horizontally scrollable row
-    # of 64x64 thumbnail cards sourced from asset_registry. Click selects a card;
-    # double-click only logs a placeholder (apply lands in a later v1.3 step).
-    # Hot-reload (Step 3), apply-to-entity (Steps 4-5) and drag-drop (Step 6) are
-    # intentionally NOT implemented here.
+    # of thumbnail cards. Textures/Sounds come from asset_registry; Models merges
+    # BUILTIN_MODELS (Cube/Stone/Metal/Wood/Enemy) with any real scanned .obj/.gltf
+    # files. Drag a Models-tab card to place an entity (same ghost/snap/undo as
+    # the former tray). Texture/Sound cards are click-to-select only.
     # -------------------------------------------------------------------------
 
-    # Browser layout constants (camera.ui units). Sits just above the v1.2 tray.
-    _BROWSER_Y      = -0.275   # centre y of the browser panel
-    _BROWSER_H      =  0.15    # panel height
-    _CARD_SIZE      =  0.085   # 64x64-ish card on a 720px-tall window (64/720 ~= 0.089)
-    _CARD_PITCH     =  0.105   # card-to-card horizontal spacing
-    _CARD_Y         = -0.275   # centre y of the card row
-    _TAB_Y          = -0.215   # y of the tab buttons (top of the panel)
+    # Browser layout constants (camera.ui units). Flush to the bottom of the window
+    # (reclaims the vertical space the old tray occupied).
+    _BROWSER_Y      = -0.40    # centre y of the browser panel
+    _BROWSER_H      =  0.20    # panel height (taller than before, fills old tray space)
+    _CARD_SIZE      =  0.095   # card width/height
+    _CARD_PITCH     =  0.115   # card-to-card horizontal spacing
+    _CARD_Y         = -0.41    # centre y of the card row
+    _TAB_Y          = -0.32    # y of the tab buttons (top of the panel)
     _BROWSER_CATEGORIES = ('texture', 'model', 'sound')
     # FIXED (Item 8): named the double-click window (was a bare 0.4 literal in
     # _handle_browser_click) so the next step's maintainer can find/tune it.
@@ -826,7 +1012,7 @@ class LevelEditor(Entity):
         self._browser_panel = Entity(
             parent=camera.ui,
             model='quad',
-            color=color.rgba(20, 20, 26, 220),
+            color=self._THEME_PANEL_BG,
             scale=(2.0, self._BROWSER_H),
             position=(0, self._BROWSER_Y),
             z=-0.5,
@@ -850,7 +1036,30 @@ class LevelEditor(Entity):
         for category in self._BROWSER_CATEGORIES:
             self._build_browser_cards(category)
 
-        self._set_browser_tab('texture')   # default tab (spec point 3)
+        # Scroll indicators — left/right arrow Text that show when more cards exist
+        # off-screen. Positioned at the card-row edges; toggled by _update_browser_scroll_indicators.
+        self._browser_scroll_left = Text(
+            parent=camera.ui,
+            text='<',
+            position=(-0.28, self._CARD_Y),
+            origin=(0.5, 0),
+            scale=1.4,
+            color=color.white66,
+            z=-0.9,
+            eternal=True,
+        )
+        self._browser_scroll_right = Text(
+            parent=camera.ui,
+            text='>',
+            position=(0, self._CARD_Y),
+            origin=(-0.5, 0),
+            scale=1.4,
+            color=color.white66,
+            z=-0.9,
+            eternal=True,
+        )
+
+        self._set_browser_tab('texture')   # default tab
 
     def _browser_manifest(self, category):
         """Return the {name: path} manifest dict for a browser category."""
@@ -860,35 +1069,53 @@ class LevelEditor(Entity):
             'sound':   asset_registry.sounds,
         }[category]
 
+    # Display names for the per-category collapsed strip ("Textures (0)").
+    _BROWSER_TAB_TITLES = {'texture': 'Textures', 'model': 'Models', 'sound': 'Sounds'}
+
     def _build_browser_cards(self, category):
-        """Build (and remember) the card row + empty-state label for one category."""
-        manifest = self._browser_manifest(category)
+        """Build (and remember) the card row + empty-state strip for one category.
+
+        For the 'model' category, BUILTIN_MODELS entries are prepended before any
+        real scanned assets from asset_registry. Built-in cards use their flat color
+        as the thumbnail and store their asset dict in _browser_card_assets so the
+        drag-to-place system can retrieve it.
+        """
         cards = []
-        for index, (name, path) in enumerate(sorted(manifest.items())):
+        index = 0
+
+        if category == 'model':
+            for asset in self.BUILTIN_MODELS:
+                cards.append(self._create_browser_card(category, index, asset['name'], None, builtin_asset=asset))
+                index += 1
+
+        manifest = self._browser_manifest(category)
+        for name, path in sorted(manifest.items()):
             cards.append(self._create_browser_card(category, index, name, path))
+            index += 1
         self._browser_cards[category] = cards
 
-        empty = {'texture': 'No textures found',
-                 'model':   'No models found',
-                 'sound':   'No sounds found'}[category]
         self._browser_empty_labels[category] = Text(
             parent=camera.ui,
-            text=empty,
-            position=(0, self._CARD_Y),
-            origin=(0, 0),
-            scale=0.85,
-            color=color.light_gray,
+            text=f"{self._BROWSER_TAB_TITLES[category]} (0)",
+            position=(self._card_x(0), self._CARD_Y),
+            origin=(-0.5, 0),
+            scale=0.7,
+            color=self._THEME_TEXT,
             z=-0.7,
             eternal=True,
         )
 
-    def _create_browser_card(self, category, index, name, path):
-        """Create one thumbnail card (bg quad + icon + name label). Returns the tuple."""
+    def _create_browser_card(self, category, index, name, path, builtin_asset=None):
+        """Create one thumbnail card (bg quad + icon + name label). Returns the tuple.
+
+        For built-in model cards (builtin_asset is not None), the icon shows the asset's
+        flat color and the asset dict is stored in _browser_card_assets for drag-to-place.
+        """
         cx = self._card_x(index)
         bg = Entity(
             parent=camera.ui,
             model='quad',
-            color=color.rgba(50, 50, 60, 200),
+            color=self._THEME_TILE_BG,
             scale=(self._CARD_SIZE, self._CARD_SIZE),
             position=(cx, self._CARD_Y),
             z=-0.6,
@@ -910,26 +1137,24 @@ class LevelEditor(Entity):
             logger.log('ERROR', f"_create_browser_card icon shader {type(e).__name__}: {e}")
 
         if category == 'texture':
-            # Texture cards show the actual image (spec point 4).
             try:
-                icon.texture = path
+                icon.texture = Texture(Path(path))
                 icon.color = color.white
-                # Auto-subscribe the card's icon so it hot-reloads (Step 3). This
-                # is the first testable proof of the reload mechanism without the
-                # Step 4 texture picker.
                 self.subscribe_texture(name, icon)
             except Exception as e:
                 logger.log('ERROR', f"_create_browser_card texture {name} {type(e).__name__}: {e}")
                 icon.texture = None
                 icon.color = color.magenta
+        elif category == 'model' and builtin_asset is not None:
+            icon.texture = None
+            icon.color = color.rgb(*builtin_asset['color'])
+            self._browser_card_assets[('model', name)] = builtin_asset
         elif category == 'model':
-            # Placeholder cube icon — live 3D thumbnails deferred (spec point 4).
             icon.texture = None
-            icon.color = color.rgba(120, 140, 170, 255)
+            icon.color = color.rgba(0.47, 0.55, 0.67, 1.0)
         else:
-            # Generic speaker/audio glyph for sounds.
             icon.texture = None
-            icon.color = color.rgba(150, 150, 90, 255)
+            icon.color = color.rgba(0.59, 0.59, 0.35, 1.0)
             Text(parent=icon, text='\U0001F50A', origin=(0, 0), scale=4, z=-1,
                  color=color.white, eternal=True)
 
@@ -973,15 +1198,30 @@ class LevelEditor(Entity):
                 empty_label.enabled = visible and not cards
         # Tab button highlight
         for cat, btn in self._browser_tab_buttons.items():
-            btn.color = color.azure if cat == category else color.dark_gray
+            btn.color = self._THEME_TAB_ACTIVE if cat == category else self._THEME_TAB_IDLE
         self._refresh_browser_card_positions()
         self._apply_browser_selection_highlight()
+        self._update_browser_scroll_indicators()
 
     def _apply_browser_selection_highlight(self):
         """Tint the selected card's background; reset all others on the active tab."""
         for bg, icon, label, name in self._browser_cards.get(self._browser_tab, []):
             selected = self._selected_asset == (self._browser_tab, name)
-            bg.color = color.rgba(90, 130, 200, 230) if selected else color.rgba(50, 50, 60, 200)
+            bg.color = self._THEME_TILE_SEL if selected else self._THEME_TILE_BG
+
+    def _update_browser_scroll_indicators(self):
+        """Show/hide left/right scroll arrows based on whether more cards exist off-screen."""
+        cards = self._browser_cards.get(self._browser_tab, [])
+        total = len(cards)
+        scroll = self._browser_scroll.get(self._browser_tab, 0)
+        aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
+        half_w = aspect * 0.5
+        visible_count = max(1, int((half_w * 2 - 0.10) / self._CARD_PITCH))
+        if self._browser_scroll_left:
+            self._browser_scroll_left.enabled = (scroll > 0)
+        if self._browser_scroll_right:
+            self._browser_scroll_right.enabled = (scroll + visible_count < total)
+            self._browser_scroll_right.x = half_w - 0.03
 
     def _card_at_mouse(self):
         """Return (category, name) for the card under the cursor on the active tab, or None."""
@@ -996,30 +1236,31 @@ class LevelEditor(Entity):
         return None
 
     def _handle_browser_click(self):
-        """Click selects a card; a second click within 0.4s on the same card is a double-click.
-
-        Returns True if the click landed on a card (so the caller can stop routing it).
+        """Click on a Models-tab card with a built-in asset dict initiates drag-to-place.
+        Other cards select only. Returns True if the click landed on a card.
         """
         target = self._card_at_mouse()
         if target is None:
             return False
 
-        now = _time.time()
-        last_target, last_t = self._browser_last_click
-        is_double = (target == last_target) and (now - last_t) <= self._DOUBLE_CLICK_SEC
-
         self._selected_asset = target
         self._apply_browser_selection_highlight()
 
-        if is_double:
-            category, name = target
-            # FIXED (Item 3): reset the click tracker after firing a double-click so a
-            # rapid triple-click does not register the 3rd click as a second double-click.
-            self._browser_last_click = (None, 0.0)
-            # Apply not yet implemented — hook point for the next v1.3 step.
-            logger.log('INFO', f"Asset double-clicked: {category}/{name} (apply not yet implemented)")
+        asset = self._browser_card_assets.get(target)
+        if asset is not None:
+            self._drag_origin = Vec2(mouse.x, mouse.y)
+            self._dragging = True
+            self._begin_drag(asset)
         else:
-            self._browser_last_click = (target, now)
+            now = _time.time()
+            last_target, last_t = self._browser_last_click
+            is_double = (target == last_target) and (now - last_t) <= self._DOUBLE_CLICK_SEC
+            if is_double:
+                category, name = target
+                self._browser_last_click = (None, 0.0)
+                logger.log('INFO', f"Asset double-clicked: {category}/{name}")
+            else:
+                self._browser_last_click = (target, now)
         return True
 
     # -------------------------------------------------------------------------
@@ -1098,21 +1339,13 @@ class LevelEditor(Entity):
         logger.log('INFO', f'Sound changed on disk: {name} (live reload not implemented)')
 
     def _show_status_notice(self, text, duration=2.0):
-        """Show a single reusable bottom-of-screen toast; reset its timer if re-shown.
-
-        Created once and reused (not per-call). Reused by drag-and-drop (Step 6)
-        for its success/error toast, so it's built generically here. A re-show
-        before the previous timer expires just updates the text and restarts the
-        timer — notices never stack.
-        """
+        """Show a single reusable bottom-of-screen toast; reset its timer if re-shown."""
         if self._status_notice is None:
             self._status_notice = Text(
                 text='',
                 parent=camera.ui,
                 origin=(0, 0),
-                # Just below the asset browser strip (centre y -0.275, half-height
-                # 0.075 → bottom edge -0.35), clear of the browser and tray.
-                position=(0, -0.40),
+                position=(0, self._BROWSER_Y - self._BROWSER_H * 0.5 - 0.02),
                 scale=0.9,
                 color=color.white,
                 z=-1,
@@ -1448,27 +1681,22 @@ class LevelEditor(Entity):
         return data
 
     def _set_editor_ui_visible(self, visible):
-        # FIXED (v1.2.4, BUG-4): also toggle the Move/Place buttons and the spawn marker —
-        # they previously stayed on screen during play-in-editor.
         for widget in [self._inspector, self._hier_panel, self._insp_title,
                        self.texture_button, self.snap_button,
                        self.play_button, self._move_button, self._place_button,
-                       self._tray_panel, self._spawn_marker]:
+                       self._stats_text,
+                       self._spawn_marker]:
             if widget:
                 if getattr(widget, 'destroy_source', None) is not None:
                     logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed widget {widget}')
                     continue
                 widget.enabled = visible
-        for bg, icon, label, asset in self._tray_tiles:
-            for e in (bg, icon, label):
-                if getattr(e, 'destroy_source', None) is not None:
-                    logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed tray entity {e}')
-                    continue
-                e.enabled = visible
 
-        # Asset browser (panel + tab buttons). Card / empty-label visibility is
-        # delegated to _set_browser_tab so only the active tab shows on restore.
-        browser_widgets = [self._browser_panel] + list(self._browser_tab_buttons.values())
+        # Asset browser (panel + tab buttons + scroll indicators). Card / empty-label
+        # visibility is delegated to _set_browser_tab so only the active tab shows.
+        browser_widgets = ([self._browser_panel]
+                           + list(self._browser_tab_buttons.values())
+                           + [self._browser_scroll_left, self._browser_scroll_right])
         for widget in browser_widgets:
             if widget:
                 if getattr(widget, 'destroy_source', None) is not None:
@@ -1646,13 +1874,25 @@ class LevelEditor(Entity):
         if not self._play_mode:
             if self._dragging:
                 self._update_ghost()
-                # Suppress normal model preview while dragging
                 self.model_preview.visible = False
             else:
                 self.update_model_preview()
-                self._highlight_hovered_tile()
             self._handle_gizmo_drag()
             self._update_gizmo()
+            # Refresh the stats strip ~once a second (matches Ursina's own counter cadence).
+            self._stats_accum += time.dt
+            if self._stats_accum >= 1.0:
+                self._stats_accum = 0.0
+                self._refresh_stats()
+
+    def _refresh_stats(self):
+        """Update the entity/collider stats readout from the editor's own level data."""
+        if getattr(self, '_stats_text', None) is None:
+            return
+        placed = self.blocks + self.enemies
+        entities = len(placed)
+        colliders = sum(1 for e in placed if getattr(e, 'collider', None) is not None)
+        self._stats_text.text = f'entities: {entities}   colliders: {colliders}'
 
     def input(self, key):
         """Route keyboard/mouse events to placement, selection, undo/redo, bookmarks, and drag."""
@@ -1704,7 +1944,8 @@ class LevelEditor(Entity):
         if not held_keys['control']:
             # FIXED: scene.focused_entity is never set by Ursina — bookmark keys fired
             # while typing numbers in inspector fields. Check InputField.active instead.
-            if any(f.active for f in self._insp_fields.values()):
+            # Also skip while typing in the hierarchy search box.
+            if any(f.active for f in self._insp_fields.values()) or self._hier_typing():
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -1714,32 +1955,36 @@ class LevelEditor(Entity):
                         self._editor_camera.rotation = bm['rotation']
                     break
 
-        # Delete selected
-        if key == 'delete' and self.selected:
-            for e in list(self.selected):
-                snapshot = self._entity_snapshot(e)
-                etype = 'enemy' if e in self.enemies else 'block'
-                logger.log('INFO', f"Entity deleted: type={etype} pos={[round(p, 3) for p in e.position]}")
-                cmd = DeleteEntityCommand(self, e, snapshot)
-                cmd.execute()
-                self._history.push(cmd)
-            self.selected.clear()
-            self._update_inspector()
-            self._refresh_hierarchy()
-            self._update_gizmo()
-            return
+        # Delete selected. macOS reports the physical Delete key as 'backspace' to
+        # Panda3D, so accept both. Skip while typing in an inspector field (backspace
+        # edits text there) or mid-drag (gizmo / box-select / browser drag).
+        if key in ('delete', 'backspace'):
+            typing = any(f.active for f in self._insp_fields.values()) or self._hier_typing()
+            mid_drag = (self._gizmo_drag_axis is not None
+                        or self._box_selecting or self._dragging)
+            if self.selected and not typing and not mid_drag:
+                for e in list(self.selected):
+                    snapshot = self._entity_snapshot(e)
+                    etype = 'enemy' if e in self.enemies else 'block'
+                    logger.log('INFO', f"Entity deleted: type={etype} pos={[round(p, 3) for p in e.position]}")
+                    cmd = DeleteEntityCommand(self, e, snapshot)
+                    cmd.execute()
+                    self._history.push(cmd)
+                self.selected.clear()
+                self._update_inspector()
+                self._refresh_hierarchy()
+                self._update_gizmo()
+                return
 
         # Cancel drag with Esc
         if key == 'escape' and self._dragging:
             self._cancel_drag()
             return
 
-        # Tray drag begin is now folded into the unified left mouse down block below.
-
         # Commit or cancel drag on left mouse up
         if key == 'left mouse up' and self._dragging:
             hovered = mouse.hovered_entity
-            if (self._is_over_tray()
+            if (self._is_over_browser()
                     or hovered is None
                     or hovered is self._drag_ghost
                     or getattr(hovered, 'parent', None) is camera.ui):
@@ -1748,18 +1993,8 @@ class LevelEditor(Entity):
                 self._commit_drag()
             return
 
-        # Unified left mouse down handler: tray drag → gizmo → panels → tool action
-        # FIXED: merged two separate 'left mouse down' blocks (was audit DEBT item #12).
-        # FIXED (FIX 1B): gizmo hit check is now step 1 — before panels and drag guard.
+        # Unified left mouse down handler: gizmo → panels → browser → tool action
         if key == 'left mouse down':
-            # Step 0: tray drag begin — must stay first so tile clicks don't fall through
-            tile_asset = self._tile_at_mouse()
-            if tile_asset is not None:
-                self._drag_origin = Vec2(mouse.x, mouse.y)
-                self._dragging = True
-                self._begin_drag(tile_asset)
-                return
-
             # Step 1: gizmo handle hit — raycast against tip cubes BEFORE any panel check.
             # setDepthTest(False)/setBin(100) make handles visible through blocks, but the
             # pick ray still hits geometry behind them; explicit raycast takes priority.
@@ -1804,7 +2039,7 @@ class LevelEditor(Entity):
 
             hovered = mouse.hovered_entity
 
-            # Skip direct camera.ui children (toolbar buttons, tray panel, etc.)
+            # Skip direct camera.ui children (toolbar buttons, browser panel, etc.)
             if hovered and getattr(hovered, 'parent', None) is camera.ui:
                 return
 
@@ -1860,13 +2095,12 @@ class LevelEditor(Entity):
             over_ui = (
                 (self._hier_panel and self._is_over_panel(self._hier_panel))
                 or (self._inspector and self._is_over_panel(self._inspector))
-                or self._is_over_tray()
                 or self._is_over_browser()
             )
             if self._editor_camera:
                 self._editor_camera.zoom_speed = 0 if over_ui else 1.25
 
-            # Asset browser horizontal scroll — same panel-hover guard as the tray
+            # Asset browser horizontal scroll
             if self._is_over_browser():
                 cards = self._browser_cards.get(self._browser_tab, [])
                 max_scroll = max(0, len(cards) - 1)
@@ -1874,6 +2108,7 @@ class LevelEditor(Entity):
                 self._browser_scroll[self._browser_tab] = max(
                     0, min(self._browser_scroll[self._browser_tab] + delta, max_scroll))
                 self._refresh_browser_card_positions()
+                self._update_browser_scroll_indicators()
                 return
 
             if self._hier_panel and self._is_over_panel(self._hier_panel):
@@ -1885,16 +2120,7 @@ class LevelEditor(Entity):
                 self._update_hierarchy_highlight()
                 return
 
-            # Inspector panel — suppress camera zoom when cursor is over it
             if self._inspector and self._is_over_panel(self._inspector):
-                return
-
-            # Tray horizontal scroll — mouse wheel while cursor over tray
-            if self._is_over_tray():
-                max_scroll = max(0, len(LevelEditor.ASSETS) - 1)
-                delta = -1 if key == 'scroll up' else 1
-                self._tray_scroll = max(0, min(self._tray_scroll + delta, max_scroll))
-                self._refresh_tray_positions()
                 return
 
         # Box-select with right mouse drag
@@ -2156,6 +2382,19 @@ if __name__ == '__main__':
     window.title = 'Level Editor'
     window.exit_button.visible = True
     window.fps_counter.enabled = True
+    # Ursina's tiny top-right entity/collider counters are replaced by the editor's
+    # own legible, labelled stats strip (LevelEditor._stats_text) — disable them so
+    # they don't double up under the new horizontal toolbar.
+    try:
+        window.entity_counter.enabled = False
+        window.collider_counter.enabled = False
+    except Exception as e:
+        logger.log('WARN', f'disable built-in counters failed: {type(e).__name__}: {e}')
+    # Drop the fps counter below the toolbar band so it never overlaps the row.
+    try:
+        window.fps_counter.y = 0.43
+    except Exception as e:
+        logger.log('WARN', f'reposition fps_counter failed: {type(e).__name__}: {e}')
     window.borderless = False
     window.size = (1280, 720)
 
@@ -2174,9 +2413,9 @@ if __name__ == '__main__':
     editor._editor_camera = editor_cam
 
     editor._hint_text = Text(
-        text="Drag tile from tray: Place block/enemy | Shift+LClick: Select | RDrag: Box-select\n"
+        text="Drag from Models tab: Place block/enemy | Shift+LClick: Select | RDrag: Box-select\n"
              "Delete: Remove selected | Ctrl+Z: Undo | Ctrl+Y/Shift+Z: Redo | Esc: Cancel drag\n"
-             "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor | Scroll over tray: scroll tiles\n"
+             "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor | Scroll: browse cards\n"
              "Ctrl+1-5: Save cam bookmark | 1-5: Recall bookmark",
         parent=camera.ui,
         position=(-.88, .48),
@@ -2185,6 +2424,7 @@ if __name__ == '__main__':
         z=-1,
         eternal=True,
     )
+    editor._attach_hint_background()   # dark backing panel sized to the legend (Change D)
     editor._apply_layout()
 
     app.run()

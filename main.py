@@ -269,7 +269,8 @@ def main_menu():
         collider='box',
         y=0,
         scale=(100, 1, 100),
-        texture='grass',
+        texture='assets/textures/floor_ground_grass.png',
+        texture_scale=(50, 50),
         name='ground'
     )
 
