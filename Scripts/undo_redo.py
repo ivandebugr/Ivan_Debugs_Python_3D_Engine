@@ -132,6 +132,26 @@ class ChangeTextureCommand(Command):
             e.texture = t
 
 
+class ChangeModelCommand(Command):
+    """Apply new_model to all entities; undo restores per-entity old models."""
+
+    def __init__(self, entities, old_models, new_model):
+        self.entities    = entities
+        self.old_models  = old_models
+        self.new_model   = new_model
+
+    def __repr__(self):
+        return f"ChangeModelCommand(n={len(self.entities)}, new={self.new_model!r})"
+
+    def execute(self):
+        for e in self.entities:
+            e.model = self.new_model
+
+    def undo(self):
+        for e, m in zip(self.entities, self.old_models):
+            e.model = m
+
+
 class ChangeColourCommand(Command):
     """Apply new_colour to all entities; undo restores per-entity old colours."""
 

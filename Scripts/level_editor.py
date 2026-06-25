@@ -7,16 +7,17 @@ from ursina.prefabs.editor_camera import EditorCamera
 from panda3d.core import loadPrcFileData, AntialiasAttrib
 import json
 import os
+import shutil
 import time as _time   # wall-clock for double-click timing (ursina `time` is Panda3D's clock)
 
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
-    MoveEntityCommand, ChangeTextureCommand, ChangeColourCommand,
+    MoveEntityCommand, ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
     ChangePropertyCommand
 )
 from Scripts.session_logger import SessionLogger
 from Scripts.level_io import load_level_data
-from Scripts.asset_registry import asset_registry
+from Scripts.asset_registry import asset_registry, CATEGORY_DIRS, CATEGORY_EXTENSIONS
 
 logger = SessionLogger()
 
@@ -72,11 +73,15 @@ class LevelEditor(Entity):
         self._insp_fields = {}
         self._insp_tex_swatch = None
         self._insp_tex_name = None
+        self._insp_model_label = None
+        self._insp_model_field = None
 
-        # Texture picker overlay (v1.3 Step 4)
-        self._texpick_panel = None
-        self._texpick_cells = []
-        self.texture_picker_open = False
+        # Asset picker overlay (v1.3 Step 4 texture, Step 5 model) — shared mechanics,
+        # one overlay instance per category, keyed by category name.
+        self._asset_picker_panels = {}   # {category: panel Entity}
+        self._asset_picker_cells = {}    # {category: [(bg_entity, name), ...]}
+        self.asset_picker_open = None    # category name while open, else None
+        self._asset_picker_on_select = None
         self._hier_panel = None
         self._hier_buttons = []
         self._hier_scroll_bar = None
@@ -181,6 +186,26 @@ class LevelEditor(Entity):
             scale=(self._TOOLBAR_BTN_W_BASE['_place_button'], self._TOOLBAR_BTN_H),
             position=(.35, self._TOOLBAR_Y),
             on_click=lambda: self._set_tool('place'),
+            color=color.dark_gray,
+            text_color=color.white,
+            highlight_text_color=color.white,
+            text_scale=0.9,
+            z=-1,
+            eternal=True,
+        )
+
+        # Import Asset button (v1.3 Step 6) — opens the OS native file picker and
+        # routes the chosen file through the same copy/route/rebuild/notice pipeline
+        # a real OS drag-and-drop would use. Panda3D has no native file-drop support
+        # on any released version (confirmed via Panda3D core dev on the official
+        # forum, Oct 2023 — open GitHub feature request since Jan 2020), so this
+        # button is the working substitute for "drag a file into the editor".
+        self._import_button = Button(
+            parent=camera.ui,
+            text='Import Asset',
+            scale=(self._TOOLBAR_BTN_W_BASE['_import_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
+            on_click=self._open_import_dialog,
             color=color.dark_gray,
             text_color=color.white,
             highlight_text_color=color.white,
@@ -311,6 +336,7 @@ class LevelEditor(Entity):
         'play_button':    0.10,
         '_move_button':   0.10,
         '_place_button':  0.11,
+        '_import_button': 0.14,
     }
     _TOOLBAR_REF_ASPECT = 16 / 9
 
@@ -388,6 +414,7 @@ class LevelEditor(Entity):
             ('play_button',    self.play_button),
             ('_move_button',   self._move_button),
             ('_place_button',  self._place_button),
+            ('_import_button', self._import_button),
         )
         scale_factor = min(1.0, aspect / self._TOOLBAR_REF_ASPECT)
         gap = self._TOOLBAR_GAP * scale_factor
@@ -722,11 +749,58 @@ class LevelEditor(Entity):
         except Exception as e:
             logger.log('ERROR', f"_build_inspector setBin tex name {type(e).__name__}: {e}")
 
+        # Model field (v1.3 Step 5) — click opens the model picker overlay.
+        # Blocks only; hidden whenever the selection includes an enemy (see
+        # _update_inspector_model_field). Sits below the Texture row.
+        self._insp_model_label = Text(
+            parent=self._inspector,
+            text='Model',
+            position=(-.33, -.38),
+            color=color.light_gray,
+            origin=(0, 0),
+            z=-1,
+            eternal=True,
+        )
+        self._insp_model_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._insp_model_label.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin model label {type(e).__name__}: {e}")
+
+        self._insp_model_field = Entity(
+            parent=self._inspector,
+            model='quad',
+            color=self._THEME_TILE_BG,
+            scale=(.27, .08),
+            position=(.10, -.38),
+            z=-1,
+            eternal=True,
+        )
+        try:
+            self._insp_model_field.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin model field {type(e).__name__}: {e}")
+
+        self._insp_model_name = Text(
+            parent=self._insp_model_field,
+            text='---',
+            origin=(0, 0),
+            color=color.white,
+            z=-1,
+            eternal=True,
+        )
+        self._insp_model_name.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._insp_model_name.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin model name {type(e).__name__}: {e}")
+
     def _update_inspector(self):
         if not self.selected:
             for f in self._insp_fields.values():
                 f.text = ' '
             self._update_inspector_texture_swatch()
+            self._update_inspector_model_field()
             return
         entities = list(self.selected)
 
@@ -744,6 +818,7 @@ class LevelEditor(Entity):
         self._insp_fields['scl_y'].text = shared_or_multi(lambda e: e.scale_y)
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
         self._update_inspector_texture_swatch()
+        self._update_inspector_model_field()
 
     def _entity_texture_name(self, e):
         """Best-effort texture name for an entity, '' if none/unreadable."""
@@ -787,6 +862,43 @@ class LevelEditor(Entity):
             self._insp_tex_swatch.color = color.white
         self._insp_tex_name.text = name or '---'
 
+    def _entity_model_name(self, e):
+        """Best-effort model name for an entity, '' if none/unreadable.
+
+        Mirrors _entity_texture_name: Ursina sets `model.name` to whatever
+        string was assigned to Entity.model (built-in name like 'cube', or
+        the full path for an imported asset), so this round-trips cleanly.
+        """
+        if not getattr(e, 'model', None):
+            return ''
+        return getattr(e.model, 'name', str(e.model))
+
+    def _update_inspector_model_field(self):
+        """Refresh the inspector's model field from the current selection.
+
+        Blocks only (v1.3 Step 5) — hidden whenever the selection is empty or
+        includes any enemy, so a mixed block+enemy selection can never look
+        like it's offering to swap the enemy's model. Shows the shared model
+        name when every selected block uses the same model, '---' on a mixed
+        selection.
+        """
+        if getattr(self, '_insp_model_field', None) is None:
+            return
+        entities = list(self.selected)
+        has_enemy = any(e in self.enemies for e in entities)
+        if not entities or has_enemy:
+            self._insp_model_label.enabled = False
+            self._insp_model_field.enabled = False
+            return
+        self._insp_model_label.enabled = True
+        self._insp_model_field.enabled = True
+        names = {self._entity_model_name(e) for e in entities}
+        if len(names) != 1:
+            self._insp_model_name.text = '---'
+            return
+        name = next(iter(names))
+        self._insp_model_name.text = (Path(name).stem if name else 'cube') or 'cube'
+
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
         # always operates on whatever is selected when Enter is pressed.
@@ -821,33 +933,70 @@ class LevelEditor(Entity):
             self._update_gizmo()
 
     # -------------------------------------------------------------------------
-    # Texture picker overlay (v1.3 Step 4)
+    # Asset picker overlay (v1.3 Step 4 texture, Step 5 model)
     #
-    # A floating grid of texture thumbnails from asset_registry, opened by
-    # clicking the inspector's texture swatch. Built lazily on first open and
-    # reused afterwards (entities just toggle .enabled). self.texture_picker_open
-    # tracks visibility; input() consults it to swallow the next click so a
-    # dismiss-click never also reaches scene selection/placement underneath.
+    # A floating grid of asset thumbnails from asset_registry, opened by clicking
+    # an inspector field (texture swatch, model field). One overlay panel is built
+    # lazily per category on first open and reused afterwards (entities just
+    # toggle .enabled). self.asset_picker_open holds the open category name (or
+    # None); input() consults it to swallow the next click so a dismiss-click
+    # never also reaches scene selection/placement underneath. Texture and model
+    # pickers share this exact mechanism — only the thumbnail content (real
+    # texture preview vs placeholder cube icon) and the apply callback differ.
     # -------------------------------------------------------------------------
 
-    _TEXPICK_COLS = 4
-    _TEXPICK_CELL = 0.09
-    _TEXPICK_GAP = 0.015
-    _TEXPICK_PAD = 0.03
+    _ASSETPICK_COLS = 4
+    _ASSETPICK_CELL = 0.09
+    _ASSETPICK_GAP = 0.015
+    _ASSETPICK_PAD = 0.03
 
-    def _build_texture_picker(self):
-        """Build the overlay panel + thumbnail grid once, sized to the current manifest."""
-        names = sorted(asset_registry.textures.keys())
-        cols = self._TEXPICK_COLS
+    _ASSETPICK_TITLES = {
+        'texture': 'Choose Texture',
+        'model': 'Choose Model',
+    }
+
+    def _asset_picker_names(self, category):
+        manifest = {'texture': asset_registry.textures, 'model': asset_registry.models}[category]
+        return sorted(manifest.keys())
+
+    def _build_asset_picker_icon(self, category, parent, name):
+        """Build the thumbnail icon for one cell. Textures show the real image;
+        models show a placeholder cube icon per the v1.3 spec (live 3D
+        thumbnails are deferred)."""
+        icon = Entity(parent=parent, model='quad', scale=(0.85, 0.85), z=-1, eternal=True)
+        try:
+            from ursina.shaders.unlit_shader import unlit_shader as _us
+            icon.shader = _us
+        except Exception as e:
+            logger.log('ERROR', f"_build_asset_picker_icon shader {type(e).__name__}: {e}")
+        if category == 'texture':
+            path = asset_registry.get_texture_path(name)
+            try:
+                icon.texture = Texture(Path(path))
+                icon.color = color.white
+            except Exception as e:
+                logger.log('ERROR', f"_build_asset_picker_icon texture {name} {type(e).__name__}: {e}")
+                icon.texture = None
+                icon.color = color.magenta
+        else:
+            icon.model = 'cube'
+            icon.color = self._THEME_TILE_BG
+        return icon
+
+    def _build_asset_picker(self, category):
+        """Build the overlay panel + thumbnail grid once for `category`, sized to
+        the current manifest."""
+        names = self._asset_picker_names(category)
+        cols = self._ASSETPICK_COLS
         rows = max(1, (len(names) + cols - 1) // cols) if names else 1
-        cell = self._TEXPICK_CELL
-        gap = self._TEXPICK_GAP
-        pad = self._TEXPICK_PAD
+        cell = self._ASSETPICK_CELL
+        gap = self._ASSETPICK_GAP
+        pad = self._ASSETPICK_PAD
         title_strip = 0.05   # panel_h-units reserved for the title row, below the top edge
         panel_w = cols * cell + (cols - 1) * gap + pad * 2
         panel_h = rows * cell + (rows - 1) * gap + pad * 2 + title_strip
 
-        self._texpick_panel = Entity(
+        panel = Entity(
             parent=camera.ui,
             model='quad',
             color=self._THEME_PANEL_BG,
@@ -857,8 +1006,8 @@ class LevelEditor(Entity):
             eternal=True,
         )
         title = Text(
-            parent=self._texpick_panel,
-            text='Choose Texture',
+            parent=panel,
+            text=self._ASSETPICK_TITLES.get(category, 'Choose Asset'),
             position=(0, 0.5 - (title_strip * 0.5) / panel_h),
             origin=(0, 0),
             color=color.white,
@@ -867,7 +1016,7 @@ class LevelEditor(Entity):
         )
         title.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
 
-        self._texpick_cells = []  # [(bg_entity, name)]
+        cells = []  # [(bg_entity, name)]
         top_y = 0.5 - title_strip / panel_h - (pad * 0.5 + cell * 0.5) / panel_h
         left_x = -0.5 + pad / panel_w + (cell / panel_w) * 0.5
         for i, name in enumerate(names):
@@ -875,7 +1024,7 @@ class LevelEditor(Entity):
             cx = left_x + c * (cell + gap) / panel_w
             cy = top_y - r * (cell + gap) / panel_h
             bg = Entity(
-                parent=self._texpick_panel,
+                parent=panel,
                 model='quad',
                 color=self._THEME_TILE_BG,
                 scale=(cell / panel_w, cell / panel_h),
@@ -883,26 +1032,7 @@ class LevelEditor(Entity):
                 z=-1,
                 eternal=True,
             )
-            icon = Entity(
-                parent=bg,
-                model='quad',
-                scale=(0.85, 0.85),
-                z=-1,
-                eternal=True,
-            )
-            try:
-                from ursina.shaders.unlit_shader import unlit_shader as _us
-                icon.shader = _us
-            except Exception as e:
-                logger.log('ERROR', f"_build_texture_picker icon shader {type(e).__name__}: {e}")
-            path = asset_registry.get_texture_path(name)
-            try:
-                icon.texture = Texture(Path(path))
-                icon.color = color.white
-            except Exception as e:
-                logger.log('ERROR', f"_build_texture_picker texture {name} {type(e).__name__}: {e}")
-                icon.texture = None
-                icon.color = color.magenta
+            self._build_asset_picker_icon(category, bg, name)
             cell_label = Text(
                 parent=bg,
                 text=name,
@@ -913,35 +1043,57 @@ class LevelEditor(Entity):
                 eternal=True,
             )
             cell_label.world_scale = Vec3(self._INSP_LABEL_WS * 0.6, self._INSP_LABEL_WS * 0.6, 1)
-            self._texpick_cells.append((bg, name))
+            cells.append((bg, name))
 
-    def open_texture_picker(self):
-        """Open the texture picker overlay near the inspector's texture swatch."""
+        self._asset_picker_panels[category] = panel
+        self._asset_picker_cells[category] = cells
+
+    def _open_asset_picker(self, category, anchor_entity, on_select):
+        """Open the `category` asset picker overlay anchored to the left of
+        `anchor_entity` (an inspector field/swatch in camera.ui space).
+        `on_select(name)` is called when a cell is clicked; the picker closes
+        itself either way (selection or dismiss)."""
         if not self.selected:
             return
-        if getattr(self, '_texpick_panel', None) is None:
-            self._build_texture_picker()
-        if getattr(self, '_insp_tex_swatch', None) is not None:
-            swatch_x, swatch_y, _, _ = self._camera_ui_pos_and_scale(self._insp_tex_swatch)
-            self._texpick_panel.x = swatch_x - self._texpick_panel.scale_x * 0.5 - 0.02
-            self._texpick_panel.y = swatch_y
-        self._texpick_panel.enabled = True
-        self.texture_picker_open = True
+        if category not in self._asset_picker_panels:
+            self._build_asset_picker(category)
+        panel = self._asset_picker_panels[category]
+        if anchor_entity is not None:
+            anchor_x, anchor_y, _, _ = self._camera_ui_pos_and_scale(anchor_entity)
+            panel.x = anchor_x - panel.scale_x * 0.5 - 0.02
+            panel.y = anchor_y
+        panel.enabled = True
+        self.asset_picker_open = category
+        self._asset_picker_on_select = on_select
 
-    def close_texture_picker(self):
-        """Hide the overlay without applying anything."""
-        if getattr(self, '_texpick_panel', None) is not None:
-            self._texpick_panel.enabled = False
-        self.texture_picker_open = False
+    def _close_asset_picker(self):
+        """Hide the open overlay without applying anything."""
+        if self.asset_picker_open is not None:
+            panel = self._asset_picker_panels.get(self.asset_picker_open)
+            if panel is not None:
+                panel.enabled = False
+        self.asset_picker_open = None
+        self._asset_picker_on_select = None
 
-    def _texpick_cell_at_mouse(self):
-        """Return the texture name under the cursor in the open picker, or None."""
-        if not self.texture_picker_open or self._texpick_panel is None:
+    def _asset_picker_cell_at_mouse(self):
+        """Return the asset name under the cursor in the open picker, or None."""
+        if self.asset_picker_open is None:
             return None
-        for bg, name in self._texpick_cells:
+        for bg, name in self._asset_picker_cells.get(self.asset_picker_open, []):
             if self._is_over_world_panel(bg):
                 return name
         return None
+
+    def open_texture_picker(self):
+        """Open the texture picker overlay near the inspector's texture swatch."""
+        self._open_asset_picker('texture', self._insp_tex_swatch, self._apply_texture_pick)
+
+    def close_texture_picker(self):
+        self._close_asset_picker()
+
+    @property
+    def texture_picker_open(self):
+        return self.asset_picker_open == 'texture'
 
     def _apply_texture_pick(self, name):
         """Apply `name`'s texture to every selected entity as one undo step, then close."""
@@ -955,7 +1107,32 @@ class LevelEditor(Entity):
                 self.subscribe_texture(name, e)
             self._update_inspector_texture_swatch()
             logger.log('INFO', f"Texture picker applied: {name} to {len(entities)} entities")
-        self.close_texture_picker()
+        self._close_asset_picker()
+
+    def open_model_picker(self):
+        """Open the model picker overlay near the inspector's model field.
+
+        Blocks only — enemy model swapping is deferred to v1.4. Guard here even
+        though the caller already gates on selection type, so this can never be
+        invoked into applying a model onto an enemy.
+        """
+        if any(e in self.enemies for e in self.selected):
+            return
+        self._open_asset_picker('model', self._insp_model_field, self._apply_model_pick)
+
+    def _apply_model_pick(self, name):
+        """Apply `name`'s model to every selected block as one undo step, then close."""
+        entities = [e for e in self.selected
+                    if getattr(e, 'destroy_source', None) is None and e not in self.enemies]
+        if entities:
+            path = asset_registry.get_model_path(name) or name
+            old_models = [self._entity_model_name(e) or 'cube' for e in entities]
+            cmd = ChangeModelCommand(entities, old_models, path)
+            cmd.execute()
+            self._history.push(cmd)
+            self._update_inspector_model_field()
+            logger.log('INFO', f"Model picker applied: {name} to {len(entities)} entities")
+        self._close_asset_picker()
 
     # -------------------------------------------------------------------------
     # Hierarchy panel
@@ -1416,6 +1593,32 @@ class LevelEditor(Entity):
         )
         return (bg, icon, label, name)
 
+    def _refresh_browser_cards(self):
+        """Tear down and rebuild every category's card row from the current
+        registry manifest (called after an import changes what's on disk).
+
+        Cards are eternal=True (per the established pattern — transient
+        per-refresh widgets that AREN'T eternal are the hierarchy panel's rows;
+        these are not, so destroy() needs force_destroy=True or it's a no-op).
+        """
+        for category in self._BROWSER_CATEGORIES:
+            for bg, icon, label, name in self._browser_cards.get(category, []):
+                if category == 'texture':
+                    self.unsubscribe_texture(name, icon)
+                destroy(bg, force_destroy=True)
+                destroy(icon, force_destroy=True)
+                destroy(label, force_destroy=True)
+            self._browser_cards[category] = []
+            empty_label = self._browser_empty_labels.get(category)
+            if empty_label is not None:
+                destroy(empty_label, force_destroy=True)
+            self._browser_card_assets = {
+                k: v for k, v in self._browser_card_assets.items() if k[0] != category
+            }
+            self._build_browser_cards(category)
+        self._set_browser_tab(self._browser_tab)
+        self._apply_layout()
+
     def _card_x(self, index):
         """Camera.ui x of a card centre at the given index for the active tab."""
         first_x = -0.20
@@ -1584,8 +1787,13 @@ class LevelEditor(Entity):
         """Sound live-reload is not implemented (per spec) — log only."""
         logger.log('INFO', f'Sound changed on disk: {name} (live reload not implemented)')
 
-    def _show_status_notice(self, text, duration=2.0):
-        """Show a single reusable bottom-of-screen toast; reset its timer if re-shown."""
+    def _show_status_notice(self, text, color_=None, duration=2.0):
+        """Show a single reusable bottom-of-screen toast; reset its timer if re-shown.
+
+        `duration=None` makes the notice persistent (no auto-hide timer) — used for
+        drag-and-drop error notices (v1.3 Step 6), which stay up until the next notice
+        replaces them. `color_` defaults to white (hot-reload's original behaviour).
+        """
         if self._status_notice is None:
             self._status_notice = Text(
                 text=text,
@@ -1598,12 +1806,15 @@ class LevelEditor(Entity):
                 eternal=True,
             )
         self._status_notice.text = text
+        self._status_notice.color = color_ if color_ is not None else color.white
         self._status_notice.enabled = True
         # Monotonically rising token: only the latest timer is allowed to hide the
-        # notice, so a rapid re-show doesn't get cut short by an earlier timer.
+        # notice, so a rapid re-show doesn't get cut short by an earlier timer, and a
+        # persistent (duration=None) notice never gets a hide invoked against it.
         self._status_notice_token = getattr(self, '_status_notice_token', 0) + 1
         token = self._status_notice_token
-        invoke(self._hide_status_notice, token, delay=duration)
+        if duration is not None:
+            invoke(self._hide_status_notice, token, delay=duration)
 
     def _hide_status_notice(self, token):
         """Hide the toast only if no newer notice has been shown since `token`."""
@@ -1611,6 +1822,90 @@ class LevelEditor(Entity):
             return
         if self._status_notice is not None and getattr(self._status_notice, 'destroy_source', None) is None:
             self._status_notice.enabled = False
+
+    # -------------------------------------------------------------------------
+    # Asset import (v1.3 Step 6)
+    #
+    # Spec called for OS drag-and-drop (base.win.setAcceptDrop + a 'drop-files'
+    # event). Neither exists in any released Panda3D version — confirmed via a
+    # Panda3D core developer on the official forum (Oct 2023): "It has not been
+    # implemented as of yet"; the GitHub feature request has been open since Jan
+    # 2020. The working substitute, by user decision: an "Import Asset" toolbar
+    # button that opens the OS-native file picker (tkinter.filedialog, stdlib,
+    # no new dependency) and feeds the chosen path into the same pipeline a real
+    # drop handler would have used. import_asset_file() is that pipeline — it
+    # has no UI-framework dependency of its own, so swapping in real OS drop
+    # support later (if Panda3D ever ships it) only means replacing the picker
+    # call, not this method.
+    # -------------------------------------------------------------------------
+
+    def _open_import_dialog(self):
+        """Toolbar handler: open the native file picker, import what's chosen."""
+        if self._play_mode:
+            return   # import is an editor-only action; ignore while playing
+        try:
+            import tkinter
+            from tkinter import filedialog
+            root = tkinter.Tk()
+            root.withdraw()
+            root.attributes('-topmost', True)
+            path = filedialog.askopenfilename(title='Import Asset')
+            root.destroy()
+        except Exception as e:
+            logger.log('ERROR', f'_open_import_dialog: {type(e).__name__}: {e}')
+            return
+        if not path:
+            return   # user cancelled
+        self.import_asset_file(path)
+
+    def import_asset_file(self, src_path):
+        """Import one file into the asset pipeline: route by extension, copy
+        (never move) into the matching assets/ subfolder, rebuild the registry
+        manifest, and show a notice. Safe to call once per file in a batch —
+        one bad file never raises out of this method.
+
+        Filename-collision handling (undefined by spec — decision made here):
+        skip the copy and show a named error notice rather than overwrite.
+        Overwriting silently could clobber an existing asset that's already
+        placed in the level; auto-suffixing would let `name` (the registry key,
+        derived from the file stem) silently diverge from what the user expects
+        to reuse. Skip-with-notice is the only option that can't surprise them.
+        """
+        if self._play_mode:
+            logger.log('INFO', f'import_asset_file: ignored during play-in-editor: {src_path}')
+            return
+        try:
+            src = Path(src_path)
+            if not src.is_file():
+                self._show_status_notice(f'Import failed: not a file: {src.name}', color_=color.red, duration=None)
+                return
+            ext = src.suffix.lower()
+            category = None
+            for cat, extensions in CATEGORY_EXTENSIONS.items():
+                if ext in extensions:
+                    category = cat
+                    break
+            if category is None:
+                self._show_status_notice(f'Unsupported file type: {src.name}', color_=color.red, duration=None)
+                logger.log('WARN', f'import_asset_file: unsupported extension {ext} ({src.name})')
+                return
+
+            dest_dir = CATEGORY_DIRS[category]
+            dest_dir.mkdir(parents=True, exist_ok=True)
+            dest = dest_dir / src.name
+            if dest.exists():
+                self._show_status_notice(f'Import skipped — "{src.name}" already exists in {category}s', color_=color.red, duration=None)
+                logger.log('WARN', f'import_asset_file: name collision, skipped: {dest}')
+                return
+
+            shutil.copy2(src, dest)
+            asset_registry.rebuild()
+            self._refresh_browser_cards()
+            self._show_status_notice(f'Imported: {src.name}', color_=color.white, duration=2.0)
+            logger.log('INFO', f'import_asset_file: imported {src} -> {dest} ({category})')
+        except Exception as e:
+            self._show_status_notice(f'Import failed: {src_path}', color_=color.red, duration=None)
+            logger.log('ERROR', f'import_asset_file: {type(e).__name__}: {e}')
 
     def _begin_drag(self, asset):
         self._drag_asset = asset
@@ -1930,6 +2225,7 @@ class LevelEditor(Entity):
         for widget in [self._inspector, self._hier_panel, self._insp_title,
                        self.snap_button,
                        self.play_button, self._move_button, self._place_button,
+                       self._import_button,
                        self._stats_text,
                        self._spawn_marker]:
             if widget:
@@ -2147,20 +2443,21 @@ class LevelEditor(Entity):
                 self._exit_play_mode()
             return
 
-        # Texture picker overlay — while open, it owns input. Escape or a click
-        # anywhere are both explicit dismiss/apply paths (no fall-through to the
-        # scene below); this is the click-outside guard the picker needs because
-        # Ursina broadcasts input() to every entity, not just the topmost one.
-        if self.texture_picker_open:
+        # Asset picker overlay (texture or model) — while open, it owns input.
+        # Escape or a click anywhere are both explicit dismiss/apply paths (no
+        # fall-through to the scene below); this is the click-outside guard the
+        # picker needs because Ursina broadcasts input() to every entity, not
+        # just the topmost one.
+        if self.asset_picker_open is not None:
             if key == 'escape':
-                self.close_texture_picker()
+                self._close_asset_picker()
                 return
             if key == 'left mouse down':
-                name = self._texpick_cell_at_mouse()
+                name = self._asset_picker_cell_at_mouse()
                 if name is not None:
-                    self._apply_texture_pick(name)
+                    self._asset_picker_on_select(name)
                 else:
-                    self.close_texture_picker()
+                    self._close_asset_picker()
                 return
             return
 
@@ -2294,6 +2591,14 @@ class LevelEditor(Entity):
             if (self._insp_tex_swatch and self.selected
                     and self._is_over_world_panel(self._insp_tex_swatch)):
                 self.open_texture_picker()
+                return
+            # Model field click opens the model picker — blocks only (see
+            # open_model_picker's own enemy guard); same priority as the texture
+            # swatch, before the blanket inspector-panel guard.
+            if (self._insp_model_field and self.selected
+                    and not any(e in self.enemies for e in self.selected)
+                    and self._is_over_world_panel(self._insp_model_field)):
+                self.open_model_picker()
                 return
             if self._inspector and self._is_over_panel(self._inspector):
                 return
