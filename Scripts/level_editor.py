@@ -693,7 +693,7 @@ class LevelEditor(Entity):
     def _update_inspector(self):
         if not self.selected:
             for f in self._insp_fields.values():
-                f.text = ''
+                f.text = ' '
             return
         entities = list(self.selected)
 
@@ -1038,9 +1038,14 @@ class LevelEditor(Entity):
 
         # Scroll indicators — left/right arrow Text that show when more cards exist
         # off-screen. Positioned at the card-row edges; toggled by _update_browser_scroll_indicators.
+        # use_tags=False: Ursina's Text treats '<'/'>' as start_tag/end_tag delimiters
+        # by default, so text='<' parses as an empty tag with zero lines, which crashes
+        # align() (IndexError: list index out of range on linewidths[-1]). Disabling tag
+        # parsing makes these literal arrow glyphs.
         self._browser_scroll_left = Text(
             parent=camera.ui,
             text='<',
+            use_tags=False,
             position=(-0.28, self._CARD_Y),
             origin=(0.5, 0),
             scale=1.4,
@@ -1051,6 +1056,7 @@ class LevelEditor(Entity):
         self._browser_scroll_right = Text(
             parent=camera.ui,
             text='>',
+            use_tags=False,
             position=(0, self._CARD_Y),
             origin=(-0.5, 0),
             scale=1.4,
@@ -1342,7 +1348,7 @@ class LevelEditor(Entity):
         """Show a single reusable bottom-of-screen toast; reset its timer if re-shown."""
         if self._status_notice is None:
             self._status_notice = Text(
-                text='',
+                text=text,
                 parent=camera.ui,
                 origin=(0, 0),
                 position=(0, self._BROWSER_Y - self._BROWSER_H * 0.5 - 0.02),
