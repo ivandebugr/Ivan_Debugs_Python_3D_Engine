@@ -14,6 +14,7 @@ DEFAULT_ROTATION   = [0, 0, 0]
 DEFAULT_SCALE      = [1, 1, 1]
 DEFAULT_COLOUR     = [1, 1, 1]
 DEFAULT_TEXTURE    = 'white_cube'
+DEFAULT_MODEL      = 'cube'
 DEFAULT_HP         = 100
 DEFAULT_ENEMY_TYPE = 'default'
 
@@ -26,6 +27,10 @@ def _normalise_entry(entry):
         'scale':    list(entry.get('scale',    DEFAULT_SCALE)),
         'colour':   list(entry.get('colour',   DEFAULT_COLOUR)),
         'texture':  entry.get('texture', DEFAULT_TEXTURE),
+        # v1.3 Step 7: optional model field. Absent → 'cube' (built-in primitive,
+        # the pre-step-7 behaviour for every block). Backwards-compatible: old
+        # level.json files have no 'model' key and load as cube exactly as before.
+        'model':    entry.get('model', DEFAULT_MODEL),
     }
     if out['type'] == 'enemy':
         out['hp']         = entry.get('hp', DEFAULT_HP)

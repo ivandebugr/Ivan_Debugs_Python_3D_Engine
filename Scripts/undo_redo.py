@@ -23,6 +23,55 @@ def _resolve_texture(name):
     return name
 
 
+def _resolve_model(name_or_path):
+    """Resolve a model reference to something safe to assign to Entity.model.
+
+    Mirrors _resolve_texture for models. The bug it avoids is the same one the
+    v1.3-step4 texture fix solved: assigning a bare path *string* to .model
+    sends it through load_model()'s glob-by-name search rooted at
+    application.asset_folder, which double-nests against an already-resolved
+    project-relative path and fails ('missing model' warning, blank entity).
+
+    Three cases:
+      - falsy / 'cube' / any built-in primitive name with no registry entry:
+        return the string unchanged. load_model finds Ursina's own built-in
+        models (cube, sphere, quad, ...) by name in its internal folder, so the
+        default-'cube' fallback must stay a bare string — do NOT force it through
+        path resolution.
+      - a registry *name* (e.g. 'wall_pillar'): look up its path, load directly.
+      - an already-resolved relative path (e.g. 'assets/models/wall_pillar.obj'),
+        which is what level.json stores and what the picker passes post-step4:
+        load it directly via load_model(filename, folder=parent) — the folder
+        override is the model-side equivalent of Texture(Path(path)); it bypasses
+        the broken asset_folder glob entirely.
+
+    The returned model NodePath's .name is set to the project-relative path so
+    _entity_model_name / _build_level_data serialise it back unchanged.
+    """
+    if not name_or_path or name_or_path == 'cube':
+        return name_or_path
+
+    path = asset_registry.get_model_path(name_or_path)
+    if path is None and ('/' in name_or_path or '\\' in name_or_path):
+        # Already a path (level.json value / picker output) — use it as-is.
+        path = name_or_path
+    if path is None:
+        # Unknown bare name: a built-in primitive (sphere, diamond, ...) or a
+        # genuinely missing asset. Let Ursina's load_model handle/​warn — same
+        # as the 'cube' default path.
+        return name_or_path
+
+    p = Path(path)
+    from ursina.mesh_importer import load_model
+    m = load_model(p.name, folder=p.parent)
+    if m is None:
+        # Load failed (corrupt / unsupported); fall back to the string so the
+        # caller sees Ursina's own missing-model warning rather than a crash.
+        return name_or_path
+    m.name = path
+    return m
+
+
 def _restore_entity(editor, snap):
     """Reconstruct an editor entity from a snapshot dict; add to correct list."""
     from ursina import Entity, color
@@ -162,12 +211,16 @@ class ChangeModelCommand(Command):
         return f"ChangeModelCommand(n={len(self.entities)}, new={self.new_model!r})"
 
     def execute(self):
+        # Resolve per entity, not once: _resolve_model returns a mesh NodePath
+        # and Ursina's model setter reparents that exact node, so one shared
+        # instance would attach to only the last entity. (A bare string like
+        # 'cube' is returned unchanged and is safe to reuse.)
         for e in self.entities:
-            e.model = self.new_model
+            e.model = _resolve_model(self.new_model)
 
     def undo(self):
         for e, m in zip(self.entities, self.old_models):
-            e.model = m
+            e.model = _resolve_model(m)
 
 
 class ChangeColourCommand(Command):

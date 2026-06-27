@@ -15,10 +15,10 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
     MoveEntityCommand, ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
-    ChangePropertyCommand
+    ChangePropertyCommand, _resolve_model
 )
 from Scripts.session_logger import SessionLogger
-from Scripts.level_io import load_level_data
+from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.asset_registry import asset_registry, CATEGORY_DIRS, CATEGORY_EXTENSIONS
 
 logger = SessionLogger()
@@ -2242,14 +2242,23 @@ class LevelEditor(Entity):
             tex_name = ''
             if hasattr(block, 'texture') and block.texture:
                 tex_name = getattr(block.texture, 'name', str(block.texture))
-            data.append({
+            block_data = {
                 'type': 'block',
                 'position': [block.x, block.y, block.z],
                 'texture': tex_name,
                 'colour': [round(actual_color.r, 3), round(actual_color.g, 3), round(actual_color.b, 3)],
                 'rotation': [round(block.rotation_x, 2), round(block.rotation_y, 2), round(block.rotation_z, 2)],
                 'scale': [round(block.scale_x, 4), round(block.scale_y, 4), round(block.scale_z, 4)],
-            })
+            }
+            # v1.3 Step 7: model field, blocks only. Omit the key entirely at the
+            # 'cube' default (chosen over writing 'cube' literally) so re-saving a
+            # pre-step-7 level produces no spurious "model": "cube" churn and the
+            # schema stays backwards-compatible. _resolve_model sets model.name to
+            # the project-relative path for custom assets, so this round-trips.
+            model_name = self._entity_model_name(block) or DEFAULT_MODEL
+            if model_name != DEFAULT_MODEL:
+                block_data['model'] = model_name
+            data.append(block_data)
         for enemy in live_enemies:
             data.append({
                 'type': 'enemy',
@@ -2386,7 +2395,7 @@ class LevelEditor(Entity):
                 self.enemies.append(new_entity)
             else:
                 new_entity = Entity(
-                    model='cube',
+                    model=_resolve_model(entry['model']),
                     texture=entry['texture'],
                     position=tuple(entry['position']),
                     rotation=tuple(entry['rotation']),
@@ -2410,7 +2419,7 @@ class LevelEditor(Entity):
         for entry in entries:
             if entry['type'] == 'block':
                 Entity(
-                    model='cube',
+                    model=_resolve_model(entry['model']),
                     collider='box',
                     texture=entry['texture'],
                     position=tuple(entry['position']),
@@ -2809,7 +2818,7 @@ class LevelEditor(Entity):
                     self.enemies.append(new_entity)
                 else:
                     new_entity = Entity(
-                        model='cube',
+                        model=_resolve_model(entry['model']),
                         texture=entry['texture'],
                         position=tuple(entry['position']),
                         rotation=tuple(entry['rotation']),

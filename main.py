@@ -5,6 +5,7 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.level_io import load_level_data
+from Scripts.undo_redo import _resolve_model
 from Scripts.session_logger import get_game_logger
 import pyglet
 
@@ -162,7 +163,7 @@ def load_level():
             enemy_placeholder.enemy_rotation = entry['rotation_y']
         else:
             Entity(
-                model='cube',
+                model=_resolve_model(entry['model']),
                 collider='box',
                 texture=entry['texture'],
                 position=tuple(entry['position']),
