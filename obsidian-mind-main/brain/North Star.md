@@ -76,6 +76,7 @@ Sequence to public release:
 - v1.3 — Asset import pipeline + hot-reload [[work/active/v1.3-asset-import-pipeline]]
 - v1.4 — Enemy behaviour trees (patrol/attack/flee) [[work/active/v1.4-enemy-behaviour-trees]]
 - v1.5 — Trigger/zone system + Weapon inventory API [[work/active/v1.5-gameplay-systems]]
+- v1.6 — Level editor refactor: split `level_editor.py` into smaller modules [[work/active/v1.6-level-editor-refactor]]
 - v2.0 — Modding + packaged runtime + gamepad + procedural gen — PUBLIC RELEASE [[work/active/v2.0-release]]
 - v2.x — Networked multiplayer (own milestone, post-release)
 
@@ -90,4 +91,5 @@ Record when focus changes, with date and reason.
 | 2026-05-20 | v1.2 shipped — focus moves to v1.3 asset import pipeline | All 4 tracks complete; editor is now Unity-feel |
 | 2026-05-20 | Full v1.2–v2.0 roadmap planned | Post-audit; engine in clean state, unblocked for feature work |
 | 2026-06-24 | v1.2.6 cleanup closed out — focus moves to active v1.3 work (Steps 4–7) | Startup crash, resize/camera, texture thumbnail, and tray-merge fixes all verified; [[work/active/v1.3-asset-import-pipeline]] Steps 1–3 already done, picking up at the texture picker |
+| 2026-06-26 | Captured v1.6 — level editor refactor — as a forward-looking planned milestone | Not started or designed yet; deliberately sequenced after v1.3–v1.5 feature work and gated on a manual design review. See [[work/active/v1.6-level-editor-refactor]] |
 |      | Created North Star | Initial setup |

@@ -22,3 +22,8 @@ Architectural or workflow decisions worth recalling. Link to the full [[Decision
 **Decision:** `6d46cd6` ("v1.2.6 wip: resize/camera fix, texture thumbnail fix, tray removed into Models tab — known issue: startup crash...") and `44f931c` ("v1.2.6: fix startup crash — never construct/set Text.text to an empty string") landed as two separate commits rather than one bundled commit.
 **Rationale:** Not stated explicitly in CLAUDE.md or the commit messages beyond the wip commit flagging the known crash as a separate, queued fix — unconfirmed beyond that.
 **Source:** Git log (`6d46cd6`, `44f931c`); CHANGELOG [1.2.6]
+
+## v1.6 level editor refactor sequenced after feature work, gated on manual design review — 2026-06-26
+**Decision:** The user explicitly chose to place v1.6 (splitting `level_editor.py` into smaller modules) after v1.3, v1.4, and v1.5 ship — not interleaved with that feature work — and to gate it on a manual system-design review of the other scripts that the user does personally, rather than starting from an agent-proposed module breakdown.
+**Rationale:** Stated directly by the user when capturing the milestone: refactoring a file that's still absorbing new features creates a moving target, and the module boundaries should come from the user's own review of the codebase, not from an agent guessing at architecture.
+**Source:** [[work/active/v1.6-level-editor-refactor]]
