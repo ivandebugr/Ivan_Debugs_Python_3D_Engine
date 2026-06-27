@@ -1,4 +1,5 @@
 from collections import deque
+from pathlib import Path
 
 from Scripts.asset_registry import asset_registry
 
@@ -9,11 +10,17 @@ class Command:
 
 
 def _resolve_texture(name):
-    """Resolve a registry texture name to its full path; pass built-in names
-    (e.g. 'white_cube') through unchanged since they aren't in the registry."""
+    """Resolve a registry texture name to a Texture object via the same
+    Texture(Path(path)) constructor the browser thumbnail loader uses.
+    Built-in names (e.g. 'white_cube') are passed through as strings —
+    Ursina's load_texture handles those by searching internal_textures_folder."""
     if not name:
         return name
-    return asset_registry.get_texture_path(name) or name
+    path = asset_registry.get_texture_path(name)
+    if path:
+        from ursina import Texture
+        return Texture(Path(path))
+    return name
 
 
 def _restore_entity(editor, snap):

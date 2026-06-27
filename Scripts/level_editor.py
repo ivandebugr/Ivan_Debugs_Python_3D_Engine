@@ -9,6 +9,8 @@ import json
 import os
 import shutil
 import time as _time   # wall-clock for double-click timing (ursina `time` is Panda3D's clock)
+from pathlib import Path
+PROJECT_ROOT = Path(__file__).resolve().parent.parent 
 
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
@@ -395,12 +397,13 @@ class LevelEditor(Entity):
         # Browser tab buttons — reposition to left edge, sized to fit.
         self._layout_browser_tabs(half_w)
 
-        # Browser scroll indicators — flush to top/bottom edges of the card column.
+        # Browser scroll indicators — flush to right of the card grid, at top/bottom.
+        scroll_ind_x = half_w - self._LAYOUT_INSP_W - 0.03
         if self._browser_scroll_up is not None:
-            self._browser_scroll_up.x = self._CARD_X
+            self._browser_scroll_up.x = scroll_ind_x
             self._browser_scroll_up.y = self._BROWSER_Y + self._BROWSER_H * 0.5 - 0.02
         if self._browser_scroll_down is not None:
-            self._browser_scroll_down.x = self._CARD_X
+            self._browser_scroll_down.x = scroll_ind_x
             self._browser_scroll_down.y = self._BROWSER_Y - self._BROWSER_H * 0.5 + 0.02
         self._update_browser_scroll_indicators()
 
@@ -1410,8 +1413,7 @@ class LevelEditor(Entity):
     _BROWSER_Y      = -0.40    # centre y of the browser panel
     _BROWSER_H      =  0.20    # panel height (taller than before, fills old tray space)
     _CARD_SIZE      =  0.095   # card width/height
-    _CARD_PITCH     =  0.115   # card-to-card vertical spacing
-    _CARD_X         = -0.20    # x of the card column
+    _CARD_PITCH     =  0.115   # card-to-card spacing (both horizontal and vertical)
     _TAB_Y          = -0.32    # y of the tab buttons (top of the panel)
     _BROWSER_CATEGORIES = ('texture', 'model', 'sound')
     # FIXED (Item 8): named the double-click window (was a bare 0.4 literal in
@@ -1459,11 +1461,13 @@ class LevelEditor(Entity):
         # by default, so text='<' parses as an empty tag with zero lines, which crashes
         # align() (IndexError: list index out of range on linewidths[-1]). Kept for
         # consistency with the other arrow glyphs even though '^'/'v' aren't delimiters.
+        aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
+        scroll_ind_x = aspect * 0.5 - self._LAYOUT_INSP_W - 0.03
         self._browser_scroll_up = Text(
             parent=camera.ui,
             text='^',
             use_tags=False,
-            position=(self._CARD_X, self._BROWSER_Y + self._BROWSER_H * 0.5 - 0.02),
+            position=(scroll_ind_x, self._BROWSER_Y + self._BROWSER_H * 0.5 - 0.02),
             origin=(0, -0.5),
             scale=1.4,
             color=color.white66,
@@ -1474,7 +1478,7 @@ class LevelEditor(Entity):
             parent=camera.ui,
             text='v',
             use_tags=False,
-            position=(self._CARD_X, self._BROWSER_Y - self._BROWSER_H * 0.5 + 0.02),
+            position=(scroll_ind_x, self._BROWSER_Y - self._BROWSER_H * 0.5 + 0.02),
             origin=(0, 0.5),
             scale=1.4,
             color=color.white66,
@@ -1517,10 +1521,11 @@ class LevelEditor(Entity):
             index += 1
         self._browser_cards[category] = cards
 
+        empty_x, empty_y = self._card_grid_pos(0)
         self._browser_empty_labels[category] = Text(
             parent=camera.ui,
             text=f"{self._BROWSER_TAB_TITLES[category]} (0)",
-            position=(self._CARD_X, self._card_y(0)),
+            position=(empty_x, empty_y),
             origin=(-0.5, 0),
             scale=0.7,
             color=self._THEME_TEXT,
@@ -1534,13 +1539,13 @@ class LevelEditor(Entity):
         For built-in model cards (builtin_asset is not None), the icon shows the asset's
         flat color and the asset dict is stored in _browser_card_assets for drag-to-place.
         """
-        cy = self._card_y(index)
+        cx, cy = self._card_grid_pos(index)
         bg = Entity(
             parent=camera.ui,
             model='quad',
             color=self._THEME_TILE_BG,
             scale=(self._CARD_SIZE, self._CARD_SIZE),
-            position=(self._CARD_X, cy),
+            position=(cx, cy),
             z=-0.6,
             eternal=True,
         )
@@ -1549,7 +1554,7 @@ class LevelEditor(Entity):
             parent=camera.ui,
             model='quad',
             scale=(self._CARD_SIZE * 0.78, self._CARD_SIZE * 0.78),
-            position=(self._CARD_X, cy + 0.008),
+            position=(cx, cy + 0.008),
             z=-0.7,
             eternal=True,
         )
@@ -1584,7 +1589,7 @@ class LevelEditor(Entity):
         label = Text(
             parent=camera.ui,
             text=name,
-            position=(self._CARD_X + self._CARD_SIZE * 0.62, cy),
+            position=(cx + self._CARD_SIZE * 0.62, cy),
             origin=(-0.5, 0),
             scale=0.5,
             color=color.light_gray,
@@ -1619,18 +1624,52 @@ class LevelEditor(Entity):
         self._set_browser_tab(self._browser_tab)
         self._apply_layout()
 
-    def _card_y(self, index):
-        """Camera.ui y of a card centre at the given index for the active tab."""
+    def _browser_cols(self):
+        """Number of card columns that fit in the browser's usable width."""
+        aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
+        half_w = aspect * 0.5
+        left = -half_w + self._LAYOUT_HIER_W + 0.02
+        right = half_w - self._LAYOUT_INSP_W - 0.02
+        usable = right - left
+        cols = max(1, int(usable / self._CARD_PITCH))
+        return cols
+
+    def _browser_visible_rows(self):
+        """Number of card rows that fit vertically in the browser panel."""
+        return max(1, int((self._BROWSER_H - 0.04) / self._CARD_PITCH))
+
+    def _card_grid_pos(self, index):
+        """Camera.ui (x, y) of a card centre at the given linear index."""
+        cols = self._browser_cols()
+        scroll_row = self._browser_scroll.get(self._browser_tab, 0)
+        row, col = divmod(index, cols)
+        aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
+        half_w = aspect * 0.5
+        left = -half_w + self._LAYOUT_HIER_W + 0.02
+        first_x = left + self._CARD_PITCH * 0.5
         first_y = self._BROWSER_Y + self._BROWSER_H * 0.5 - self._CARD_PITCH * 0.5 - 0.02
-        return first_y - index * self._CARD_PITCH + self._browser_scroll[self._browser_tab] * self._CARD_PITCH
+        cx = first_x + col * self._CARD_PITCH
+        cy = first_y - (row - scroll_row) * self._CARD_PITCH
+        return cx, cy
 
     def _refresh_browser_card_positions(self):
-        """Reposition the active tab's cards to reflect the current scroll offset."""
+        """Reposition the active tab's cards to reflect the current scroll offset,
+        hiding any that fall outside the panel's vertical bounds."""
+        panel_top = self._BROWSER_Y + self._BROWSER_H * 0.5
+        panel_bot = self._BROWSER_Y - self._BROWSER_H * 0.5
+        hh = self._CARD_SIZE * 0.5
         for index, (bg, icon, label, name) in enumerate(self._browser_cards.get(self._browser_tab, [])):
-            cy = self._card_y(index)
+            cx, cy = self._card_grid_pos(index)
+            visible = (cy - hh) >= panel_bot and (cy + hh) <= panel_top
+            bg.x = cx
             bg.y = cy
+            bg.enabled = visible
+            icon.x = cx
             icon.y = cy + 0.008
+            icon.enabled = visible
+            label.x = cx + self._CARD_SIZE * 0.62
             label.y = cy
+            label.enabled = visible
 
     def _set_browser_tab(self, category):
         """Switch the active tab: show that category's cards, hide the others."""
@@ -1659,15 +1698,16 @@ class LevelEditor(Entity):
             bg.color = self._THEME_TILE_SEL if selected else self._THEME_TILE_BG
 
     def _update_browser_scroll_indicators(self):
-        """Show/hide up/down scroll arrows based on whether more cards exist off-screen."""
+        """Show/hide up/down scroll arrows based on whether more rows exist off-screen."""
         cards = self._browser_cards.get(self._browser_tab, [])
-        total = len(cards)
+        cols = self._browser_cols()
+        total_rows = (len(cards) + cols - 1) // cols if cards else 0
         scroll = self._browser_scroll.get(self._browser_tab, 0)
-        visible_count = max(1, int((self._BROWSER_H - 0.04) / self._CARD_PITCH))
+        visible_rows = self._browser_visible_rows()
         if self._browser_scroll_up:
             self._browser_scroll_up.enabled = (scroll > 0)
         if self._browser_scroll_down:
-            self._browser_scroll_down.enabled = (scroll + visible_count < total)
+            self._browser_scroll_down.enabled = (scroll + visible_rows < total_rows)
 
     def _card_at_mouse(self):
         """Return (category, name) for the card under the cursor on the active tab, or None."""
@@ -1676,8 +1716,10 @@ class LevelEditor(Entity):
         mx, my = mouse.x, mouse.y
         hh = self._CARD_SIZE * 0.5
         for index, (bg, icon, label, name) in enumerate(self._browser_cards.get(self._browser_tab, [])):
-            cy = self._card_y(index)
-            if (self._CARD_X - hh) <= mx <= (self._CARD_X + hh) and (cy - hh) <= my <= (cy + hh):
+            if not bg.enabled:
+                continue
+            cx, cy = self._card_grid_pos(index)
+            if (cx - hh) <= mx <= (cx + hh) and (cy - hh) <= my <= (cy + hh):
                 return (self._browser_tab, name)
         return None
 
@@ -2671,10 +2713,12 @@ class LevelEditor(Entity):
             if self._editor_camera:
                 self._editor_camera.zoom_speed = 0 if over_ui else 1.25
 
-            # Asset browser vertical scroll
+            # Asset browser vertical scroll (by row)
             if self._is_over_browser():
                 cards = self._browser_cards.get(self._browser_tab, [])
-                max_scroll = max(0, len(cards) - 1)
+                cols = self._browser_cols()
+                total_rows = (len(cards) + cols - 1) // cols if cards else 0
+                max_scroll = max(0, total_rows - self._browser_visible_rows())
                 delta = -1 if key == 'scroll up' else 1
                 self._browser_scroll[self._browser_tab] = max(
                     0, min(self._browser_scroll[self._browser_tab] + delta, max_scroll))
@@ -2969,13 +3013,12 @@ if __name__ == '__main__':
     window.borderless = False
     window.size = (1280, 720)
 
-
     ground = Entity(
         model='plane',
         collider='box',
         y=-0.5,
         scale=(100, 1, 100),
-        texture='grass',
+        texture=str(PROJECT_ROOT / 'assets/textures/floor_ground_grass.png'),
         eternal=True,
     )
 
