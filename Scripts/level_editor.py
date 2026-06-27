@@ -3027,7 +3027,8 @@ if __name__ == '__main__':
         collider='box',
         y=-0.5,
         scale=(100, 1, 100),
-        texture=str(PROJECT_ROOT / 'assets/textures/floor_ground_grass.png'),
+        texture=Texture(Path(str(PROJECT_ROOT / 'assets/textures/floor_ground_grass.png'))),
+        texture_scale=(50, 50),
         eternal=True,
     )
 

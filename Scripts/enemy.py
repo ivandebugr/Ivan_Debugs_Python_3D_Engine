@@ -1,6 +1,8 @@
 from ursina import *
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import AliveEntity, Layers, collision_manager
+from Scripts.behaviour_tree import Selector
+from Scripts.behaviour_nodes import AttackNode, IdleNode
 
 # TUNE: balance / experiment variables — label kept so grep finds them fast during playtesting
 ENEMY_HP_DEFAULT         = 100    # TUNE: try 50 for a 2-shot kill at 25 dmg/bullet
@@ -13,7 +15,7 @@ VALID_ENEMY_TYPES = ('default',)  # extend here as new types are added
 
 
 class Enemy(AliveEntity):
-    def __init__(self, spawn_position, player, hp=ENEMY_HP_DEFAULT, enemy_type='default', rotation_y=0):
+    def __init__(self, spawn_position, player, hp=ENEMY_HP_DEFAULT, enemy_type='default', rotation_y=0, behaviour_tree=None):
         """Spawn an enemy at spawn_position; origin_y=-0.5 passed to super so grid cell is correct from frame 0."""
         if enemy_type not in VALID_ENEMY_TYPES:
             raise ValueError(f"Unknown enemy_type {enemy_type!r}; valid: {VALID_ENEMY_TYPES}")
@@ -38,6 +40,16 @@ class Enemy(AliveEntity):
         self.attack_range     = ENEMY_ATTACK_RANGE
         self.detection_range  = ENEMY_DETECTION_RANGE
 
+        # Interim behaviour tree: matches today's stationary detect→shoot exactly
+        # (AttackNode fires in range/off-cooldown, IdleNode is the always-SUCCESS
+        # fallback). ChaseNode is added in Step 3; until then the Selector falls
+        # straight through to IdleNode whenever the player is out of attack range.
+        # TODO(v1.4 Step 7): replace with BehaviourTreeFactory.build("default", {})
+        self._tree = behaviour_tree or Selector([
+            AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
+            IdleNode(),
+        ])
+
         self._occluded        = False   # cached result — updated on throttle interval
         self._occlusion_timer = 0.0     # counts down; raycast fires when <= 0
 
@@ -52,7 +64,7 @@ class Enemy(AliveEntity):
         )
 
     def update(self):
-        """Per-frame: rotate toward player, throttled occlusion check, shoot when in range."""
+        """Per-frame: rotate toward player, throttled occlusion check, tick the tree."""
         if not self.alive or not self.player:
             return
 
@@ -69,8 +81,10 @@ class Enemy(AliveEntity):
                 self._occluded        = self._is_occluded()
                 self._occlusion_timer = ENEMY_OCCLUSION_INTERVAL
 
-            if player_dist <= self.attack_range and self.can_shoot:
-                self.shoot()
+        # Behaviour tree owns the detect→shoot decision (replaces the old
+        # `if player_dist <= attack_range and can_shoot: self.shoot()` block).
+        # AttackNode re-checks attack-range itself, so this ticks every frame.
+        self._tree.tick(self, time.dt)
 
         self.health_bar.world_position = self.world_position + Vec3(0, 3.75, 0)
         self.health_bar.value          = self.health
