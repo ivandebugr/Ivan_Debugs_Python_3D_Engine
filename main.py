@@ -258,7 +258,7 @@ def main_menu():
             destroy(e)
     logger.log('INFO', 'main_menu: old scene swept')
 
-    sky = Sky()
+    sky = Sky(texture='sky_textures/sky_0.png')
     sky.name = 'main_sky'
 
     camera.name = 'main_camera'

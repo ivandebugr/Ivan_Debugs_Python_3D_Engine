@@ -60,7 +60,7 @@ Switch to `/.claude/agents/startup-cto.md` for architecture, performance, and co
 | Prompt engineering for tooling             | `senior-prompt-engineer` | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/senior-prompt-engineer/SKILL.md`|
 
 ### Obsidian Mind Plugin
-Loaded from `breferrari/obsidian-mind`. Vault root: check `brain/North Star.md` for current location.
+Loaded from `obsidian-mind-main/`. Vault root: check `brain/North Star.md` for current location.
 The vault is the persistent memory layer — every session builds on the last.
 See **Obsidian Mind Integration** below.
 
@@ -663,7 +663,7 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `game.return_to_menu()` �
 
 ## Obsidian Mind Integration
 
-The vault (`breferrari/obsidian-mind`) is the persistent memory layer across sessions.
+The vault (`obsidian-mind-main/`) is the persistent memory layer across sessions.
 **Vault location:** confirm path in `brain/North Star.md` — do not assume a working directory.
 
 ### Where Project Content Lives
