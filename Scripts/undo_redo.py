@@ -1,9 +1,19 @@
 from collections import deque
 
+from Scripts.asset_registry import asset_registry
+
 
 class Command:
     def execute(self): raise NotImplementedError
     def undo(self):    raise NotImplementedError
+
+
+def _resolve_texture(name):
+    """Resolve a registry texture name to its full path; pass built-in names
+    (e.g. 'white_cube') through unchanged since they aren't in the registry."""
+    if not name:
+        return name
+    return asset_registry.get_texture_path(name) or name
 
 
 def _restore_entity(editor, snap):
@@ -12,7 +22,7 @@ def _restore_entity(editor, snap):
     is_enemy = snap.get('is_enemy', False)
     e = Entity(
         model='cube',
-        texture=snap.get('texture', 'white_cube'),
+        texture=_resolve_texture(snap.get('texture', 'white_cube')),
         position=snap['position'],
         color=snap.get('color', color.white),
         rotation=snap.get('rotation', (0, 0, 0)),
@@ -124,12 +134,13 @@ class ChangeTextureCommand(Command):
         return f"ChangeTextureCommand(n={len(self.entities)}, new={self.new_texture!r})"
 
     def execute(self):
+        new_texture = _resolve_texture(self.new_texture)
         for e in self.entities:
-            e.texture = self.new_texture
+            e.texture = new_texture
 
     def undo(self):
         for e, t in zip(self.entities, self.old_textures):
-            e.texture = t
+            e.texture = _resolve_texture(t)
 
 
 class ChangeModelCommand(Command):
