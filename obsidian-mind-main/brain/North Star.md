@@ -35,11 +35,26 @@ See: [[work/active/v1.2-level-editor-overhaul]] (Resolution section), [[work/arc
 ## v1.2.6 Shipped — 2026-06-24
 Startup crash fixed (`Text(text='')` → `IndexError` in `Text.align()`), window resize + camera lens aspect ratio fix, texture thumbnail rendering fix, standalone placement tray merged into the Models tab of the asset browser. Closed out — no longer "next," fully verified per `CHANGELOG.md` [1.2.6].
 
+## v1.3 Shipped — 2026-06-26
+All 7 Implementation-Order steps complete and verified by a cross-step integration audit (re-derived from code, not session logs). The level editor now has a full asset pipeline: drop a file in and use it immediately without editing config.
+
+**Shipped in v1.3:**
+- `Scripts/asset_registry.py` — framework-free `AssetRegistry`: scans `assets/textures|models|sounds` → `{name: path}` manifests, persists `assets/manifest.json` (gitignored), mtime-cache fast path, `poll()`-driven hot-reload callbacks (Steps 1 & 3)
+- Asset browser panel — Textures/Models/Sounds tabs, scrollable thumbnail cards, built-in models merged into the Models tab, drag-to-place with ghost/snap/undo (Step 2)
+- Texture hot-reload — `_on_texture_changed` re-uploads to subscribed entities live; model/sound log-only per spec (Step 3)
+- Texture picker (Step 4) + Model picker (Step 5) — floating inspector overlays, blocks-only model swap, each pushes its own `ChangeTextureCommand`/`ChangeModelCommand` (independent undo). `_resolve_texture`/`_resolve_model` fix the bare-path load bug.
+- Asset import (Step 6) — shipped as an **Import Asset toolbar button** + native file picker (Panda3D has no OS file-drop on any release); copy-on-import, extension routing, name-collision skip-with-notice, manifest rebuild, play-mode guard
+- `level.json` `model` field (Step 7) — optional, default `'cube'`, omitted-at-default for backwards-compat; resolved everywhere via `_resolve_model`
+
+One known risk carried forward (flagged, ships per decision): bare-string texture on the load path — works via Ursina's folder glob but not routed through `_resolve_texture` like models are. See [[work/active/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] and [[brain/Gotchas]].
+
+See: [[work/active/v1.3-asset-import-pipeline]], [[work/archive/version-map]]
+
 ## Current Focus
 
 _What am I working toward right now?_
 
-- v1.3 Asset Import Pipeline, Steps 4–7 of the Implementation Order in [[work/active/v1.3-asset-import-pipeline]]: texture picker in the inspector (Step 4, next up), then model picker (Step 5), drag-and-drop import (Step 6), and the `level.json` model field (Step 7). Steps 1–3 (AssetRegistry, read-only asset browser, texture hot-reload) are done.
+- **v1.4 — Enemy behaviour trees** (patrol / attack / flee state composition) is next per the v1.2–v2.0 roadmap. Not yet started or designed — gated on the manual test-checklist pass for v1.3 and a design pass before any code. See [[work/active/v1.4-enemy-behaviour-trees]].
 
 ## Goals
 
@@ -92,4 +107,5 @@ Record when focus changes, with date and reason.
 | 2026-05-20 | Full v1.2–v2.0 roadmap planned | Post-audit; engine in clean state, unblocked for feature work |
 | 2026-06-24 | v1.2.6 cleanup closed out — focus moves to active v1.3 work (Steps 4–7) | Startup crash, resize/camera, texture thumbnail, and tray-merge fixes all verified; [[work/active/v1.3-asset-import-pipeline]] Steps 1–3 already done, picking up at the texture picker |
 | 2026-06-26 | Captured v1.6 — level editor refactor — as a forward-looking planned milestone | Not started or designed yet; deliberately sequenced after v1.3–v1.5 feature work and gated on a manual design review. See [[work/active/v1.6-level-editor-refactor]] |
+| 2026-06-26 | v1.3 asset import pipeline shipped — focus moves to v1.4 enemy behaviour trees | Cross-step integration audit passed all 7 steps; one latent texture-load risk flagged (not blocking) and carried forward. See [[work/active/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] |
 |      | Created North Star | Initial setup |
