@@ -86,11 +86,19 @@ class Player(FirstPersonController):
             camera.rotation_x -= mouse.velocity[1] * self.mouse_sensitivity[1] * time.dt
             camera.rotation_x = clamp(camera.rotation_x, -90, 90)
 
+        # Triggers are non-physical (v1.5): a kill-plane/fall-catcher volume below
+        # the world must let the player fall THROUGH it so intersects() fires and
+        # kills mid-fall — never act as a floor the player lands on. The horizontal
+        # swept test already skips Layers.TRIGGER (collision authority #2); apply the
+        # same rule to the vertical ground/ceiling rays (authority #3) so triggers
+        # block nothing on any axis. Pass instances, never the class (Hard Constraint 2).
+        vertical_ignore = [self] + collision_manager.query_layer(Layers.TRIGGER)
+
         ground_hit = raycast(
             self.position + (0, -0.1, 0),
             (0, -1),
             distance=1,
-            ignore=[self]
+            ignore=vertical_ignore
         )
         self.grounded = ground_hit.hit
 
@@ -110,7 +118,7 @@ class Player(FirstPersonController):
             self.position + Vec3(0, 2.0, 0),
             Vec3(0, 1, 0),
             distance=0.3,
-            ignore=[self],
+            ignore=vertical_ignore,
             debug=False
         )
         if ceiling_hit.hit and self.vertical_speed > 0:
