@@ -2,6 +2,7 @@ from ursina import *
 from Scripts.player_controller import Player
 from Scripts.enemy import Enemy
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
+from Scripts.trigger_system import TriggerZone, build_actions
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
@@ -147,7 +148,7 @@ def load_level():
     for e in scene.entities[:]:
         if not _is_live(e):
             continue
-        if e.name in ['level_block', 'level_enemy']:
+        if e.name in ['level_block', 'level_enemy', 'level_trigger']:
             destroy(e)
 
     for entry in entities:
@@ -166,6 +167,20 @@ def load_level():
             # the placeholder; start_game() builds the tree from it and passes
             # behaviour_tree= to Enemy. Same two-stage hand-off as hp/type/rot.
             enemy_placeholder.behaviour_config = entry['behaviour']
+        elif entry['type'] == 'trigger':
+            # v1.5 System A: invisible trigger volume. Config-store role — stash
+            # the raw action lists on an invisible placeholder; start_game()
+            # builds the live TriggerZone with real callbacks (factory consumer).
+            # Same two-stage hand-off as the enemy behaviour config. Placeholder
+            # is non-collidable so it can't block movement or shadow the picker.
+            trigger_placeholder = Entity(
+                position=tuple(entry['position']),
+                scale=tuple(entry['scale']),
+                visible=False,
+                name='level_trigger'
+            )
+            trigger_placeholder.on_enter_actions = entry['on_enter']
+            trigger_placeholder.on_exit_actions  = entry['on_exit']
         else:
             Entity(
                 model=_resolve_model(entry['model']),
@@ -327,6 +342,18 @@ def main_menu():
                 behaviour_tree=behaviour_tree,
             )
             game.enemies.append(enemy)
+            destroy(placeholder)
+        # v1.5 System A: factory-consume trigger placeholders into live TriggerZones.
+        # build_actions() turns the stored raw action lists into zero-arg callbacks
+        # HERE (runtime), never at editor-load time. TriggerZone is an AliveEntity,
+        # so the main_menu() die()-sweep tears it down on return-to-menu.
+        for placeholder in [e for e in scene.entities if e.name == 'level_trigger']:
+            TriggerZone(
+                position=placeholder.position,
+                scale=placeholder.scale,
+                on_enter=build_actions(getattr(placeholder, 'on_enter_actions', [])),
+                on_exit=build_actions(getattr(placeholder, 'on_exit_actions', [])),
+            )
             destroy(placeholder)
         destroy(play_button)
         destroy(quit_button)

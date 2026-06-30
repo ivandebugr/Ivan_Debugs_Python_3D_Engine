@@ -44,6 +44,17 @@ def _normalise_entry(entry):
         # function, preserves it instead of silently dropping it (the bug that
         # bit block 'rotation' — see brain/Gotchas.md).
         out['behaviour']  = entry.get('behaviour', None)
+    if out['type'] == 'trigger':
+        # v1.5 System A: invisible enter/exit volume. on_enter/on_exit are raw
+        # action-dict lists (e.g. [{"action": "kill_plane"}]) stored verbatim —
+        # the editor stashes them on its placeholder and the runtime factory
+        # (main.start_game / editor _spawn_gameplay_from_snapshot) turns them into
+        # live callbacks via trigger_system.build_actions(). Surfaced HERE, the
+        # single parser, so every read path preserves them (same discipline as the
+        # enemy 'behaviour' field above). Absent → empty lists, never None, so call
+        # sites can iterate without a guard.
+        out['on_enter'] = list(entry.get('on_enter', []))
+        out['on_exit']  = list(entry.get('on_exit', []))
     return out
 
 

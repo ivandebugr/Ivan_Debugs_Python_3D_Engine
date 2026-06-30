@@ -3190,6 +3190,16 @@ class LevelEditor(Entity):
         try:
             entries = load_level_data(self.filename)
             for entry in entries:
+                if entry['type'] == 'trigger':
+                    # v1.5 System A: full editor trigger placement (render as a
+                    # semi-transparent volume + inspector action lists + save
+                    # round-trip) is Step 6. Until then the editor is NOT
+                    # trigger-aware: skip the entry so it is neither mis-rendered
+                    # as a solid block (the else branch) nor silently re-saved as
+                    # one (the block-rotation corruption class — see
+                    # brain/Gotchas). The runtime (main.load_level/start_game)
+                    # already handles triggers; the editor catches up in Step 6.
+                    continue
                 if entry['type'] == 'enemy':
                     new_entity = Entity(
                         model='cube',
