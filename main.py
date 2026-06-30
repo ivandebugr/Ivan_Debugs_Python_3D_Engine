@@ -347,7 +347,14 @@ def main_menu():
         # build_actions() turns the stored raw action lists into zero-arg callbacks
         # HERE (runtime), never at editor-load time. TriggerZone is an AliveEntity,
         # so the main_menu() die()-sweep tears it down on return-to-menu.
-        for placeholder in [e for e in scene.entities if e.name == 'level_trigger']:
+        #
+        # _is_live() guard is load-bearing: this loop runs AFTER the enemy loop's
+        # destroy(placeholder) calls, which empty those NodePaths synchronously but
+        # leave them in scene.entities until the frame flush. Reading e.name on an
+        # emptied NodePath fires the C++ getName() assertion (nodePath.I:2102) that
+        # except cannot catch — Hard Constraint 13.
+        for placeholder in [e for e in scene.entities
+                            if _is_live(e) and e.name == 'level_trigger']:
             TriggerZone(
                 position=placeholder.position,
                 scale=placeholder.scale,
