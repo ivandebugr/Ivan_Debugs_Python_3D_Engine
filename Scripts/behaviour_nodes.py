@@ -14,8 +14,8 @@ FleeNode in Steps 3–5, decorators in Step 6) an obvious home. Steps 3+ append
 to this file.
 
 Step 2 scope — ``IdleNode`` and ``AttackNode``. Step 3 added ``ChaseNode``.
-Step 4 adds ``PatrolNode``. ``FleeNode`` and the decorators are later steps
-and are not implemented here, not even partially.
+Step 4 added ``PatrolNode``. Step 5 adds ``FleeNode``. Decorators are a later
+step and are not implemented here, not even partially.
 
 Purity contract (same as Layer 1)
 ----------------------------------
@@ -57,6 +57,10 @@ vector ops ``AttackNode`` already uses) and hands the move to the enemy via
 shared ``swept_move_blocked`` helper so the enemy avoids walls the same way the
 player does — no duplicated raycast loop (see ``brain/Patterns`` no-duplication
 rule and ``docs/v1.4-enemy-behaviour-trees.md``).
+
+``FleeNode`` reuses ``enemy.chase_step`` for the same reason — see its class
+docstring "Movement: reuses chase_step, inverted direction" for why a Step
+3/4-shaped ``flee_step`` method was deliberately NOT added.
 
 Per-instance cooldown state (relies on Layer 1's ownership contract)
 --------------------------------------------------------------------
@@ -291,4 +295,120 @@ class PatrolNode(BehaviourNode):
 
         direction = to_target.normalized()
         enemy.patrol_step(direction, self.speed, dt)
+        return Status.RUNNING
+
+
+class FleeNode(BehaviourNode):
+    """Run away from the player while low on HP; yield once HP recovers or
+    enough distance has opened.
+
+    Per the v1.4 spec (Step 5), with one ambiguity resolved explicitly (see
+    "flee_range semantics" below):
+
+    - ``enemy.health >= flee_threshold_hp``  -> ``FAILURE`` immediately, NO
+      movement attempted. This is the "not fleeing" case: the parent
+      ``Selector`` (in the ``flee_when_low`` preset, Step 7) falls through to
+      the chase/attack branch.
+    - ``enemy.health <  flee_threshold_hp`` AND distance to player
+      ``<= flee_range``                      -> step away from the player,
+      return ``RUNNING`` (still too close, wants to be ticked again).
+    - ``enemy.health <  flee_threshold_hp`` AND distance to player
+      ``>  flee_range``                      -> ``SUCCESS``, NO movement
+      attempted (already far enough — nothing to do this tick).
+
+    flee_range semantics (Step 5 PART 0-A — resolved, not re-derived by
+    callers): ``flee_range`` is the TARGET SEPARATION DISTANCE from the
+    player, not a total travel budget measured from the enemy's flee-start
+    position. Concretely: ``FleeNode`` returns ``SUCCESS`` the instant
+    ``(enemy.position - player.position).length() > flee_range`` is already
+    true — whether that distance opened up over ten ticks of fleeing or was
+    already true on the very first tick (e.g. the player is far away but HP
+    is low for some other reason). There is no accumulated "distance fled"
+    counter anywhere in this node. Step 7's ``flee_when_low`` preset must
+    wire ``flee_range`` as a separation radius, not a travel distance.
+
+    Health attribute (Step 5 PART 0-B — confirmed by reading ``enemy.py``
+    and ``collision_system.py``, not assumed): ``Enemy.__init__`` sets
+    ``self.health = hp`` (see ``Scripts/enemy.py``); ``AliveEntity`` (the
+    ``Enemy`` base class, in ``Scripts/collision_system.py``) does not
+    define or shadow ``health`` itself. ``enemy.health`` is therefore the
+    correct, and only, attribute to read here — matching what
+    ``Enemy.update()`` already compares against ``<= 0`` for death and what
+    ``HealthBar.value`` is driven from.
+
+    Movement inversion — chosen approach and why: this node reuses
+    ``enemy.chase_step(direction, dt)`` (the SAME method ``ChaseNode`` calls;
+    see this module's docstring "Why ChaseNode delegates the move to
+    enemy.chase_step"), passing it the INVERTED vector
+    ``(enemy.position - player.position).normalized()`` — enemy-minus-player
+    instead of ChaseNode's player-minus-enemy — so the same wall-avoiding
+    swept-move machinery in ``Enemy.chase_step`` drives the enemy away from
+    the player instead of toward it. ``chase_step`` itself takes a raw
+    ``direction`` argument and has no opinion about which way it points, so
+    no new ``flee_step`` method or "virtual target behind the enemy" trick is
+    needed — feeding it the opposite unit vector is sufficient and reuses
+    100% of the existing wall-avoidance code (no duplicated raycast loop,
+    per ``brain/Patterns`` and ``docs/v1.4-enemy-behaviour-trees.md``). A
+    second movement method was considered and rejected: it would duplicate
+    ``chase_step``'s move-then-axis-slide body for zero behavioural
+    difference, since "moving away" is just "moving toward" with the
+    direction vector negated before the call.
+
+    Speed — ``ENEMY_CHASE_SPEED`` is NOT referenced directly here (this file
+    stays free of ``enemy.py`` imports per the purity contract); instead,
+    speed comes for free because ``chase_step`` is the same method
+    ``ChaseNode`` calls, and ``Enemy.chase_step`` hardcodes its move to
+    ``ENEMY_CHASE_SPEED`` internally (see ``Scripts/enemy.py``). Reusing
+    ``chase_step`` rather than ``patrol_step`` (which takes an explicit
+    ``speed`` argument) is therefore also what keeps flee speed identical to
+    chase speed without this node inventing a fourth speed value or passing
+    one through.
+
+    Player reference — same pattern ``ChaseNode``/``AttackNode`` already use:
+    ``enemy.player.position``. No new player-reference mechanism introduced.
+
+    Oscillation behaviour in the ``flee_when_low`` preset (Step 7) — documented
+    here so it is not mistaken for a bug when observed in-game:
+
+    - tick N:     HP low, player within ``flee_range``     -> ``RUNNING`` (fleeing)
+    - tick N+k:   HP low, player now beyond ``flee_range``  -> ``SUCCESS``
+    - tick N+k+1: HP still low, player still beyond range   -> ``SUCCESS``
+      immediately, no movement needed (distance check alone satisfies it) ->
+      the Step 7 ``Selector`` returns ``SUCCESS`` from this branch -> the
+      enemy idles in place rather than re-engaging.
+    - Eventually: the player closes the distance again, OR HP recovers above
+      ``flee_threshold_hp`` (this node now returns ``FAILURE`` instead) ->
+      the ``Selector`` falls through to the chase/attack branch and the
+      enemy re-engages.
+
+    This is the intended, correct steady state for a "kited" low-HP enemy —
+    it does not chase the player down once it has successfully created
+    distance; it waits (via repeated cheap ``SUCCESS``-without-movement
+    ticks) for either HP to recover or the player to close in again. Re-
+    engagement is entirely the parent Selector's responsibility, not this
+    node's — ``FleeNode`` only ever reports its own HP/distance state.
+
+    Per-instance state — this node holds none across ticks (no cursor, no
+    "distance fled so far" accumulator); every tick re-derives its answer
+    fresh from current HP and current distance, matching the stateless
+    RUNNING re-evaluation convention in ``behaviour_tree.py``.
+    """
+
+    def __init__(self, flee_threshold_hp: int, flee_range: float):
+        self.flee_threshold_hp = flee_threshold_hp
+        self.flee_range = flee_range
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        if enemy.health >= self.flee_threshold_hp:
+            return Status.FAILURE
+
+        distance = (enemy.position - enemy.player.position).length()
+        if distance > self.flee_range:
+            # Already far enough away — nothing to do this tick.
+            return Status.SUCCESS
+
+        # Too close: step away from the player. Inverted ChaseNode direction:
+        # enemy-minus-player (away), not player-minus-enemy (toward).
+        direction = (enemy.position - enemy.player.position).normalized()
+        enemy.chase_step(direction, dt)
         return Status.RUNNING

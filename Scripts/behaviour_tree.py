@@ -48,6 +48,7 @@ distinction does not apply to it.
 
 from __future__ import annotations
 
+import time as _time
 from abc import ABC, abstractmethod
 from enum import Enum
 from typing import TYPE_CHECKING
@@ -190,3 +191,133 @@ class Parallel(BehaviourNode):
         if any_running:
             return Status.RUNNING
         return Status.FAILURE
+
+
+class Invert(BehaviourNode):
+    """Flip a child's result: ``SUCCESS``<->``FAILURE``; ``RUNNING`` passes through.
+
+    Exceptions raised by the child during ``tick()`` are **propagated**, not
+    caught-and-converted — the safe default. A decorator that swallows
+    exceptions to produce a status would hide real bugs (e.g. an
+    ``AttributeError`` from a misconfigured ``enemy`` duck type) behind a
+    plausible-looking ``SUCCESS``/``FAILURE``, which is worse than a loud crash.
+    """
+
+    def __init__(self, child: BehaviourNode):
+        self.child = child
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        status = self.child.tick(enemy, dt)
+        if status is Status.SUCCESS:
+            return Status.FAILURE
+        if status is Status.FAILURE:
+            return Status.SUCCESS
+        return status
+
+
+class Repeat(BehaviourNode):
+    """Tick ``child`` until it has returned ``SUCCESS`` a total of ``n`` times.
+
+    - What counts as "one completion": a tick where the child returns
+      ``SUCCESS``. A child returning ``RUNNING`` does NOT increment the
+      counter — ``Repeat`` waits for the child to resolve before counting,
+      and itself returns ``RUNNING`` that tick.
+    - A child returning ``FAILURE``: ``Repeat`` propagates ``FAILURE``
+      immediately (it cannot complete the full ``n`` repetitions) and resets
+      its completion counter to 0.
+    - When the ``n``th completion is reached: ``Repeat`` returns ``SUCCESS``
+      and resets its counter to 0, so a parent ``Repeat`` or a re-ticked
+      ``Selector``/``Sequence`` can reuse this instance from a clean slate
+      without reconstructing it.
+    - ``n=-1`` (infinite): the primary use case (infinite patrol loops etc).
+      The counter never reaches a terminal value, so this node never returns
+      ``SUCCESS`` — it returns ``RUNNING`` for every child ``SUCCESS`` and
+      ``FAILURE`` for any child ``FAILURE``, forever.
+    - ``n=0``: zero repetitions requested. Returns ``SUCCESS`` immediately on
+      the first tick, without ticking the child at all.
+
+    Per-instance mutable state — the completion counter lives on ``self``,
+    safe under the one-tree-per-enemy ownership contract (module docstring).
+    """
+
+    def __init__(self, child: BehaviourNode, n: int):
+        self.child = child
+        self.n = n
+        self._count = 0
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        if self.n == 0:
+            return Status.SUCCESS
+
+        status = self.child.tick(enemy, dt)
+        if status is Status.RUNNING:
+            return Status.RUNNING
+        if status is Status.FAILURE:
+            self._count = 0
+            return Status.FAILURE
+
+        # SUCCESS: one completion.
+        self._count += 1
+        if self.n == -1:
+            # Infinite mode never resolves — always RUNNING after a success.
+            return Status.RUNNING
+        if self._count >= self.n:
+            self._count = 0
+            return Status.SUCCESS
+        return Status.RUNNING
+
+
+class Cooldown(BehaviourNode):
+    """Rate-limit ``child`` to at most one new tick cycle per ``seconds``.
+
+    RUNNING-interaction decision (the most non-obvious part of this node):
+    the cooldown timer starts (or restarts) only when ``child`` *resolves*
+    (returns ``SUCCESS`` or ``FAILURE``) — not when ``Cooldown`` itself is
+    ticked. While ``child`` is returning ``RUNNING`` across multiple frames,
+    every ``Cooldown.tick()`` call passes straight through to ``child.tick()``
+    without consulting or restarting the timer, because the child is
+    mid-execution, not starting a new cycle. Only once the child resolves
+    does the cooldown window begin. The next ``Cooldown.tick()`` call inside
+    that window does **not** re-tick the child at all — it returns the
+    child's last resolved status (``SUCCESS`` or ``FAILURE``) directly. This
+    applies identically to both resolved statuses: a child that last
+    resolved ``FAILURE`` is rate-limited exactly like one that resolved
+    ``SUCCESS``. Once the window elapses, the next tick invokes the child
+    again and the cycle repeats.
+
+    Time tracking matches ``AttackNode`` (``Scripts/behaviour_nodes.py``):
+    wall-clock ``time.time()`` timestamp comparison, not dt-accumulation.
+
+    Edge cases:
+    - First tick ever (no prior resolution): always allowed — the cooldown
+      only applies *after* the first resolution, never before it.
+    - ``seconds=0``: no rate limiting — the child is ticked on every call.
+    - Child still ``RUNNING``: passed through every time, timer untouched.
+
+    Per-instance mutable state — ``self._last_resolved_time`` and
+    ``self._last_status`` live on ``self``, safe under the one-tree-per-enemy
+    ownership contract (module docstring).
+    """
+
+    def __init__(self, child: BehaviourNode, seconds: float):
+        self.child = child
+        self.seconds = seconds
+        self._last_resolved_time = None
+        self._last_status: Status | None = None
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        now = _time.time()
+        if (
+            self._last_resolved_time is not None
+            and self.seconds > 0
+            and now - self._last_resolved_time < self.seconds
+        ):
+            # Within the cooldown window since the child last resolved —
+            # rate-limited: do not re-tick the child, replay its last status.
+            return self._last_status
+
+        status = self.child.tick(enemy, dt)
+        if status is not Status.RUNNING:
+            self._last_resolved_time = now
+            self._last_status = status
+        return status

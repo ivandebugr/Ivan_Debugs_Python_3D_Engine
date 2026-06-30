@@ -1,13 +1,13 @@
 """Unit tests for Scripts/behaviour_nodes.py (v1.4 — Step 2: IdleNode, AttackNode;
-Step 3: ChaseNode; Step 4: PatrolNode).
+Step 3: ChaseNode; Step 4: PatrolNode; Step 5: FleeNode).
 
 Pure unit tests: no Ursina import, no app launch, no window. The enemy and
 player are mock objects exposing only the attributes the nodes read:
 ``enemy.position``, ``enemy.player.position``, ``enemy.shoot()``,
-``enemy.chase_step()`` (Step 3) and ``enemy.patrol_step()`` (Step 4).
-``position`` is a tiny vector stub with the handful of operations the nodes
-use (subtraction, length, normalisation) so the node math runs without
-Ursina's Vec3.
+``enemy.chase_step()`` (Step 3, also reused by Step 5's ``FleeNode``) and
+``enemy.patrol_step()`` (Step 4). ``position`` is a tiny vector stub with the
+handful of operations the nodes use (subtraction, length, normalisation) so
+the node math runs without Ursina's Vec3.
 
 Wall-clock cooldown is controlled by monkeypatching the module's ``_time``
 reference so tests advance time deterministically — no real sleeping.
@@ -21,7 +21,7 @@ import math
 import unittest
 
 import Scripts.behaviour_nodes as bn
-from Scripts.behaviour_nodes import AttackNode, ChaseNode, IdleNode, PatrolNode
+from Scripts.behaviour_nodes import AttackNode, ChaseNode, FleeNode, IdleNode, PatrolNode
 from Scripts.behaviour_tree import Status
 
 
@@ -83,21 +83,36 @@ class MockEnemy:
     advance ``self.position`` by ``direction * speed * dt`` — used by the
     PatrolNode tests that need to simulate multiple frames of real travel
     (e.g. reaching a waypoint, then cycling to the next one).
+
+    ``health`` defaults to 100 (matching ``ENEMY_HP_DEFAULT`` in
+    ``enemy.py``) so existing tests that don't care about HP are unaffected;
+    FleeNode tests override it via the constructor or by setting it directly,
+    the same way ``Enemy.health`` is a plain mutable attribute in production.
+
+    ``move_on_chase_step``, when True, makes ``chase_step`` (Step 3, reused
+    by Step 5's FleeNode with an inverted direction) actually advance
+    ``self.position`` by ``direction * dt`` — mirrors ``move_on_patrol_step``,
+    used by FleeNode's multi-tick flee-to-success test.
     """
 
-    def __init__(self, position, player=None, move_on_patrol_step=False):
+    def __init__(self, position, player=None, move_on_patrol_step=False,
+                 health=100, move_on_chase_step=False):
         self.position = position
         self.player = player
         self.shoot_count = 0
         self.chase_calls = []     # list of (direction, dt) tuples
         self.patrol_calls = []    # list of (direction, speed, dt) tuples
         self.move_on_patrol_step = move_on_patrol_step
+        self.health = health
+        self.move_on_chase_step = move_on_chase_step
 
     def shoot(self):
         self.shoot_count += 1
 
     def chase_step(self, direction, dt):
         self.chase_calls.append((direction, dt))
+        if self.move_on_chase_step:
+            self.position = self.position + direction * dt
 
     def patrol_step(self, direction, speed, dt):
         self.patrol_calls.append((direction, speed, dt))
@@ -481,6 +496,129 @@ class TestPatrolNode(unittest.TestCase):
         self.assertGreaterEqual(statuses.count(Status.SUCCESS), 2,
                                 "must cycle through both waypoints and back")
         self.assertEqual(node.current_index, 0, "route must have looped back to index 0")
+
+
+class TestFleeNode(unittest.TestCase):
+    """FleeNode (Step 5): flee while HP < threshold and player is within
+    flee_range; reuses chase_step with an inverted direction."""
+
+    def test_hp_at_or_above_threshold_fails_immediately_no_movement(self):
+        # HP >= threshold: "not fleeing" case, FAILURE, zero movement attempted.
+        enemy, _ = make_pair(distance=5)
+        enemy.health = 50
+        node = FleeNode(flee_threshold_hp=50, flee_range=20)
+        result = node.tick(enemy, DT)
+        self.assertIs(result, Status.FAILURE)
+        self.assertEqual(enemy.chase_calls, [], "must not move when not fleeing")
+
+    def test_low_hp_player_within_range_runs_and_moves_away(self):
+        # HP below threshold, player close (within flee_range) -> RUNNING,
+        # and the step direction must be AWAY from the player, not toward it.
+        player = MockPlayer(Vec(5, 0, 0))
+        enemy = MockEnemy(Vec(0, 0, 0), player, health=10)
+        node = FleeNode(flee_threshold_hp=30, flee_range=20)
+        result = node.tick(enemy, DT)
+
+        self.assertIs(result, Status.RUNNING)
+        self.assertEqual(len(enemy.chase_calls), 1, "must step once")
+        direction, passed_dt = enemy.chase_calls[0]
+        # Player is at +x from enemy; fleeing must point -x (away), the
+        # opposite of what ChaseNode would compute for the same layout.
+        self.assertAlmostEqual(direction[0], -1.0, places=6)
+        self.assertAlmostEqual(direction[1], 0.0, places=6)
+        self.assertAlmostEqual(direction[2], 0.0, places=6)
+        self.assertEqual(passed_dt, DT)
+
+    def test_low_hp_player_already_beyond_range_succeeds_no_movement(self):
+        # HP below threshold but player already further than flee_range ->
+        # SUCCESS immediately, no movement attempted this tick.
+        enemy, _ = make_pair(distance=50)   # 50 > flee_range 20
+        enemy.health = 10
+        node = FleeNode(flee_threshold_hp=30, flee_range=20)
+        result = node.tick(enemy, DT)
+        self.assertIs(result, Status.SUCCESS)
+        self.assertEqual(enemy.chase_calls, [], "already far enough — no step needed")
+
+    def test_flees_across_multiple_ticks_until_beyond_range(self):
+        # Real multi-tick flee: enemy starts close, player stationary, enemy
+        # walks away each tick via move_on_chase_step until distance crosses
+        # flee_range, at which point the SAME node call transitions to SUCCESS.
+        player = MockPlayer(Vec(0, 0, 0))
+        enemy = MockEnemy(Vec(1, 0, 0), player, health=10, move_on_chase_step=True)
+        node = FleeNode(flee_threshold_hp=30, flee_range=5)
+
+        statuses = []
+        for _ in range(2000):
+            status = node.tick(enemy, DT)
+            statuses.append(status)
+            if status is Status.SUCCESS:
+                break
+
+        self.assertIn(Status.RUNNING, statuses, "must run while still within flee_range")
+        self.assertIs(statuses[-1], Status.SUCCESS, "must eventually succeed once far enough")
+        final_distance = (enemy.position - player.position).length()
+        self.assertGreater(final_distance, 5, "enemy must have actually opened the distance")
+
+    def test_movement_direction_is_away_for_arbitrary_relative_position(self):
+        # Enemy at (1,0,2), player at (4,0,6): ChaseNode's direction test uses
+        # this exact layout and expects (0.6, 0, 0.8) toward the player.
+        # FleeNode must produce the exact negation: (-0.6, 0, -0.8).
+        # Actual distance is 5 (|(3,0,4)| = 5); flee_range must exceed that to
+        # force RUNNING (a step) instead of an immediate SUCCESS.
+        player = MockPlayer(Vec(4, 0, 6))
+        enemy = MockEnemy(Vec(1, 0, 2), player, health=10)
+        node = FleeNode(flee_threshold_hp=30, flee_range=10)
+
+        result = node.tick(enemy, DT)
+        self.assertIs(result, Status.RUNNING)
+        direction, _ = enemy.chase_calls[0]
+        self.assertAlmostEqual(direction[0], -0.6, places=6)
+        self.assertAlmostEqual(direction[1], 0.0, places=6)
+        self.assertAlmostEqual(direction[2], -0.8, places=6)
+        self.assertAlmostEqual(direction.length(), 1.0, places=6,
+                               msg="direction handed to chase_step must be unit length")
+
+    def test_hp_recovery_mid_flee_switches_to_failure_and_stops_movement(self):
+        # Start fleeing (RUNNING), then HP recovers above threshold before the
+        # enemy has opened flee_range -> next tick is FAILURE, no more movement.
+        player = MockPlayer(Vec(2, 0, 0))
+        enemy = MockEnemy(Vec(0, 0, 0), player, health=10)
+        node = FleeNode(flee_threshold_hp=30, flee_range=20)
+
+        self.assertIs(node.tick(enemy, DT), Status.RUNNING)
+        calls_before = len(enemy.chase_calls)
+
+        enemy.health = 35   # recovers above threshold
+        result = node.tick(enemy, DT)
+        self.assertIs(result, Status.FAILURE)
+        self.assertEqual(len(enemy.chase_calls), calls_before,
+                         "no movement once HP has recovered above threshold")
+
+    def test_oscillation_repeated_success_is_stable_no_crash(self):
+        # PART 2: once far enough, repeated ticks with the same low-HP,
+        # far-away state must keep returning SUCCESS with no movement and no
+        # stuck/crashing state — confirms statelessness across ticks.
+        enemy, _ = make_pair(distance=50)
+        enemy.health = 10
+        node = FleeNode(flee_threshold_hp=30, flee_range=20)
+        for _ in range(5):
+            result = node.tick(enemy, DT)
+            self.assertIs(result, Status.SUCCESS)
+        self.assertEqual(enemy.chase_calls, [], "never moves once already beyond flee_range")
+
+    def test_speed_comes_from_shared_chase_step_not_a_new_value(self):
+        # FleeNode must reuse enemy.chase_step (the SAME method ChaseNode
+        # calls) rather than introduce its own speed-aware method — confirmed
+        # structurally: the call recorded in chase_calls is indistinguishable
+        # in shape from a ChaseNode call (direction, dt) with no speed
+        # argument, proving speed is owned entirely by Enemy.chase_step
+        # (ENEMY_CHASE_SPEED), not passed in or reinvented here.
+        player = MockPlayer(Vec(5, 0, 0))
+        enemy = MockEnemy(Vec(0, 0, 0), player, health=10)
+        node = FleeNode(flee_threshold_hp=30, flee_range=20)
+        node.tick(enemy, DT)
+        self.assertEqual(len(enemy.chase_calls[0]), 2,
+                         "chase_step call signature is (direction, dt) only — no speed arg")
 
 
 if __name__ == "__main__":

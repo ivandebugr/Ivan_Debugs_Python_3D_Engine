@@ -1,8 +1,6 @@
 from ursina import *
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import AliveEntity, Layers, collision_manager, swept_move_blocked
-from Scripts.behaviour_tree import Selector, Sequence
-from Scripts.behaviour_nodes import ChaseNode, AttackNode, IdleNode
 
 # TUNE: balance / experiment variables — label kept so grep finds them fast during playtesting
 ENEMY_HP_DEFAULT         = 100    # TUNE: try 50 for a 2-shot kill at 25 dmg/bullet
@@ -47,27 +45,21 @@ class Enemy(AliveEntity):
         self.attack_range     = ENEMY_ATTACK_RANGE
         self.detection_range  = ENEMY_DETECTION_RANGE
 
-        # Interim behaviour tree (v1.4 Step 3): chase when the player is within
-        # detection range, then attack when close enough. Flow:
-        #  - Player beyond detection_range (100): ChaseNode FAILS -> Sequence
-        #    aborts -> Selector falls through to IdleNode -> enemy stays put.
-        #  - Player inside detection but beyond attack_range: ChaseNode moves the
-        #    enemy and returns RUNNING -> Sequence short-circuits, AttackNode not
-        #    ticked yet (too far to shoot) -> enemy closes the gap.
-        #  - Player within attack_range (30): ChaseNode returns SUCCESS without
-        #    moving -> Sequence advances to AttackNode -> fires on cooldown.
-        # ChaseNode's stop_range is ENEMY_ATTACK_RANGE so the enemy stops closing
-        # exactly where it can start shooting. detection_range = ENEMY_DETECTION_
-        # RANGE (100) is a superset of attack_range (30) — the same constant that
-        # already gates look_at/occlusion in update().
-        # TODO(v1.4 Step 7): replace with BehaviourTreeFactory.build("default", {})
-        self._tree = behaviour_tree or Selector([
-            Sequence([
-                ChaseNode(ENEMY_DETECTION_RANGE, ENEMY_ATTACK_RANGE),
-                AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
-            ]),
-            IdleNode(),
-        ])
+        # Behaviour tree (v1.4 Step 7): built by BehaviourTreeFactory from a
+        # named preset. The "default" preset reproduces the interim Step-3 tree
+        # exactly — Selector([Sequence([Chase, Attack]), Idle]) with the same
+        # tuned constants — so behaviour is unchanged from before this swap.
+        # The `behaviour_tree` param remains a test/injection escape hatch: unit
+        # and smoke tests pass a custom tree directly, bypassing the Factory.
+        # Lazy import breaks the enemy <-> factory cycle (the Factory imports the
+        # ENEMY_* tuned constants from this module): by the time an Enemy is
+        # constructed, enemy.py is fully loaded, so the Factory's import resolves.
+        # Same pattern as shoot()'s lazy get_enemy_bullet_pool import.
+        if behaviour_tree is not None:
+            self._tree = behaviour_tree
+        else:
+            from Scripts.behaviour_tree_factory import BehaviourTreeFactory
+            self._tree = BehaviourTreeFactory.build("default", {})
 
         self._occluded        = False   # cached result — updated on throttle interval
         self._occlusion_timer = 0.0     # counts down; raycast fires when <= 0
