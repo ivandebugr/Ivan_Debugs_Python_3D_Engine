@@ -160,6 +160,25 @@ def _build_open_door(action: dict):
     return fire
 
 
+def _build_win_condition(action: dict):
+    """`win_condition`: trigger the WIN end-screen on enter.
+
+    Delegates entirely to game.trigger_win() — which already does everything the
+    spec's win_condition row describes (sets game.state = Game.WIN, freezes time,
+    surfaces the mouse, hides the HUD, builds the EndScreen 'YOU WIN' overlay) and
+    is the SAME path the kill-all-enemies win uses (main.update). This action must
+    NOT build its own overlay: EndScreen is the single win-screen implementation and
+    game.win_screen is its single owner (cleared in _clear_gameplay_entities). A
+    second overlay would leak and double-render.
+
+    trigger_win() is idempotent (only fires from PLAYING), so a trigger that re-fires
+    on re-entry is harmless — no extra guard needed here.
+    """
+    def fire():
+        game.trigger_win()
+    return fire
+
+
 def _build_checkpoint(action: dict):
     """`checkpoint`: snapshot player.position into game.respawn_point on enter.
 
@@ -175,11 +194,13 @@ def _build_checkpoint(action: dict):
     return fire
 
 
-# action name → builder fn. Step 5 adds 'win_condition', 'play_sound'.
+# action name → builder fn. 'play_sound' is the remaining spec action (deferred —
+# not in this session's Steps 3–6 scope).
 ACTION_BUILDERS = {
-    'kill_plane': _build_kill_plane,
-    'checkpoint': _build_checkpoint,
-    'open_door':  _build_open_door,
+    'kill_plane':    _build_kill_plane,
+    'checkpoint':    _build_checkpoint,
+    'open_door':     _build_open_door,
+    'win_condition': _build_win_condition,
 }
 
 
