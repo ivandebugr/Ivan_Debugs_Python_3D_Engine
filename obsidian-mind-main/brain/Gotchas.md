@@ -8,6 +8,21 @@ tags:
 
 Things that have bitten before and will bite again.
 
+## `Entity.intersects(other)` — the arg is a traversal target, not the entity to test against — 2026-06-30
+**Context:** v1.5 System A. The spec's `TriggerZone` (and `AmmoPickup`, Step 12 in System B) pseudocode reads `inside = self.intersects(player).hit` — meaning "am I overlapping the player?". This looks obviously correct and would be copied verbatim by anyone implementing from the spec.
+**Symptom:** No crash, but wrong behaviour — the trigger fires (or never fires) regardless of where the player is. `self.intersects(player)` does NOT test "self vs player": Ursina's `Entity.intersects(traverse_target=scene, ...)` treats its first positional arg as the *root of the collision traversal*, then returns a `HitInfo` for whatever `self`'s collider hits within that subtree. Passing the player as `traverse_target` traverses only the player's node, so `.hit`/`.entities` reflect the player subtree, not a self-vs-player test — and `.hit` can read true/false for reasons unrelated to actual overlap.
+**Root cause:** API shape mismatch. `intersects()` is "what does my collider hit when I traverse *this target*?", not "do I overlap *this specific entity*?". There is no built-in "do these two AABBs overlap" call with that signature.
+**Fix:** Call `self.intersects()` with no arg (traverses the default scene), then test membership: `hit_info = self.intersects(); inside = hit_info.hit and player in hit_info.entities`. This is the live, correct pattern in `TriggerZone.update()` ([[v1.5-gameplay-systems]], commit `e93ebae`). **Treat this as the documented pattern for the whole codebase** — any future `.intersects(specific_entity)` call (notably the `AmmoPickup` in System B Step 12) needs the same correction. Do not copy the spec's pseudocode literally.
+**Source:** [[v1.5-gameplay-systems]]; commits `e93ebae` (TriggerZone), `61b2712`/`cbd05d6` (v1.5 step-2 fixes)
+
+## FPS gun viewmodel clipping — depth-state tricks fail, need a 2nd camera — 2026-06-30
+**Context:** The FPS gun (`Weapon`, `parent=camera`, local `position=(0.5,-0.5,1)`) clipped through walls and level blocks when the player stood flush against them.
+**Symptom:** The gun's far end pokes through / is painted over by world geometry as the camera approaches a wall. The geometry physically intersects the wall in world space — the gun is ~1.5u ahead of the camera.
+**Root cause:** This is a depth-*order* problem caused by overlapping geometry, not a draw-order problem. Depth-state-only fixes — Ursina `always_on_top`, `setBin('fixed', 100)` + `setDepthTest(False)` (the gizmo pattern in Hard Constraint 11) — CANNOT fix it, because the gun shares the world's render pass: other world geometry in the same pass still paints over it even with depth-test off.
+**Fix:** Standard Unity/Unreal dual-camera viewmodel. Give the gun a dedicated draw bit (`VIEWMODEL_MASK = BitMask32.bit(7)`), clear that bit from the main camera's mask so it renders everything except the gun, then add a second Panda3D camera (mask = bit 7 only, reuse `base.camLens`, parent to `base.cam`) on its own `make_display_region()` at sort 15 (after world=0/render2d=10, before UI=20). Hide the gun from all masks, show it only to `VIEWMODEL_MASK`, and set `setDepthTest(False)`/`setDepthWrite(False)` — because the VM pass runs after the whole world pass, an always-pass gun lands on top regardless of wall proximity. See `_setup_viewmodel_camera()` in `Scripts/weapon.py`.
+**Footgun within the footgun:** Do NOT enable the display region's clear-depth (`set_clear_depth_active`). On macOS GL 2.1 it blanked the already-rendered world (verified via headless Panda3D render tests: gun-on-top but wall wiped). Leave clear-depth OFF and rely on depth-test-off + pass ordering instead. The GLSL 1.20 shader patch in `main.py` rewrites shader *source* only, not render state, so it does not re-enable depth-test on the gun.
+**Source:** [[v1.5-gameplay-systems]]
+
 ## Ursina destroy() does not call entity.destroy() — override is dead code — 2026-05-20
 **Context:** Tried to override `HealthBar.destroy()` to auto-clean up sub-entities parented outside the hierarchy (text parented to camera.ui instead of the health bar).
 **Symptom:** Sub-entities survive after the parent entity is destroyed; text elements leak on scene transition.
