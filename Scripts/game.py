@@ -19,6 +19,11 @@ class Game:
         self.hud              = None
         self.win_screen       = None
         self.game_over_screen = None
+        # v1.5: written by the trigger `checkpoint` action (player.position snapshot).
+        # Forward declaration — no consumer yet, like Layers.PICKUP. A respawn-on-death
+        # mechanic would read this, but the death path is terminal (trigger_game_over),
+        # so nothing reads it this version. Reset in return_to_menu() so it never leaks.
+        self.respawn_point    = None
 
     def __repr__(self):
         return f"Game(state={self.state!r})"
@@ -76,6 +81,7 @@ class Game:
             self.hud              = None
             self.win_screen       = None
             self.game_over_screen = None
+            self.respawn_point    = None
             # Reset time_scale here (not in _clear_gameplay_entities) so it always
             # resets even when teardown raises mid-way (e.g. stale NodePath crash).
             try:

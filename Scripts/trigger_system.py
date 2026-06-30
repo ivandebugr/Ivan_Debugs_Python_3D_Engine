@@ -105,10 +105,25 @@ def _build_kill_plane(action: dict):
     return fire
 
 
-# action name → builder fn. Steps 3–5 add 'checkpoint', 'open_door',
-# 'win_condition', 'play_sound'.
+def _build_checkpoint(action: dict):
+    """`checkpoint`: snapshot player.position into game.respawn_point on enter.
+
+    Forward-declaration consumer (see Game.respawn_point): nothing reads
+    respawn_point yet — the death path is terminal — so this only records the
+    value. Snapshot by value (Vec3(...)) so respawn_point freezes the crossing
+    position rather than tracking the live player.
+    """
+    def fire():
+        player = game.player
+        if player is not None:
+            game.respawn_point = Vec3(player.position)
+    return fire
+
+
+# action name → builder fn. Steps 4–5 add 'open_door', 'win_condition', 'play_sound'.
 ACTION_BUILDERS = {
     'kill_plane': _build_kill_plane,
+    'checkpoint': _build_checkpoint,
 }
 
 
