@@ -631,9 +631,21 @@ class LevelEditor(Entity):
                           self.BUILTIN_MODELS[-1]['color'][1],
                           self.BUILTIN_MODELS[-1]['color'][2],
                           self._TRIGGER_ALPHA)
+        # Resolve the volume texture to an ABSOLUTE path. A bare string
+        # ('texture_orange_test') only works when application.asset_folder points at
+        # the project root; the editor runs standalone with asset_folder='Scripts',
+        # so the bare glob misses and the volume renders untextured. PROJECT_ROOT is
+        # the same absolute-path resolution the ground texture (below) already uses.
+        trig_tex = None
+        try:
+            tex_path = PROJECT_ROOT / 'assets' / 'textures' / f'{self._TRIGGER_TEXTURE}.png'
+            if tex_path.exists():
+                trig_tex = Texture(Path(str(tex_path)))
+        except Exception as exc:
+            logger.log('ERROR', f"_make_trigger_entity texture {type(exc).__name__}: {exc}")
         e = Entity(
             model='cube',
-            texture=self._TRIGGER_TEXTURE,
+            texture=trig_tex,
             color=tint,
             scale=tuple(scale),
             position=tuple(position),
