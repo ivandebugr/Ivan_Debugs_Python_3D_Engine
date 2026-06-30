@@ -115,156 +115,40 @@ Scripts/
   level_editor.py          — LevelEditor(Entity): EDITOR_GRID_SNAPS=(1.0,0.5,0.25,None) constant;
                              snap/undo/redo/multi-select/inspector/hierarchy/gizmos/bookmarks/
                              play-in-editor/drag-and-drop placement via asset browser Models tab.
-                             **Tool modes**: self._tool = 'move' | 'place'. Move mode selects/
-                             deselects only (left-click never places). Place mode left-click on any
-                             collidable non-editor surface places a new block; Shift+click selects.
-                             Buttons [↖ Move] and [+ Place] in toolbar toggle _set_tool(mode).
-                             Toolbar buttons whose active-state background uses color.rgb(...)
-                             (clamps to white in Ursina 8.3.0) carry text_color=color.black AND
-                             highlight_text_color set in step so the label stays readable in both
-                             states — play_button (always black), Move/Place (black when active /
-                             white when inactive, kept in sync by _set_tool). Default white text on
-                             a clamped-white active background is invisible (the fixed bug).
-                             **Inspector (reduced 6-field set, by design):** _build_inspector()
-                             renders ONLY a 3-column × 2-row grid — Row 1 Pos X/Y/Z, Row 2
-                             Scale X/Y/Z (keys pos_x/pos_y/pos_z/scl_x/scl_y/scl_z). HP, rotation,
-                             colour, texture and enemy_type are NO LONGER editable in the panel but
-                             still live on the entity and round-trip through level.json
-                             (_build_level_data writes them; load_existing_level reads them) — this
-                             is a display-only simplification, not a schema change. Multi-select
-                             with differing values shows '---' (not editable; _apply_inspector_value
-                             skips '---'/''). Labels use world_scale (Vec3(15,15,1)) + setBin('fixed',41)
-                             on the Entity — NOT scale=(...) which inherits the tiny panel scale and
-                             renders microscopically (the real cause of past "invisible label" bugs);
-                             never call node().setBin (PandaNode has no setBin).
-                             **Delete key:** input() accepts both 'delete' AND 'backspace' (macOS
-                             reports the physical Delete key as 'backspace' to Panda3D); guarded
-                             against firing while typing in an inspector field or mid-drag
-                             (gizmo/box-select/browser drag). Editor blocks/enemies are plain Entity
-                             placeholders (NOT AliveEntity), so deletion uses destroy() via
-                             DeleteEntityCommand — never .die(). Snapshot carries scale so undo
-                             restores it.
-                             _apply_layout() repositions border-anchored UI (hierarchy left,
-                             inspector right, asset browser bottom, toolbar
-                             top-right, hint top-left) from window.aspect_ratio; invoked on
-                             resize via a wrapped window.update_aspect_ratio (NOT window.on_resize,
-                             which Ursina never calls). Also refreshes camera lens aspect ratio.
-                             Toolbar button widths scale proportionally via _TOOLBAR_BTN_W_BASE ×
-                             min(1, aspect / _TOOLBAR_REF_ASPECT).  Browser tab buttons are
-                             repositioned by _layout_browser_tabs(). Panel
-                             widths are constants (_LAYOUT_HIER_W/_LAYOUT_INSP_W/_LAYOUT_PANEL_H);
-                             children of each panel use panel-local space and inherit the move
-                             automatically.
-                             **Hierarchy panel (search + type-grouped sections — v1.3):**
-                             SINGLE shared row-position formula `_hier_row_y(visual_index)` =
-                             `_HIER_TOP - visual_index * _HIER_ROW_H` is THE only place a row index
-                             maps to a panel-local y. Entity rows, their colour swatches, the section
-                             headers AND the scroll-thumb track (`_update_hier_scroll_bar` derives
-                             track_top/bottom from `_hier_row_y(0)` and `_hier_row_y(_HIER_MAX_VISIBLE-1)`)
-                             all call it — so the selection/scroll indicator can never drift from the
-                             rows again (the Bug A class). Never re-introduce a second inline y formula.
-                             `_hier_visual_rows()` is the layout model: an ordered list of
-                             ('header', section) / ('row', entity) tuples for the current filter +
-                             collapse state — headers always present, a section's rows present only
-                             when expanded AND matching the filter. `_refresh_hierarchy` walks the
-                             SCROLL WINDOW of that list (≤ _HIER_MAX_VISIBLE=13 slots) and builds only
-                             the visible widgets, so a filter keystroke at 140+ entities rebuilds ≤13
-                             buttons (~9ms, under frame budget) — NOT the whole list. **Search box**
-                             (`_hier_search_field`, InputField pinned above the list, y=0.40): live
-                             filter-as-you-type via `on_value_changed` → `_on_hier_search_changed`
-                             (case-insensitive substring on the row label); filtering only hides rows,
-                             never deletes or deselects. Focused-state is folded into the Delete/
-                             bookmark typing-guard via `_hier_typing()` so backspace/number keys edit
-                             the search text instead of deleting entities or recalling bookmarks.
-                             **Per-row colour swatch:** a quad tinted to the entity's real
-                             `_original_color` (blue/grey/silver/brown blocks, red enemies) left of the
-                             row text — distinguishes type beyond the B/E prefix. **Collapsible
-                             sections:** `Blocks (N)` / `Enemies (N)` header Buttons toggle
-                             `_hier_collapsed[section]` via `_toggle_hier_section`; counts reflect the
-                             FILTERED visible total. Collapse marker is ASCII `[+]` (collapsed) / `[-]`
-                             (expanded) — OpenSans (Ursina's default font) has NO triangle glyphs
-                             (▾▸▼▶ all render as missing-glyph boxes, verified against the .ttf cmap;
-                             same class as the ▶/↖ gaps). Row Buttons AND swatches are transient
-                             (destroyed/rebuilt every `_refresh_hierarchy`) and therefore are NOT
-                             eternal=True — `destroy()` is a no-op on eternal entities
-                             (ursina/destroy.py:27), so an eternal swatch would leak/ghost on every
-                             rebuild. Only the persistent panel/search-field/scroll-bar carry eternal.
-                             All these widgets are children of `_hier_panel`, so the existing
-                             `_is_over_panel(self._hier_panel)` click guard already covers clicks on the
-                             search box and headers (no fall-through to scene placement), and
-                             `_set_editor_ui_visible` hides them in F5 play mode via the panel's
-                             enabled cascade. The scroll-bar colour is `color.rgba(0.78,0.78,0.78,0.47)`
-                             — 0–1 floats; the old 0–255 `rgba(200,200,200,120)` clamped to opaque
-                             white (the over-bright bar).
-                             **Toolbar (HORIZONTAL row — v1.3 layout pass):** Texture/Snap/Play/
-                             Move/Place render as ONE horizontal strip in the thin band ABOVE the
-                             inspector (y centre _TOOLBAR_Y=0.475; inspector top edge is 0.45 at
-                             PANEL_H 0.9), NOT a vertical stack. _apply_layout lays them right-to-
-                             left from half_w - _TOOLBAR_RIGHT_PAD so they read Texture→Place L→R;
-                             per-button base widths live in _TOOLBAR_BTN_W_BASE (keyed by attr name,
-                             scaled by _TOOLBAR_REF_ASPECT ratio in _apply_layout), uniform
-                             height _TOOLBAR_BTN_H. Labels shortened to fit ('Tex: White/Grass',
-                             'Play' — NO ▶ glyph, the font lacks U+25b6; '↖ Move' keeps U+2196 which
-                             the font also lacks but predates this pass). Verified no overlap with
-                             the Pos/Scale grid at 960x540 and at 21:9. The white-bg/black-text fix
-                             (play_button always black; Move/Place black-when-active via _set_tool)
-                             is unchanged. **Stats strip (Change C):** self._stats_text is a labelled
-                             'entities: N   colliders: N' Text sitting on the toolbar row to its left
-                             (right-aligned, origin (0.5,0); x = _toolbar_left_x - 0.02 set in
-                             _apply_layout). Counts the editor's own self.blocks+self.enemies (and how
-                             many carry a collider), refreshed ~1/s from update() via _refresh_stats().
-                             Ursina's built-in window.entity_counter/collider_counter are DISABLED in
-                             __main__ (replaced by this); window.fps_counter is dropped to y=0.43 so it
-                             clears the toolbar band. **Hint background (Change D):** _attach_hint_
-                             background() (called from __main__ after _hint_text exists) builds
-                             self._hint_bg — a dark quad (_THEME_PANEL_BG, parent=camera.ui, eternal,
-                             z=0.01 so it sits BEHIND the z=-1 text) sized to the text via
-                             _position_hint_bg() (Text.width/height × the Text's own scale, since the
-                             bg is NOT parented to the text; + _HINT_BG_PAD). Sized to the legend, not
-                             full width.
-                             **Asset browser (v1.3):** _build_asset_browser() renders a full-width
-                             strip flush to the bottom of the window (centre y _BROWSER_Y=-0.40,
-                             _BROWSER_H=0.20; parent=camera.ui, eternal=True). Three tabs
-                             (Textures|Models|Sounds via _set_browser_tab; default Textures) over a
-                             horizontally scrollable row of thumbnail cards. Texture cards load the
-                             real image via `Texture(Path(path))` — raw path strings fail silently
-                             in Ursina's texture setter (the v1.3 BUG A fix). Model cards show the
-                             flat colour of built-in types (blue/grey/silver/brown/red from
-                             BUILTIN_MODELS) or a placeholder tint for real scanned .obj/.gltf files.
-                             Sound cards show a speaker glyph. The standalone placement tray that
-                             existed in v1.2 has been removed — its 5 built-in types (Cube/Stone/
-                             Metal/Wood/Enemy) are now synthetic entries prepended to the Models tab
-                             via BUILTIN_MODELS and _browser_card_assets; clicking one initiates the
-                             same drag-to-place flow (ghost preview, snap-to-grid, PlaceEntityCommand
-                             undo) that the old tray used. Non-built-in cards (Textures, Sounds,
-                             scanned models) use click-to-select / double-click only.
-                             Horizontal scroll per-tab via mouse wheel over the panel; scroll
-                             position persists per-tab when switching. Left/right arrow Text
-                             indicators (_browser_scroll_left/_right) show when more cards exist
-                             off-screen; toggled by _update_browser_scroll_indicators(). The
-                             _is_over_browser() guard suppresses EditorCamera zoom while scrolling.
-                             **Empty category** collapses to a single "Category (0)" strip;
-                             re-expands when the category gains ≥1 asset.
-                             **Consistent dark theme:** ALL chrome shares one dark palette via
-                             class-level _THEME_* constants (0–1 floats, NOT 0–255).
-                             _THEME_PANEL_BG=rgba(0,0,0,0.75) is used by the browser panel and
-                             hint bg; _THEME_TILE_BG/_HOVER/_SEL drive card backgrounds;
-                             _THEME_TAB_ACTIVE/_IDLE the browser tabs; _THEME_TEXT the light body
-                             text.
-                             _patch_shaders_to_glsl120() duplicated here for standalone runs
-                             (compat.py extraction still TODO).
-                             _exit_play_mode: sets game.state=MAIN_MENU before try block;
-                             except ImportError only (not bare except).
-                             ALL persistent editor UI entities (panels, browser cards, scroll
-                             indicators, gizmo axes/tips, toolbar buttons, stats strip,
-                             model_preview, spawn marker, ground, hint Text + hint bg) use
-                             eternal=True so scene teardown during play-in-editor cannot destroy
-                             them. Level blocks/enemies in self.blocks/self.enemies do NOT use
-                             eternal=True — they must be destroyable. _restore_editor_level()
-                             rebuilds them from _play_level_snapshot when play mode exits.
+                             **Tool modes**: self._tool = 'move'|'place'. Move: left-click selects only.
+                             Place: left-click on collidable non-editor surface places a block.
+                             [↖ Move]/[+ Place] toolbar buttons call _set_tool(mode).
+                             **Inspector**: 6 fields (pos_x/y/z, scl_x/y/z only). HP/rotation/colour/
+                             texture/enemy_type still round-trip through level.json — display-only
+                             simplification. Labels use world_scale=Vec3(15,15,1) + setBin('fixed',41)
+                             on the Entity (NOT scale= which inherits tiny panel scale → microscopic).
+                             **Delete key**: accepts 'delete' AND 'backspace' (macOS). Editor
+                             placeholders use destroy() not die() — they are plain Entity, not AliveEntity.
+                             **_apply_layout()**: repositions all border-anchored UI from window.aspect_ratio;
+                             invoked via wrapped window.update_aspect_ratio. Also refreshes camera lens.
+                             Toolbar widths: _TOOLBAR_BTN_W_BASE × min(1, aspect/_TOOLBAR_REF_ASPECT).
+                             **Hierarchy panel**: single row-position formula _hier_row_y(visual_index) —
+                             NEVER add a second inline y formula or scroll indicator will drift.
+                             _hier_visual_rows() is the layout model (header/row tuples). Transient
+                             row buttons/swatches are NOT eternal=True — destroy() is a no-op on
+                             eternal entities (ursina/destroy.py:27), they would leak on every rebuild.
+                             Search box (_hier_search_field): live filter via on_value_changed.
+                             Collapse marker: ASCII [+]/[-] — OpenSans has no triangle glyphs.
+                             **Toolbar**: horizontal strip above inspector. _TOOLBAR_Y=0.475. No ▶ glyph.
+                             Toolbar buttons: play_button text always black; Move/Place black-when-active.
+                             Stats strip (_stats_text): 'entities: N  colliders: N', refreshed ~1/s.
+                             **Asset browser**: _build_asset_browser(), full-width bottom strip
+                             (_BROWSER_Y=-0.40, _BROWSER_H=0.20). Tabs: Textures|Models|Sounds.
+                             Built-in types (Cube/Stone/Metal/Wood/Enemy) are synthetic Models-tab
+                             entries via BUILTIN_MODELS. Textures load via Texture(Path(path)) —
+                             raw path strings fail silently. _is_over_browser() suppresses EditorCamera zoom.
+                             **eternal=True**: ALL persistent editor UI uses eternal=True (survives
+                             play-in-editor teardown). Level blocks/enemies do NOT — they must be
+                             destroyable. _restore_editor_level() rebuilds from _play_level_snapshot.
+                             _exit_play_mode: sets game.state=MAIN_MENU before try; except ImportError only.
+                             Theme: _THEME_* constants (0–1 floats). Scroll-bar rgba(0.78,0.78,0.78,0.47).
                              Standalone runnable: `python Scripts/level_editor.py`
-                             SessionLogger (module-level singleton) writes structured log to
-                             logs/session_YYYYMMDD_HHMMSS.log on exit (atexit). Log dir auto-created.
+                             SessionLogger singleton → logs/session_YYYYMMDD_HHMMSS.log on exit (atexit).
   session_logger.py        — SessionLogger: stdlib-only; logger.log(level, msg) / logger.flush().
                              Levels: INFO | WARN | ERROR. Format: [HH:MM:SS.mmm] [LEVEL] message.
                              Instantiated once at module level in level_editor.py as `logger`.
@@ -364,52 +248,21 @@ Inactive bullets are parked at `BulletPool._PARK = Vec3(0, -10000, 0)`. **Never*
 
 ## Ursina 8.3.0 Compatibility (macOS / OpenGL 2.1)
 
-**Root cause of black screen after upgrade:** Ursina 8.3.0 set `Entity.default_shader =
-unlit_with_fog_shader`, and `Sky()` hardcodes `shader=unlit_shader`. Both use GLSL `#version 130/140`.
-macOS OpenGL 2.1 (Panda3D CocoaGraphicsPipe on Apple Silicon) supports GLSL 1.20 at most →
-every shader fails to compile → geometry renders black.
+`_patch_shaders_to_glsl120()` is called **twice**: once before `Ursina()`, and once after all
+window setup. Targets three shaders: `unlit_shader`, `unlit_with_fog_shader`, `text_shader` —
+both direct-import instances AND `ursina.shader.imported_shaders` dict entries.
+**Do not** upgrade shaders back to `#version 130+` without a verified Core Profile context.
+The same patch is duplicated in `level_editor.py` for standalone runs (compat.py TODO).
 
-**Fix in `main.py`:** `_patch_shaders_to_glsl120()` is called **twice** — once before `Ursina()`,
-and once after all window setup (fullscreen/size assignments) because window resize events
-can re-initialize shader objects on internal Ursina entities, undoing the first patch.
+**Other 8.3.0 changes:**
+- `window.color` default → black; set to `color.rgb(0.196, 0.196, 0.235)` (≈50,50,60 in 0–1) after `App()`
+- `Sky(texture='sky_default')` → `Sky()` — asset removed
+- `render.setAntialias()` / `render2d.setAntialias()` deferred to first frame via `taskMgr.doMethodLater(0, ...)`
 
-The patch targets three shaders: `unlit_shader`, `unlit_with_fog_shader`, `text_shader`.
-It patches both direct-import instances AND `ursina.shader.imported_shaders` dict entries
-(which may be different Python objects due to Ursina's module registration quirk).
-
-Key GLSL 1.20 differences: `attribute`/`varying` instead of `in`/`out`, `texture2D()` instead
-of `texture()`, `gl_FragColor` instead of a named `out vec4`.
-
-**Do not** upgrade shaders back to `#version 130+` without verifying a working Core Profile
-context exists on the target machine.
-
-**Other 8.3.0 changes accounted for:**
-- `window.color` default → black; set explicitly to `color.rgb(50, 50, 60)` after `App()`
-- `Sky(texture='sky_default')` → `Sky()` — the `sky_default` asset was removed
-- `render.setAntialias()` / `render2d.setAntialias()` deferred to first frame via
-  `taskMgr.doMethodLater(0, ...)` — accessing these NodePaths during startup resize crashes Panda3D
-
-**Verified Ursina 8.3.0 API footguns (read the installed source before trusting memory):**
-- **`color.rgb()` expects 0–1 floats, not 0–255.** `color.rgb` is an alias for `rgba()` which
-  returns `Color(r, g, b, a)` with **no division by 255** (`ursina/color.py`). `color.rgb(80,120,200)`
-  → `Color(80,120,200,1)` which clamps to white on render. Use 0–1 floats everywhere; use
-  `color.rgb32()` only when you genuinely have 0–255 ints. `level.json` colours and
-  `LevelEditor.BUILTIN_MODELS` are both 0–1.
-- **`InputField` Enter needs `submit_on` set AND a no-arg `on_submit`.** `InputField.submit_on`
-  defaults to `[]`, so `on_submit` never fires until you set `field.submit_on = ['enter']`. Ursina
-  then calls `self.on_submit()` with **no arguments** (`ursina/prefabs/input_field.py`) — the callback
-  must be no-arg and read `field.text` itself: `lambda k=key, f=field: handler(k, f.text)`. A
-  `lambda val, ...` raises `TypeError`. (v1.2.4 FIX 4.)
-- **Pick through the mouse cursor with `camera.lens.extrude`, not `camera.forward`.** `camera.forward`
-  rays through the screen centre; with a free editor cursor that is almost never where the user clicked.
-  Build the cursor ray the way Ursina's own picker does (`mouse.update`):
-  `camera.lens.extrude(Point2(mouse.x*2/window.aspect_ratio, mouse.y*2), near, far)`, then transform
-  both points with `render.get_relative_point(camera, …)` and normalise. See
-  `LevelEditor._cursor_ray()`. Combined with `ignore=[non-gizmo-tips]`, a handle wins even when a
-  block overlaps it on screen. (v1.2.4 FIX 1B.)
-
-The same shader patch is duplicated in `level_editor.py` for standalone runs.
-(Extraction to `Scripts/compat.py` is still a TODO — see Tech Debt table.)
+**Ursina 8.3.0 API footguns** (see `brain/Gotchas.md` for full context):
+- **`color.rgb()` expects 0–1 floats.** `color.rgb(80,120,200)` clamps to white. Use `color.rgb32()` for 0–255.
+- **`InputField.submit_on` defaults to `[]`.** Set `field.submit_on = ['enter']`. Callback must be no-arg.
+- **Pick ray: `camera.lens.extrude`, not `camera.forward`.** See `LevelEditor._cursor_ray()`.
 
 ---
 
@@ -447,7 +300,7 @@ Log new footguns → `brain/Gotchas.md` in the vault.
 7. `time` in Ursina scope is Panda3D's clock. Use `import time as _time; _time.time()` for wall-clock.
 9. Pool bullets must not have `enabled` toggled — use position parking (`y = -10000`) instead.
    Panda3D's `unstash()` asserts on re-enable and crashes.
-10. **Ursina 8.3.0 shader patch must run before any `Entity` is created** (and again after window setup).
+10. **Shader patch must run before any `Entity` is created** (and again after window setup).
     `_patch_shaders_to_glsl120()` must be the first call in `__main__`, before `Ursina()`.
 11. **Gizmo render-bin: call `setBin` / `setDepthTest` / `setDepthWrite` on the Entity directly**
     (Ursina's `Entity` subclasses `NodePath`). Never call on `entity.node()` — that returns
@@ -456,13 +309,11 @@ Log new footguns → `brain/Gotchas.md` in the vault.
 12. **`self._tool` in LevelEditor** — always `'move'` or `'place'`. Gate placement branches
     with `if self._tool == 'place':`. Move mode must never place entities on left-click.
 13. **Never read `e.name` (or any NodePath property) on an entity destroyed earlier in the
-    same synchronous call.** Ursina's `destroy()` empties the NodePath immediately
-    (`removeNode()`) but defers list removal to the next frame's flush, so `scene.entities[:]`
-    snapshots taken mid-teardown still contain emptied NodePaths. `getName()` on an empty
-    NodePath asserts `!is_empty()` at `nodePath.I:2102` (a **C++ assertion — `except Exception`
-    does not catch it**). Always filter with `_is_live(e)` (`not e.is_empty()`) **before**
-    touching `.name`. This applies to every sweep loop in `_clear_gameplay_entities`,
-    `main_menu`, and `load_level`.
+    same synchronous call.** `destroy()` empties the NodePath immediately but defers list
+    removal to next frame — `scene.entities[:]` snapshots still contain emptied NodePaths.
+    `getName()` on an empty NodePath fires a C++ assertion that `except Exception` cannot catch.
+    Always filter with `_is_live(e)` (`not e.is_empty()`) **before** touching `.name` in every
+    sweep loop in `_clear_gameplay_entities`, `main_menu`, and `load_level`.
 14. **Gameplay entity `input()` handlers must early-return when `game.state != Game.PLAYING`.**
     Ursina runs `__main__.input(key)` first (which may destroy gameplay entities via
     `return_to_menu()`), then continues the *same* dispatch into the per-entity loop calling
@@ -470,29 +321,15 @@ Log new footguns → `brain/Gotchas.md` in the vault.
     (e.g. `self.position = …`) raises `entity has been destroyed by: …`. `Player.input()`
     gates on `game.state == Game.PLAYING` for exactly this reason.
 
-15. **Camera lens aspect ratio must be explicitly refreshed on window resize, not just UI
-    panel positions.** Panda3D's automatic lens update via `base.camLens` is unreliable on
-    some macOS resize paths. `_apply_layout()` calls
-    `camera.perspective_lens.set_aspect_ratio(aspect)` (and the orthographic equivalent)
-    every time it runs. **Every dynamic UI element's size/position must be computed
-    relative to available space inside `_apply_layout()`, never hardcoded** — fixed-width
-    toolbar buttons at a 16:9 baseline overlap at narrower aspect ratios. Toolbar button
-    widths use `_TOOLBAR_BTN_W_BASE` scaled by `min(1, aspect / _TOOLBAR_REF_ASPECT)`.
-16. **`window.on_resize` is never called by Ursina** — setting it is dead code. To run
-    code on window resize, wrap `window.update_aspect_ratio` (invoked by Panda3D's
-    `aspectRatioChanged` event). The editor's constructor does this: the wrapped version
-    calls the original (which rescales camera.ui children's x-positions) then calls
-    `_apply_layout()` to reset all managed elements to correct absolute positions.
-17. **Never construct or set a `Text` entity's `.text` to `''` (empty string), and never
-    pass literal `'<'` or `'>'` as the full text with tag parsing left on.** Ursina's
-    `Text.start_tag`/`end_tag` default to `'<'`/`'>'` with `use_tags=True`; a bare `'<'` or
-    `'>'` parses as an empty tag pair with zero content lines, and an empty string also
-    produces zero lines. Either case makes `Text.align()` index `linewidths[-1]` into an
-    empty list → `IndexError: list index out of range` at `ursina/text.py:408` (this crashed
-    `_build_asset_browser()`'s scroll-arrow `Text` entities in v1.3). Fix: use
-    `enabled=False/True` to hide/show a `Text`, never an empty `.text`; for literal `<`/`>`
-    glyphs pass `use_tags=False` to the constructor (it's read from kwargs before the
-    initial `self.text = text` assignment, so it takes effect immediately).
+15. **Camera lens aspect ratio must be explicitly refreshed on window resize.** `_apply_layout()`
+    calls `camera.perspective_lens.set_aspect_ratio(aspect)` every time it runs.
+    Every dynamic UI element's size/position must be computed relative to available space inside
+    `_apply_layout()`, never hardcoded. Toolbar widths: `_TOOLBAR_BTN_W_BASE × min(1, aspect / _TOOLBAR_REF_ASPECT)`.
+16. **`window.on_resize` is never called by Ursina** — setting it is dead code. Wrap
+    `window.update_aspect_ratio` instead; the wrapped version calls the original then `_apply_layout()`.
+17. **Never set a `Text` entity's `.text` to `''` or to a bare `'<'`/`'>'` with tag parsing on.**
+    Both cases leave `Text.align()` with an empty linewidths list → `IndexError` (C++ cannot catch).
+    Use `enabled=False/True` to hide/show; pass `use_tags=False` for literal `<`/`>` glyphs.
 
 ### Conventions
 4. Use `except Exception:` not bare `except:`.
@@ -621,43 +458,19 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `game.return_to_menu()` �
 
 ## Roadmap
 
-### v1.3 — Ship a playable demo (current focus)
-- [x] Win screen — `game.trigger_win()` fires when `collision_manager.count_layer(Layers.ENEMY) == 0`
-- [x] Game Over screen — `game.trigger_game_over()` fires on player HP ≤ 0
+v1.3 shipped. v1.4 (enemy behaviour trees) in progress. Full history: `brain/North Star.md`.
+
+### Open items — v1.3 remainder (before itch.io)
 - [ ] PyInstaller macOS `.app` build, documented in README
 - [ ] One curated 5-enemy level saved as `levels/v1.json`
 - [ ] 1 shot SFX + 1 ambient track (CC-0 from freesound/Pixabay)
 - [ ] itch.io page with 2 screenshots + 30-second clip
 - [ ] Extract shader patch to `Scripts/compat.py`
 
-### Near-term housekeeping
-- [x] Delete `swept_cast()` dead code from `collision_system.py`
-- [x] Delete `_pooled` dead param from `PlayerBullet` and `EnemyBullet`
-- [x] Extract `SWEPT_OFFSETS` constant in `player_controller.py`
-- [x] Fix duplicate `health_bar.value` update in `Player.update()`
-- [x] Add `on_destroy()` to `Player` — unregisters from `collision_manager`
-- [x] Add `POOL_SIZE_PLAYER`/`POOL_SIZE_ENEMY` constants to `weapon.py`
-- [x] Add `BulletPool.active_count()` method
-- [x] Add `BulletPool.reset()` + `reset_bullet_pools()` — called during scene teardown
-- [x] Cache `HealthBar._registry` — replaces per-frame `scene.entities` scan
-- [x] Remove `eternal=True` from `HealthBar`; `on_destroy()` handles camera.ui text
-- [x] PlayerHUD — consolidate crosshair, hint text, health bar ref; fix hint-text leak and crosshair restore bug
-- [x] Add TUNE constants to `enemy.py` (HP, cooldown, ranges, occlusion interval)
-- [x] Add `VALID_ENEMY_TYPES` guard in `Enemy.__init__`
-- [x] `_restore_entity()` helper in `undo_redo.py` — fixes enemy redo origin_y
-- [x] `EDITOR_GRID_SNAPS` constant in `level_editor.py`
-- [x] Wire `game.trigger_game_over()` — replaced teleport in `Player.update()`
-
-### Engine features (post-demo)
-- [x] Collision bitmask system — `Layers` registry + `can_hit()`
-- [x] Object pooling for bullets — `BulletPool` eliminates per-shot allocation
-- [x] AliveEntity lifecycle — idempotent `die()` replaces `_destroyed` bool
-- [x] CollisionManager spatial grid — `query_layer()` / `query_near()`
-- [x] Game state machine — `Scripts/game.py`, replaces module-level globals
-- [x] Level editor: snap, undo/redo, multi-select, inspector, hierarchy, gizmos, bookmarks, play-in-editor, asset browser with drag-and-drop placement
-- [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition
-- [ ] Trigger/zone system — volume entry/exit callbacks
-- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations
+### Open items — post-demo engine
+- [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition (v1.4, in progress)
+- [ ] Trigger/zone system — volume entry/exit callbacks (v1.5)
+- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations (v1.5)
 
 ---
 

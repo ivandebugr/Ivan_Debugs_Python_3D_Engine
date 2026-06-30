@@ -139,6 +139,27 @@ Things that have bitten before and will bite again.
 **Fix:** `_apply_layout()` explicitly calls `camera.perspective_lens.set_aspect_ratio(aspect)` (and the orthographic equivalent) every time it runs — UI repositioning alone is insufficient.
 **Source:** CLAUDE.md Hard Constraint 15; CHANGELOG [1.2.6]
 
+## `color.rgb()` expects 0–1 floats, not 0–255 — Ursina 8.3.0
+**Context:** Setting entity colours in Ursina 8.3.0 after migrating from a version that used 0–255 conventions.
+**Symptom:** `color.rgb(80,120,200)` renders as white. Any colour call with values > 1 clamps to white on render.
+**Root cause:** `color.rgb` is an alias for `rgba()` which returns `Color(r, g, b, a)` with **no division by 255** (`ursina/color.py`). Passing 0–255 ints produces `Color(80,120,200,1)` which clamps to white.
+**Fix:** Use 0–1 floats everywhere. Use `color.rgb32()` only when you genuinely have 0–255 ints. `level.json` colours and `LevelEditor.BUILTIN_MODELS` are both 0–1.
+**Source:** CLAUDE.md Ursina 8.3.0 Compatibility section
+
+## `InputField.submit_on` defaults to `[]` — on_submit never fires — Ursina 8.3.0
+**Context:** Wiring up an `InputField` to fire a callback when the user presses Enter.
+**Symptom:** `on_submit` callback never fires even when Enter is pressed and `on_submit` is assigned.
+**Root cause:** `InputField.submit_on` defaults to `[]`, so `on_submit` never fires until you set `field.submit_on = ['enter']`. Ursina then calls `self.on_submit()` with **no arguments** — the callback must be no-arg and read `field.text` itself. A `lambda val, ...` raises `TypeError`.
+**Fix:** Set `field.submit_on = ['enter']` after construction. Make the callback no-arg: `lambda k=key, f=field: handler(k, f.text)`.
+**Source:** CLAUDE.md Ursina 8.3.0 Compatibility section (v1.2.4 FIX 4)
+
+## Pick ray uses `camera.lens.extrude`, not `camera.forward` — Ursina editor cursor
+**Context:** Building a mouse pick ray for a free-cursor editor (not a locked FPS).
+**Symptom:** Raycasts hit wrong geometry — ray goes through screen centre, not cursor position.
+**Root cause:** `camera.forward` always rays through the screen centre. With a free editor cursor that is almost never at screen centre, the ray misses the intended target.
+**Fix:** Build the cursor ray the way Ursina's own picker does: `camera.lens.extrude(Point2(mouse.x*2/window.aspect_ratio, mouse.y*2), near, far)`, then transform both points with `render.get_relative_point(camera, …)` and normalise. Combined with `ignore=[non-gizmo-tips]`, a handle wins even when a block overlaps it on screen. See `LevelEditor._cursor_ray()`.
+**Source:** CLAUDE.md Ursina 8.3.0 Compatibility section (v1.2.4 FIX 1B)
+
 ## Bare-string texture on the load path works, but bare-string model does not — 2026-06-26
 **Context:** v1.3 asset-pipeline final integration audit. Models load via `_resolve_model(entry['model'])` at every site; textures are still assigned bare (`Entity(texture=entry['texture'])`) at four load sites (`main.py:168`, and `Scripts/level_editor.py` `_restore_editor_level`/`_spawn_gameplay_from_snapshot`/`load_existing_level`).
 **Symptom:** None today — it works. The concern is that it *looks* like the Step-4 bug that broke models, so a future maintainer might "fix" it wrong or extend the bare pattern to a case that does break.
