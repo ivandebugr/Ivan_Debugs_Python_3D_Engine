@@ -1,12 +1,13 @@
 """Unit tests for Scripts/behaviour_nodes.py (v1.4 — Step 2: IdleNode, AttackNode;
-Step 3: ChaseNode).
+Step 3: ChaseNode; Step 4: PatrolNode).
 
 Pure unit tests: no Ursina import, no app launch, no window. The enemy and
 player are mock objects exposing only the attributes the nodes read:
-``enemy.position``, ``enemy.player.position``, ``enemy.shoot()`` and (Step 3)
-``enemy.chase_step()``. ``position`` is a tiny vector stub with the handful of
-operations the nodes use (subtraction, length, normalisation) so the node math
-runs without Ursina's Vec3.
+``enemy.position``, ``enemy.player.position``, ``enemy.shoot()``,
+``enemy.chase_step()`` (Step 3) and ``enemy.patrol_step()`` (Step 4).
+``position`` is a tiny vector stub with the handful of operations the nodes
+use (subtraction, length, normalisation) so the node math runs without
+Ursina's Vec3.
 
 Wall-clock cooldown is controlled by monkeypatching the module's ``_time``
 reference so tests advance time deterministically — no real sleeping.
@@ -20,7 +21,7 @@ import math
 import unittest
 
 import Scripts.behaviour_nodes as bn
-from Scripts.behaviour_nodes import AttackNode, ChaseNode, IdleNode
+from Scripts.behaviour_nodes import AttackNode, ChaseNode, IdleNode, PatrolNode
 from Scripts.behaviour_tree import Status
 
 
@@ -28,18 +29,29 @@ DT = 0.016
 
 
 class Vec(tuple):
-    """Minimal 3-vector stub: subtraction, Euclidean length, and normalisation.
+    """Minimal 3-vector stub: addition, subtraction, scaling, Euclidean
+    length, and normalisation.
 
     Subclasses tuple so equality/repr come for free; only the operations the
     leaf nodes use are implemented. ``__sub__`` + ``length`` cover AttackNode;
     ChaseNode additionally calls ``.normalized()`` on the enemy→player vector.
+    ``__add__`` and ``__mul__`` (Step 4) support PatrolNode tests that
+    simulate real position updates via ``direction * speed * dt`` then
+    ``position + step`` — the same arithmetic the real Vec3-backed
+    Enemy.patrol_step performs.
     """
 
     def __new__(cls, x, y, z):
         return super().__new__(cls, (x, y, z))
 
+    def __add__(self, other):
+        return Vec(self[0] + other[0], self[1] + other[1], self[2] + other[2])
+
     def __sub__(self, other):
         return Vec(self[0] - other[0], self[1] - other[1], self[2] - other[2])
+
+    def __mul__(self, scalar):
+        return Vec(self[0] * scalar, self[1] * scalar, self[2] * scalar)
 
     def length(self):
         return math.sqrt(self[0] ** 2 + self[1] ** 2 + self[2] ** 2)
@@ -57,27 +69,40 @@ class MockPlayer:
 
 
 class MockEnemy:
-    """Mock enemy: position, a player ref, shoot() and chase_step() recorders.
+    """Mock enemy: position, a player ref, shoot()/chase_step()/patrol_step() recorders.
 
     ``shoot_count`` counts AttackNode firings. ``chase_calls`` records every
     direction ChaseNode hands to ``chase_step`` (so tests can assert movement
-    was — or was not — attempted, and inspect the direction). The mock does NOT
-    move itself: ChaseNode's contract is "compute direction + delegate"; the
-    real Enemy.chase_step does the position update, which is Ursina-land and out
-    of scope for these pure tests.
+    was — or was not — attempted, and inspect the direction). ``patrol_calls``
+    is the same idea for PatrolNode's ``patrol_step``. The mock does NOT move
+    itself by default: Chase/PatrolNode's contract is "compute direction +
+    delegate"; the real Enemy.chase_step/patrol_step does the position
+    update, which is Ursina-land and out of scope for these pure tests.
+
+    ``move_on_patrol_step``, when True, makes ``patrol_step`` actually
+    advance ``self.position`` by ``direction * speed * dt`` — used by the
+    PatrolNode tests that need to simulate multiple frames of real travel
+    (e.g. reaching a waypoint, then cycling to the next one).
     """
 
-    def __init__(self, position, player):
+    def __init__(self, position, player=None, move_on_patrol_step=False):
         self.position = position
         self.player = player
         self.shoot_count = 0
-        self.chase_calls = []   # list of (direction, dt) tuples
+        self.chase_calls = []     # list of (direction, dt) tuples
+        self.patrol_calls = []    # list of (direction, speed, dt) tuples
+        self.move_on_patrol_step = move_on_patrol_step
 
     def shoot(self):
         self.shoot_count += 1
 
     def chase_step(self, direction, dt):
         self.chase_calls.append((direction, dt))
+
+    def patrol_step(self, direction, speed, dt):
+        self.patrol_calls.append((direction, speed, dt))
+        if self.move_on_patrol_step:
+            self.position = self.position + direction * (speed * dt)
 
 
 class FakeClock:
@@ -355,6 +380,107 @@ class TestDefaultTreeShape(unittest.TestCase):
         self.assertIs(result, Status.SUCCESS, "Chase SUCCEEDS -> Attack fires -> Sequence SUCCESS")
         self.assertEqual(enemy.chase_calls, [], "stops closing within attack range")
         self.assertEqual(enemy.shoot_count, 1, "AttackNode fires on the handoff")
+
+
+class TestPatrolNode(unittest.TestCase):
+    """PatrolNode (Step 4): walk a looping waypoint route via patrol_step."""
+
+    def test_construction_rejects_empty_waypoints(self):
+        with self.assertRaises(ValueError):
+            PatrolNode(waypoints=[])
+
+    def test_single_step_toward_first_waypoint_is_running_and_moves(self):
+        # Waypoint far enough away that one step does not reach it.
+        enemy = MockEnemy(Vec(0, 0, 0), move_on_patrol_step=True)
+        node = PatrolNode(waypoints=[Vec(10, 0, 0)])
+        result = node.tick(enemy, DT)
+        self.assertIs(result, Status.RUNNING)
+        self.assertEqual(len(enemy.patrol_calls), 1, "must step toward the waypoint once")
+        self.assertNotEqual(enemy.position, Vec(0, 0, 0), "position must have advanced")
+        self.assertEqual(node.current_index, 0, "index must not advance while still in transit")
+
+    def test_reaching_waypoint_returns_success_and_advances_index(self):
+        # Two waypoints; place the enemy already within threshold of waypoint 0.
+        enemy = MockEnemy(Vec(0.1, 0, 0))
+        node = PatrolNode(waypoints=[Vec(0, 0, 0), Vec(5, 0, 0)], threshold=0.3)
+        result = node.tick(enemy, DT)
+        self.assertIs(result, Status.SUCCESS)
+        self.assertEqual(enemy.patrol_calls, [], "must not step when already within threshold")
+        self.assertEqual(node.current_index, 1, "index must advance to the next waypoint")
+
+    def test_cycles_from_last_waypoint_back_to_index_zero(self):
+        # Two-waypoint path: drive the node through both SUCCESS handoffs and
+        # confirm current_index wraps 0 -> 1 -> 0.
+        waypoints = [Vec(0, 0, 0), Vec(0.05, 0, 0)]
+        enemy = MockEnemy(Vec(0, 0, 0))
+        node = PatrolNode(waypoints=waypoints, threshold=0.3)
+
+        # Already within threshold of waypoint 0 -> SUCCESS, advance to 1.
+        self.assertIs(node.tick(enemy, DT), Status.SUCCESS)
+        self.assertEqual(node.current_index, 1)
+
+        # Waypoint 1 (0.05,0,0) is also within threshold of the enemy's
+        # (unmoved) position -> SUCCESS, wraps back to 0.
+        self.assertIs(node.tick(enemy, DT), Status.SUCCESS)
+        self.assertEqual(node.current_index, 0, "must wrap back to the first waypoint")
+
+    def test_single_waypoint_loops_without_crash(self):
+        # Enemy starts already at the only waypoint: every tick SUCCEEDs and
+        # current_index stays 0 (wraps to itself) — confirm no crash, no
+        # infinite-loop-in-one-call, and no movement ever attempted.
+        enemy = MockEnemy(Vec(3, 1, 0))
+        node = PatrolNode(waypoints=[Vec(3, 1, 0)], threshold=0.3)
+        for _ in range(5):
+            result = node.tick(enemy, DT)
+            self.assertIs(result, Status.SUCCESS)
+            self.assertEqual(node.current_index, 0)
+        self.assertEqual(enemy.patrol_calls, [], "enemy already at the only waypoint, never moves")
+
+    def test_movement_direction_is_normalized_toward_each_waypoint(self):
+        # Enemy at (1,0,2), waypoint at (4,0,6): delta (3,0,4), |delta|=5,
+        # expected direction (0.6, 0, 0.8), unit length — same convention
+        # ChaseNode's direction test uses.
+        enemy = MockEnemy(Vec(1, 0, 2))
+        node = PatrolNode(waypoints=[Vec(4, 0, 6)], threshold=0.01)
+        result = node.tick(enemy, DT)
+
+        self.assertIs(result, Status.RUNNING)
+        self.assertEqual(len(enemy.patrol_calls), 1)
+        direction, speed, passed_dt = enemy.patrol_calls[0]
+        self.assertAlmostEqual(direction[0], 0.6, places=6)
+        self.assertAlmostEqual(direction[1], 0.0, places=6)
+        self.assertAlmostEqual(direction[2], 0.8, places=6)
+        self.assertAlmostEqual(direction.length(), 1.0, places=6,
+                               msg="direction handed to patrol_step must be unit length")
+        self.assertEqual(passed_dt, DT, "dt must be forwarded to patrol_step")
+
+    def test_default_speed_matches_enemy_chase_speed(self):
+        # PART 2 Decision B: PatrolNode's default speed must equal the same
+        # constant enemy.py uses for chase movement (ENEMY_CHASE_SPEED = 5),
+        # not an invented third value.
+        enemy = MockEnemy(Vec(10, 0, 0))
+        node = PatrolNode(waypoints=[Vec(0, 0, 0)])
+        node.tick(enemy, DT)
+        _, speed, _ = enemy.patrol_calls[0]
+        self.assertEqual(speed, 5, "PatrolNode default speed must match ENEMY_CHASE_SPEED")
+
+    def test_full_two_waypoint_cycle_with_real_movement(self):
+        # End-to-end with move_on_patrol_step=True: walk to waypoint 0, then
+        # to waypoint 1, then confirm the route loops back toward 0 again.
+        waypoints = [Vec(1, 0, 0), Vec(1, 0, 1)]
+        enemy = MockEnemy(Vec(0, 0, 0), move_on_patrol_step=True)
+        node = PatrolNode(waypoints=waypoints, speed=5, threshold=0.3)
+
+        statuses = []
+        for _ in range(200):
+            statuses.append(node.tick(enemy, DT))
+            if node.current_index == 0 and statuses.count(Status.SUCCESS) >= 2:
+                break
+
+        self.assertIn(Status.SUCCESS, statuses, "must reach at least one waypoint")
+        self.assertGreaterEqual(statuses.count(Status.SUCCESS), 2,
+                                "must cycle through both waypoints and back")
+        self.assertEqual(node.current_index, 0, "route must have looped back to index 0")
 
 
 if __name__ == "__main__":

@@ -140,6 +140,35 @@ class Enemy(AliveEntity):
                                                    abs(move.z), ENEMY_SWEPT_OFFSETS):
             self.position += z
 
+    def patrol_step(self, direction, speed, dt):
+        """Move one frame toward `direction` at `speed`, avoiding walls (called by PatrolNode).
+
+        Mirrors chase_step's move-then-axis-slide via the SAME shared
+        swept_move_blocked helper (collision authority #2) — no duplicated
+        raycast loop (see docs/v1.4-enemy-behaviour-trees.md and
+        brain/Patterns no-duplication rule). The only difference from
+        chase_step is that speed is passed in (PatrolNode's own speed
+        parameter) rather than hardcoded to ENEMY_CHASE_SPEED, since a patrol
+        route is not tied to the chase constant the way ChaseNode is.
+
+        `direction` is the normalized enemy->waypoint vector PatrolNode
+        computed; this method only translates it into a wall-aware position
+        update.
+        """
+        move = direction * speed * dt
+        if not swept_move_blocked(self, self.position, direction, move.length(),
+                                  ENEMY_SWEPT_OFFSETS):
+            self.position += move
+            return
+        x = Vec3(move.x, 0, 0)
+        z = Vec3(0, 0, move.z)
+        if x.length() and not swept_move_blocked(self, self.position, x.normalized(),
+                                                 abs(move.x), ENEMY_SWEPT_OFFSETS):
+            self.position += x
+        elif z.length() and not swept_move_blocked(self, self.position, z.normalized(),
+                                                   abs(move.z), ENEMY_SWEPT_OFFSETS):
+            self.position += z
+
     def _is_occluded(self) -> bool:
         """Raycast from self toward player; True if a non-player entity blocks the line of sight."""
         hit = raycast(

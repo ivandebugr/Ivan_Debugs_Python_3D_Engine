@@ -13,9 +13,9 @@ that purity boundary and gives the remaining steps (ChaseNode/PatrolNode/
 FleeNode in Steps 3–5, decorators in Step 6) an obvious home. Steps 3+ append
 to this file.
 
-Step 2 scope — ``IdleNode`` and ``AttackNode``. Step 3 adds ``ChaseNode``.
-``PatrolNode``, ``FleeNode`` and the decorators are later steps and are not
-implemented here, not even partially.
+Step 2 scope — ``IdleNode`` and ``AttackNode``. Step 3 added ``ChaseNode``.
+Step 4 adds ``PatrolNode``. ``FleeNode`` and the decorators are later steps
+and are not implemented here, not even partially.
 
 Purity contract (same as Layer 1)
 ----------------------------------
@@ -23,9 +23,28 @@ No import from ``main.py``, ``enemy.py``, or any Ursina / Panda3D module at
 runtime. All game-state access flows through the ``enemy`` argument passed into
 ``tick()``. The enemy is duck-typed: ``AttackNode`` needs ``enemy.position``,
 ``enemy.player.position`` and ``enemy.shoot()``; ``ChaseNode`` needs
-``enemy.position``, ``enemy.player.position`` and ``enemy.chase_step(direction, dt)``.
+``enemy.position``, ``enemy.player.position`` and ``enemy.chase_step(direction, dt)``;
+``PatrolNode`` needs ``enemy.position`` and ``enemy.patrol_step(direction, dt)``.
 The single stdlib dependency is ``time`` (wall-clock), used for the cooldown
 timer — see below.
+
+Vec3 type tension (PatrolNode waypoints) — chosen resolution
+--------------------------------------------------------------
+This file (``behaviour_nodes.py``) is held to the same no-Ursina-import purity
+contract as ``behaviour_tree.py``, but ``PatrolNode`` needs vector subtraction
+and ``.length()`` on its waypoints, the same operations ``ChaseNode`` already
+performs on ``enemy.position`` / ``enemy.player.position``. Those objects are
+real Ursina ``Vec3`` at runtime but the node never imports ``Vec3`` itself — it
+relies on duck typing (the tests' ``Vec`` stub proves this works without
+Ursina). ``PatrolNode`` extends the same duck-typed contract to its
+``waypoints`` argument: each waypoint must support ``-``, ``.length()`` and
+``.normalized()`` against an ``enemy.position``-shaped object — in practice a
+``Vec3`` (or 3-tuple-like stub in tests). This is option (b) from the v1.4
+Step 4 task: duck-typed ``list[Any]``, not a hard ``Vec3`` type hint, so this
+file's import profile is unchanged from Steps 2–3 (still zero Ursina/Panda3D
+imports — only ``Scripts.behaviour_tree`` and stdlib ``time``). Callers
+(``enemy.py``, which already imports Ursina) are free to pass ``Vec3``
+instances; this file never constructs or imports ``Vec3`` itself.
 
 Why ``ChaseNode`` delegates the move to ``enemy.chase_step`` (purity)
 ---------------------------------------------------------------------
@@ -177,4 +196,99 @@ class ChaseNode(BehaviourNode):
         # vector above to keep the in-range path's intent obvious.)
         direction = (enemy.player.position - enemy.position).normalized()
         enemy.chase_step(direction, dt)
+        return Status.RUNNING
+
+
+# Waypoint-reached threshold, in world units. Derived (not guessed): the
+# enemy's per-frame patrol step is bounded by PATROL_SPEED * dt_max. Taking
+# dt_max = 0.05s (a 20 FPS floor — below this the game is already considered
+# unplayable, see CLAUDE.md Performance Investigation Order) and PATROL_SPEED
+# = 5 (same constant as ENEMY_CHASE_SPEED, see "Why PATROL_SPEED" below):
+#   step_max = 5 * 0.05 = 0.25
+# The threshold must be >= step_max or a single slow frame could step the
+# enemy clean past a waypoint without ever landing inside the radius,
+# oscillating forever. 0.3 clears that bound with margin while staying tight
+# enough that the enemy visibly arrives at each waypoint rather than
+# corner-cutting early.
+PATROL_WAYPOINT_THRESHOLD = 0.3
+
+# Why PATROL_SPEED reuses ENEMY_CHASE_SPEED: the v1.4 spec gives PatrolNode no
+# speed parameter, and ChaseNode's movement (via enemy.chase_step) already
+# uses ENEMY_CHASE_SPEED as the single chase/patrol speed constant in
+# enemy.py. Inventing a second, different default would mean a patrolling
+# enemy visibly changes pace the instant ChaseNode takes over — introducing a
+# third speed value has no spec justification, so PatrolNode's default below
+# matches it exactly. Callers may still override per-instance.
+PATROL_SPEED_DEFAULT = 5
+
+
+class PatrolNode(BehaviourNode):
+    """Walk a looping waypoint route; never shoots, never reacts to the player.
+
+    Per the v1.4 spec (Step 4):
+
+    - moves the enemy toward ``waypoints[current_index]``
+    - returns ``RUNNING`` while in transit
+    - returns ``SUCCESS`` the tick the waypoint is reached, and advances
+      ``current_index`` (wrapping to 0 after the last waypoint — infinite
+      loop by design)
+
+    Waypoint type — see this module's docstring "Vec3 type tension" section:
+    each waypoint is duck-typed (anything supporting ``-``, ``.length()`` and
+    ``.normalized()`` against ``enemy.position``), matching how ``ChaseNode``
+    already treats ``enemy.position`` / ``enemy.player.position``. This file
+    never imports ``Vec3``.
+
+    Reached threshold — ``PATROL_WAYPOINT_THRESHOLD`` (module constant above),
+    derived from the max per-frame patrol step so the enemy cannot step clean
+    over a waypoint and miss the SUCCESS tick.
+
+    Speed — ``PATROL_SPEED_DEFAULT`` (module constant above), the same value
+    ``enemy.py`` uses for chase movement (``ENEMY_CHASE_SPEED``), so patrol
+    and chase read as the same gait.
+
+    Movement is delegated to ``enemy.patrol_step(direction, dt)`` — the
+    Ursina-land half (wall-avoiding swept move + ``enemy.position +=``) lives
+    on the enemy, exactly as ``ChaseNode`` delegates to ``chase_step``. This
+    node computes only the framework-free direction vector.
+
+    Edge cases (explicit, not left undefined):
+
+    - Empty ``waypoints`` ([]) — raises ``ValueError`` at construction. A
+      patrol node with no route is a configuration error, not a runtime state
+      to tick through silently; failing fast at construction surfaces the
+      mistake immediately instead of returning a quiet ``FAILURE`` every tick
+      forever.
+    - Single waypoint — the enemy walks to it, returns ``SUCCESS``,
+      ``current_index`` wraps back to 0 (the same waypoint), and the next
+      tick starts walking to it again (distance ~0, so it immediately
+      ``SUCCESS``s again). This is NOT an infinite-SUCCESS-in-one-tick storm:
+      each ``SUCCESS`` still costs exactly one ``tick()`` call, so a parent
+      ``Selector``/``Sequence`` ticking once per frame just sees a node that
+      perpetually re-succeeds on every frame — identical in cost to
+      ``IdleNode``. Covered by ``test_single_waypoint_loops_without_crash``.
+
+    Per-instance mutable state — ``current_index`` lives on ``self``. Safe
+    under the one-tree-per-enemy ownership contract in ``behaviour_tree.py``
+    (each enemy's ``PatrolNode`` is a distinct instance, never shared).
+    """
+
+    def __init__(self, waypoints: list, speed: float = PATROL_SPEED_DEFAULT,
+                 threshold: float = PATROL_WAYPOINT_THRESHOLD):
+        if not waypoints:
+            raise ValueError("PatrolNode requires at least one waypoint")
+        self.waypoints = waypoints
+        self.speed = speed
+        self.threshold = threshold
+        self.current_index = 0
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        target = self.waypoints[self.current_index]
+        to_target = target - enemy.position
+        if to_target.length() <= self.threshold:
+            self.current_index = (self.current_index + 1) % len(self.waypoints)
+            return Status.SUCCESS
+
+        direction = to_target.normalized()
+        enemy.patrol_step(direction, self.speed, dt)
         return Status.RUNNING
