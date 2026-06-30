@@ -39,6 +39,11 @@ class Layers:
     ENEMY_BULLET  = 1 << 3   # 8
     WALL          = 1 << 4   # 16
     PICKUP        = 1 << 5   # 32 — forward declaration; no entity registers this yet
+    TRIGGER       = 1 << 6   # 64 — invisible enter/exit volumes (v1.5); NOT a damage
+                             #      path. Never appears in COLLISION_MATRIX, and
+                             #      swept_move_blocked skips it so triggers don't
+                             #      physically block movement. Detection is per-frame
+                             #      self.intersects(player), not a raycast authority.
 
 
 # Declarative hit matrix — no file needs to import enemy/bullet types.
@@ -86,8 +91,10 @@ def swept_move_blocked(mover, origin, direction, dist, offsets, skin_width=0.0) 
     avoid walls identically instead of each owning a copy of the loop.
 
     In-flight bullets are always ignored (a character must never be blocked by a
-    bullet mid-air), and `mover` ignores itself. Walls are unregistered, so they
-    are NOT in the bullet ignore lists and correctly block the sweep.
+    bullet mid-air), trigger volumes are always ignored (Layers.TRIGGER is an
+    enter/exit detection volume, never a physical blocker — v1.5), and `mover`
+    ignores itself. Walls are unregistered, so they are NOT in the ignore lists
+    and correctly block the sweep.
 
     Args:
         mover:      the entity being moved (added to the raycast ignore list).
@@ -103,7 +110,8 @@ def swept_move_blocked(mover, origin, direction, dist, offsets, skin_width=0.0) 
     """
     ignore = ([mover]
               + collision_manager.query_layer(Layers.PLAYER_BULLET)
-              + collision_manager.query_layer(Layers.ENEMY_BULLET))
+              + collision_manager.query_layer(Layers.ENEMY_BULLET)
+              + collision_manager.query_layer(Layers.TRIGGER))
     for offset in offsets:
         if raycast(origin + offset, direction,
                    distance=dist + skin_width,
