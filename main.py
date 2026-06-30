@@ -182,7 +182,7 @@ def load_level():
             trigger_placeholder.on_enter_actions = entry['on_enter']
             trigger_placeholder.on_exit_actions  = entry['on_exit']
         else:
-            Entity(
+            block = Entity(
                 model=_resolve_model(entry['model']),
                 collider='box',
                 texture=entry['texture'],
@@ -192,6 +192,10 @@ def load_level():
                 scale=tuple(entry['scale']),
                 name='level_block'
             )
+            # v1.5 Step 4: lookup-name for open_door. Structural name stays
+            # 'level_block' (cleanup sweeps depend on it) — door identity is a
+            # SEPARATE attribute the open_door action scans for at fire time.
+            block.door_name = entry['door_name']
 
 
 def _clear_gameplay_entities():

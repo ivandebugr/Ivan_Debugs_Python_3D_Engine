@@ -31,6 +31,13 @@ def _normalise_entry(entry):
         # the pre-step-7 behaviour for every block). Backwards-compatible: old
         # level.json files have no 'model' key and load as cube exactly as before.
         'model':    entry.get('model', DEFAULT_MODEL),
+        # v1.5 Step 4: optional door identity for blocks. A trigger's open_door
+        # action resolves its target by matching this name at fire time. Absent →
+        # '' (an unnamed block, the default for every pre-v1.5 block). Surfaced
+        # HERE, the single parser, so every read path preserves it (same discipline
+        # as 'model'/'behaviour'). Only blocks are ever doors, but the key is set
+        # uniformly so call sites never need a type guard to read it.
+        'door_name': entry.get('door_name', ''),
     }
     if out['type'] == 'enemy':
         out['hp']         = entry.get('hp', DEFAULT_HP)

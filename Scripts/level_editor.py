@@ -799,7 +799,91 @@ class LevelEditor(Entity):
         except Exception as e:
             logger.log('ERROR', f"_build_inspector setBin model name {type(e).__name__}: {e}")
 
+        # Door name field (v1.5 Step 4) — blocks only. A trigger's open_door action
+        # resolves its target by matching this string. Sits below the Model row at
+        # -.46. Block-only, so it never co-renders with the enemy-only behaviour UI
+        # that reuses the same band (mutually exclusive by selection type). Unlike
+        # the numeric Pos/Scale fields, clearing this to '' is a LEGAL edit (un-naming
+        # a door), so it has its own string commit handler, not _apply_inspector_value.
+        self._insp_door_label = Text(
+            parent=self._inspector,
+            text='Door Name',
+            position=(-.30, -.46),
+            color=color.light_gray,
+            origin=(0, 0),
+            z=-1,
+            eternal=True,
+        )
+        self._insp_door_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._insp_door_label.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin door label {type(e).__name__}: {e}")
+
+        self._insp_door_field = InputField(
+            parent=self._inspector,
+            position=(.12, -.46),
+            scale=(.30, .055),
+            default_value='',
+            z=-1,
+            eternal=True,
+        )
+        try:
+            self._insp_door_field.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin door field {type(e).__name__}: {e}")
+        # submit_on + no-arg callback (InputField gotcha): on_submit fires with no
+        # args and only when Enter is in submit_on. Read field.text at call time.
+        self._insp_door_field.submit_on = ['enter']
+        self._insp_door_field.on_submit = lambda f=self._insp_door_field: self._apply_door_name(f.text)
+
         self._build_behaviour_ui()
+
+    def _update_inspector_door_field(self):
+        """Refresh the door-name field from the current selection. Blocks only —
+        hidden for empty / enemy / mixed selections, exactly like the model field.
+        Shows the shared name when all selected blocks agree, '---' otherwise.
+        """
+        if getattr(self, '_insp_door_field', None) is None:
+            return
+        entities = list(self.selected)
+        has_enemy = any(e in self.enemies for e in entities)
+        if not entities or has_enemy:
+            self._insp_door_label.enabled = False
+            self._insp_door_field.enabled = False
+            return
+        self._insp_door_label.enabled = True
+        self._insp_door_field.enabled = True
+        names = {getattr(e, 'door_name', '') for e in entities}
+        # Never assign '' to an InputField via .text here — empty is the field's
+        # natural state and InputField handles it (it is NOT a Text with tag parsing,
+        # so the Text(text='') align() crash does not apply). A mixed selection shows
+        # '---' so the user sees the values differ.
+        self._insp_door_field.text = next(iter(names)) if len(names) == 1 else '---'
+
+    def _apply_door_name(self, value_str):
+        """Commit the door-name field to every selected block via undo/redo.
+
+        String edit (not numeric): '' is legal (un-naming). '---' means a mixed
+        selection was left untouched — applying it would stamp the literal '---'
+        onto every block, so skip it. Uses ChangePropertyCommand like the numeric
+        fields, targeting the door_name attribute.
+        """
+        if not self.selected or value_str == '---':
+            return
+        value = value_str.strip()
+        for e in list(self.selected):
+            if getattr(e, 'destroy_source', None) is not None:
+                continue
+            if e in self.enemies:        # enemies are never doors
+                continue
+            old = getattr(e, 'door_name', '')
+            if old == value:
+                continue
+            logger.log('INFO', f"Inspector door_name changed: entity@{[round(p,3) for p in e.position]} {old!r} -> {value!r}")
+            cmd = ChangePropertyCommand(e, 'door_name', old, value)
+            cmd.execute()
+            self._history.push(cmd)
 
     def _update_inspector(self):
         if not self.selected:
@@ -807,6 +891,7 @@ class LevelEditor(Entity):
                 f.text = ' '
             self._update_inspector_texture_swatch()
             self._update_inspector_model_field()
+            self._update_inspector_door_field()
             self._refresh_behaviour_ui()
             return
         entities = list(self.selected)
@@ -826,6 +911,7 @@ class LevelEditor(Entity):
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
         self._update_inspector_texture_swatch()
         self._update_inspector_model_field()
+        self._update_inspector_door_field()
         self._refresh_behaviour_ui()
 
     def _entity_texture_name(self, e):
@@ -1262,6 +1348,14 @@ class LevelEditor(Entity):
                 if getattr(f, 'active', False):
                     return True
         return False
+
+    def _door_name_typing(self):
+        """True while the door-name InputField is focused — gate Delete / bookmark
+        keys so typing a name like 'door1' can't recall a camera bookmark or delete
+        the selection. The door field lives outside _insp_fields (string, not numeric),
+        so the existing inspector-field guard does not cover it."""
+        f = getattr(self, '_insp_door_field', None)
+        return bool(f is not None and getattr(f, 'active', False))
 
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
@@ -2619,6 +2713,13 @@ class LevelEditor(Entity):
             model_name = self._entity_model_name(block) or DEFAULT_MODEL
             if model_name != DEFAULT_MODEL:
                 block_data['model'] = model_name
+            # v1.5 Step 4: door identity. Write the key ONLY when set (same
+            # omit-at-default pattern as 'model'/'behaviour') so unnamed blocks
+            # produce no spurious "door_name": "" churn and the schema stays
+            # backwards-compatible with pre-v1.5 loaders.
+            door_name = getattr(block, 'door_name', '')
+            if door_name:
+                block_data['door_name'] = door_name
             data.append(block_data)
         for enemy in live_enemies:
             enemy_data = {
@@ -2940,7 +3041,8 @@ class LevelEditor(Entity):
             # while typing numbers in inspector fields. Check InputField.active instead.
             # Also skip while typing in the hierarchy search box.
             if (any(f.active for f in self._insp_fields.values())
-                    or self._hier_typing() or self._behaviour_typing()):
+                    or self._hier_typing() or self._behaviour_typing()
+                    or self._door_name_typing()):
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -2955,7 +3057,8 @@ class LevelEditor(Entity):
         # edits text there) or mid-drag (gizmo / box-select / browser drag).
         if key in ('delete', 'backspace'):
             typing = (any(f.active for f in self._insp_fields.values())
-                      or self._hier_typing() or self._behaviour_typing())
+                      or self._hier_typing() or self._behaviour_typing()
+                      or self._door_name_typing())
             mid_drag = (self._gizmo_drag_axis is not None
                         or self._box_selecting or self._dragging)
             if self.selected and not typing and not mid_drag:
@@ -3232,6 +3335,10 @@ class LevelEditor(Entity):
                         collider='box'
                     )
                     new_entity._original_color = new_entity.color
+                    # v1.5 Step 4: round-trip door identity (raw value from the
+                    # single parser; '' for unnamed blocks). _build_level_data reads
+                    # the same attribute on save.
+                    new_entity.door_name = entry['door_name']
                     self.blocks.append(new_entity)
             logger.log('INFO', f"Level loaded: {os.path.abspath(self.filename)} ({len(entries)} entries)")
         except FileNotFoundError:

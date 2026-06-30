@@ -105,6 +105,61 @@ def _build_kill_plane(action: dict):
     return fire
 
 
+def _find_door(target_name: str):
+    """Return the live block entity whose door_name matches, or None.
+
+    Fire-time scan (not build-time): the door block and the trigger are built in
+    the same load→start_game flow, so resolving eagerly at build time is
+    order-fragile; reading live state at fire time is the trigger_system
+    convention. Guard each entity with not is_empty() before reading attributes —
+    this scan can run mid-frame after other entities were destroyed, and getName()
+    /attribute access on an emptied NodePath fires the C++ assertion that except
+    cannot catch (Hard Constraint 13 / brain/Gotchas "NodePath teardown assertion").
+    """
+    for e in scene.entities[:]:
+        try:
+            if e.is_empty():
+                continue
+        except Exception:
+            continue
+        if getattr(e, 'door_name', '') == target_name:
+            return e
+    return None
+
+
+def _build_open_door(action: dict):
+    """`open_door`: slide a named door block straight up on enter.
+
+    Resolves the door by `target` (its door_name) at fire time. Slides the door up
+    by `height` units (default: its own scale_y, so a wall-height door fully clears
+    the doorway) over `duration` seconds, mirroring the existing animate_position
+    idiom in weapon.py. The collider tweens WITH the entity, so the door stays solid
+    geometry mid-slide — the player can still collide with it while it moves, which
+    is correct (the swept/ground rays read its live position every frame).
+
+    Fires once per door: a re-entry must not re-trigger the tween (the player could
+    leave and step back into the volume). Marks the resolved entity _door_opened.
+    """
+    target = action.get('target')
+    height = action.get('height')      # optional explicit slide distance
+    duration = action.get('duration', 0.6)
+
+    def fire():
+        if not target:
+            print("[trigger_system] open_door action has no 'target'; skipping")
+            return
+        door = _find_door(target)
+        if door is None:
+            print(f"[trigger_system] open_door target {target!r} not found; skipping")
+            return
+        if getattr(door, '_door_opened', False):
+            return
+        door._door_opened = True
+        slide = height if height is not None else door.scale_y
+        door.animate_y(door.y + slide, duration=duration, curve=curve.out_quad)
+    return fire
+
+
 def _build_checkpoint(action: dict):
     """`checkpoint`: snapshot player.position into game.respawn_point on enter.
 
@@ -120,10 +175,11 @@ def _build_checkpoint(action: dict):
     return fire
 
 
-# action name → builder fn. Steps 4–5 add 'open_door', 'win_condition', 'play_sound'.
+# action name → builder fn. Step 5 adds 'win_condition', 'play_sound'.
 ACTION_BUILDERS = {
     'kill_plane': _build_kill_plane,
     'checkpoint': _build_checkpoint,
+    'open_door':  _build_open_door,
 }
 
 
