@@ -1,8 +1,8 @@
 from ursina import *
 from Scripts.health_bar import HealthBar
-from Scripts.collision_system import AliveEntity, Layers, collision_manager
-from Scripts.behaviour_tree import Selector
-from Scripts.behaviour_nodes import AttackNode, IdleNode
+from Scripts.collision_system import AliveEntity, Layers, collision_manager, swept_move_blocked
+from Scripts.behaviour_tree import Selector, Sequence
+from Scripts.behaviour_nodes import ChaseNode, AttackNode, IdleNode
 
 # TUNE: balance / experiment variables — label kept so grep finds them fast during playtesting
 ENEMY_HP_DEFAULT         = 100    # TUNE: try 50 for a 2-shot kill at 25 dmg/bullet
@@ -10,6 +10,13 @@ ENEMY_SHOOT_COOLDOWN     = 1.0    # TUNE: try 1.5 for more breathing room
 ENEMY_DETECTION_RANGE    = 100    # TUNE: try 40 to remove whole-level aggro
 ENEMY_ATTACK_RANGE       = 30     # TUNE: try 20 to tighten melee zone
 ENEMY_OCCLUSION_INTERVAL = 0.15   # TUNE: raycast throttle — do not go below 0.05
+ENEMY_CHASE_SPEED        = 5      # TUNE: chase move speed (units/s); player.speed is 8 — slower so the player can disengage
+
+# Body-height sweep offsets for chase wall-avoidance — enemy is scale (1.5,3,1.5)
+# with origin_y=-0.5, so it spans ~position.y (feet) to position.y+3 (head).
+# Three heights (feet / mid / head) feed the SAME swept_move_blocked helper the
+# player uses with its own 5 offsets; enemies are simpler so three suffice.
+ENEMY_SWEPT_OFFSETS = (Vec3(0, 0.2, 0), Vec3(0, 1.5, 0), Vec3(0, 2.8, 0))
 
 VALID_ENEMY_TYPES = ('default',)  # extend here as new types are added
 
@@ -40,13 +47,25 @@ class Enemy(AliveEntity):
         self.attack_range     = ENEMY_ATTACK_RANGE
         self.detection_range  = ENEMY_DETECTION_RANGE
 
-        # Interim behaviour tree: matches today's stationary detect→shoot exactly
-        # (AttackNode fires in range/off-cooldown, IdleNode is the always-SUCCESS
-        # fallback). ChaseNode is added in Step 3; until then the Selector falls
-        # straight through to IdleNode whenever the player is out of attack range.
+        # Interim behaviour tree (v1.4 Step 3): chase when the player is within
+        # detection range, then attack when close enough. Flow:
+        #  - Player beyond detection_range (100): ChaseNode FAILS -> Sequence
+        #    aborts -> Selector falls through to IdleNode -> enemy stays put.
+        #  - Player inside detection but beyond attack_range: ChaseNode moves the
+        #    enemy and returns RUNNING -> Sequence short-circuits, AttackNode not
+        #    ticked yet (too far to shoot) -> enemy closes the gap.
+        #  - Player within attack_range (30): ChaseNode returns SUCCESS without
+        #    moving -> Sequence advances to AttackNode -> fires on cooldown.
+        # ChaseNode's stop_range is ENEMY_ATTACK_RANGE so the enemy stops closing
+        # exactly where it can start shooting. detection_range = ENEMY_DETECTION_
+        # RANGE (100) is a superset of attack_range (30) — the same constant that
+        # already gates look_at/occlusion in update().
         # TODO(v1.4 Step 7): replace with BehaviourTreeFactory.build("default", {})
         self._tree = behaviour_tree or Selector([
-            AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
+            Sequence([
+                ChaseNode(ENEMY_DETECTION_RANGE, ENEMY_ATTACK_RANGE),
+                AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
+            ]),
             IdleNode(),
         ])
 
@@ -81,9 +100,10 @@ class Enemy(AliveEntity):
                 self._occluded        = self._is_occluded()
                 self._occlusion_timer = ENEMY_OCCLUSION_INTERVAL
 
-        # Behaviour tree owns the detect→shoot decision (replaces the old
+        # Behaviour tree owns the chase→attack decision (replaces the old
         # `if player_dist <= attack_range and can_shoot: self.shoot()` block).
-        # AttackNode re-checks attack-range itself, so this ticks every frame.
+        # ChaseNode/AttackNode re-check range themselves, so this ticks every
+        # frame. ChaseNode may move the enemy via self.chase_step().
         self._tree.tick(self, time.dt)
 
         self.health_bar.world_position = self.world_position + Vec3(0, 3.75, 0)
@@ -92,6 +112,33 @@ class Enemy(AliveEntity):
 
         if self.health <= 0:
             self.die()
+
+    def chase_step(self, direction, dt):
+        """Move one frame toward `direction`, avoiding walls (called by ChaseNode).
+
+        Uses the shared swept_move_blocked helper (collision authority #2) — the
+        SAME wall test the player uses — instead of duplicating the raycast loop
+        (see docs/v1.4-enemy-behaviour-trees.md and brain/Patterns no-duplication
+        rule). Mirrors Player.handle_horizontal_movement's move-then-axis-slide:
+        if the full move is blocked, try sliding along X, else along Z, so the
+        enemy follows walls instead of sticking to them.
+
+        `direction` is the normalized enemy→player vector ChaseNode computed; this
+        method only translates it into a wall-aware position update.
+        """
+        move = direction * ENEMY_CHASE_SPEED * dt
+        if not swept_move_blocked(self, self.position, direction, move.length(),
+                                  ENEMY_SWEPT_OFFSETS):
+            self.position += move
+            return
+        x = Vec3(move.x, 0, 0)
+        z = Vec3(0, 0, move.z)
+        if x.length() and not swept_move_blocked(self, self.position, x.normalized(),
+                                                 abs(move.x), ENEMY_SWEPT_OFFSETS):
+            self.position += x
+        elif z.length() and not swept_move_blocked(self, self.position, z.normalized(),
+                                                   abs(move.z), ENEMY_SWEPT_OFFSETS):
+            self.position += z
 
     def _is_occluded(self) -> bool:
         """Raycast from self toward player; True if a non-player entity blocks the line of sight."""

@@ -3,8 +3,15 @@
 #
 # Three collision authorities (never add a fourth):
 #   1. Swept projectile raycast  — PlayerBullet/EnemyBullet.update() in weapon.py
-#   2. Swept player movement     — Player._swept_blocked() in player_controller.py
+#   2. Swept character movement  — swept_move_blocked() here; called by
+#                                  Player._swept_blocked() and Enemy.chase_step()
 #   3. Ground/ceiling raycast   — Player.update() in player_controller.py
+#
+# Authority #2 is the shared multi-height sweep test (swept_move_blocked below).
+# It was extracted from Player._swept_blocked so player movement (Step <1.4) and
+# enemy chase movement (ChaseNode, v1.4 Step 3) test walls the SAME way instead
+# of duplicating the raycast loop. This is not a new authority — it IS authority
+# #2, now callable by both characters.
 #
 # External code uses query_layer() / query_near() — not _tracked or spatial_grid directly.
 
@@ -17,6 +24,7 @@ __all__ = [
     'register',
     'unregister',
     'can_hit',
+    'swept_move_blocked',
     'AliveEntity',
     'CollisionManager',
     'collision_manager',
@@ -66,6 +74,42 @@ def can_hit(a, b) -> bool:
     la = getattr(a, '_collision_layer', 0)
     mb = getattr(b, '_collision_mask',  0)
     return bool(la & mb)
+
+
+def swept_move_blocked(mover, origin, direction, dist, offsets, skin_width=0.0) -> bool:
+    """Multi-height swept wall test — collision authority #2 (shared).
+
+    Cast one ray per height in `offsets` from `origin + offset` along `direction`
+    for `dist + skin_width`; return True if ANY ray hits something solid. This is
+    the exact sweep `Player._swept_blocked` used to do inline, lifted here so the
+    player (movement) and enemies (ChaseNode/PatrolNode chase movement, v1.4)
+    avoid walls identically instead of each owning a copy of the loop.
+
+    In-flight bullets are always ignored (a character must never be blocked by a
+    bullet mid-air), and `mover` ignores itself. Walls are unregistered, so they
+    are NOT in the bullet ignore lists and correctly block the sweep.
+
+    Args:
+        mover:      the entity being moved (added to the raycast ignore list).
+        origin:     sweep start position (the mover's current position).
+        direction:  normalized travel direction.
+        dist:       intended travel distance this frame (before skin padding).
+        offsets:    iterable of Vec3 height offsets — the body heights to test.
+        skin_width: extra padding added to `dist` so the mover stops just shy of
+                    the wall instead of touching it (Player uses 0.1).
+
+    Returns:
+        True if the move would drive any sampled height into a wall.
+    """
+    ignore = ([mover]
+              + collision_manager.query_layer(Layers.PLAYER_BULLET)
+              + collision_manager.query_layer(Layers.ENEMY_BULLET))
+    for offset in offsets:
+        if raycast(origin + offset, direction,
+                   distance=dist + skin_width,
+                   ignore=ignore, debug=False).hit:
+            return True
+    return False
 
 
 class AliveEntity(Entity):

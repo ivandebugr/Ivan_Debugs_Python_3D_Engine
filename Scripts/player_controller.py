@@ -2,7 +2,7 @@ from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
 from Scripts.weapon import Weapon
 from Scripts.health_bar import HealthBar
-from Scripts.collision_system import Layers, collision_manager
+from Scripts.collision_system import Layers, collision_manager, swept_move_blocked
 from Scripts.game import game, Game
 
 # 5 swept-ray heights: feet → knee → waist → shoulder → forehead (entity.y-0.4 to entity.y+1.9)
@@ -155,16 +155,14 @@ class Player(FirstPersonController):
             ray.enabled = self.show_colliders
 
     def _swept_blocked(self, origin, direction, distance):
-        """Cast 5 rays at SWEPT_OFFSETS heights; returns True if any ray hits a wall."""
-        ignore = ([self]
-                  + collision_manager.query_layer(Layers.PLAYER_BULLET)
-                  + collision_manager.query_layer(Layers.ENEMY_BULLET))
-        for offset in SWEPT_OFFSETS:
-            if raycast(origin + offset, direction,
-                       distance=distance + self.skin_width,
-                       ignore=ignore, debug=False).hit:
-                return True
-        return False
+        """Cast 5 rays at SWEPT_OFFSETS heights; returns True if any ray hits a wall.
+
+        Delegates to collision_system.swept_move_blocked (collision authority #2,
+        shared with enemy chase movement) — the multi-height raycast loop lives
+        there now so player and enemies test walls identically.
+        """
+        return swept_move_blocked(self, origin, direction, distance,
+                                  SWEPT_OFFSETS, self.skin_width)
 
     def handle_horizontal_movement(self):
         raw = Vec3(self.forward * (held_keys['w'] - held_keys['s']) +

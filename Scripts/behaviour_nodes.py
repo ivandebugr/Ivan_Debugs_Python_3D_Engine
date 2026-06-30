@@ -13,7 +13,7 @@ that purity boundary and gives the remaining steps (ChaseNode/PatrolNode/
 FleeNode in Steps 3–5, decorators in Step 6) an obvious home. Steps 3+ append
 to this file.
 
-Step 2 scope — ONLY ``IdleNode`` and ``AttackNode``. ``ChaseNode``,
+Step 2 scope — ``IdleNode`` and ``AttackNode``. Step 3 adds ``ChaseNode``.
 ``PatrolNode``, ``FleeNode`` and the decorators are later steps and are not
 implemented here, not even partially.
 
@@ -21,9 +21,23 @@ Purity contract (same as Layer 1)
 ----------------------------------
 No import from ``main.py``, ``enemy.py``, or any Ursina / Panda3D module at
 runtime. All game-state access flows through the ``enemy`` argument passed into
-``tick()``. The enemy is duck-typed: ``AttackNode`` only needs ``enemy.position``,
-``enemy.player.position`` and ``enemy.shoot()``. The single stdlib dependency is
-``time`` (wall-clock), used for the cooldown timer — see below.
+``tick()``. The enemy is duck-typed: ``AttackNode`` needs ``enemy.position``,
+``enemy.player.position`` and ``enemy.shoot()``; ``ChaseNode`` needs
+``enemy.position``, ``enemy.player.position`` and ``enemy.chase_step(direction, dt)``.
+The single stdlib dependency is ``time`` (wall-clock), used for the cooldown
+timer — see below.
+
+Why ``ChaseNode`` delegates the move to ``enemy.chase_step`` (purity)
+---------------------------------------------------------------------
+The actual movement (a wall-avoiding swept raycast + ``enemy.position +=``) is
+Ursina-land — it cannot live in this pure layer. So ``ChaseNode`` does only the
+framework-free part itself (distance check + normalized direction, the same
+vector ops ``AttackNode`` already uses) and hands the move to the enemy via
+``enemy.chase_step(direction, dt)``, exactly as ``AttackNode`` hands firing to
+``enemy.shoot()``. ``Enemy.chase_step`` (in ``enemy.py``) routes through the
+shared ``swept_move_blocked`` helper so the enemy avoids walls the same way the
+player does — no duplicated raycast loop (see ``brain/Patterns`` no-duplication
+rule and ``docs/v1.4-enemy-behaviour-trees.md``).
 
 Per-instance cooldown state (relies on Layer 1's ownership contract)
 --------------------------------------------------------------------
@@ -102,3 +116,65 @@ class AttackNode(BehaviourNode):
         enemy.shoot()
         self._last_attack_time = now
         return Status.SUCCESS
+
+
+class ChaseNode(BehaviourNode):
+    """Close distance to the player, then yield to the attacker once in range.
+
+    Per the v1.4 spec (Step 3), with one refinement (see "Why a stop_range"):
+
+    - distance to player via ``(enemy.position - player.position).length()`` —
+      the SAME true-length convention ``AttackNode`` uses, and both thresholds
+      below use the same ``distance > range`` comparison, so a single tree never
+      mixes squared- and true-distance conventions.
+    - out of ``detection_range``       -> ``FAILURE``. This aborts the parent
+      ``Sequence`` (default tree is ``Selector([Sequence([Chase, Attack]),
+      Idle])``), so the Selector falls through to ``IdleNode`` and the enemy
+      stops.
+    - inside detection but beyond ``stop_range`` -> step toward the player,
+      return ``RUNNING`` (still closing the gap, wants to be ticked again). The
+      ``Sequence`` short-circuits on RUNNING, so ``AttackNode`` is intentionally
+      NOT ticked yet — the enemy is too far to shoot.
+    - within ``stop_range``            -> ``SUCCESS`` with NO movement. The
+      ``Sequence`` then advances to ``AttackNode``, which fires on cooldown.
+
+    Why a ``stop_range`` (the one refinement over the spec's literal node):
+    the spec's bare ChaseNode returns RUNNING whenever in detection range, which
+    — under Step 1's Sequence contract that short-circuits on RUNNING — would
+    mean ``AttackNode`` never ticks and the enemy chases but never shoots. To
+    deliver the spec's stated intent ("chase if in range, ATTACK if close
+    enough") the node must hand off to the attacker once close. ``stop_range`` is
+    that handoff radius; callers pass the enemy's ``attack_range`` so the enemy
+    stops closing exactly where it can start shooting.
+
+    Does **not** shoot — firing is ``AttackNode``'s job exclusively. There is no
+    ``enemy.shoot()`` call anywhere in this node.
+
+    Movement is delegated to ``enemy.chase_step(direction, dt)`` (see this
+    module's docstring): this node computes only the normalized enemy→player
+    direction (pure vector math, framework-free); the enemy performs the
+    wall-avoiding swept move. Both ranges are per-instance config; the node
+    holds no cross-frame state, matching the stateless RUNNING re-evaluation
+    convention in ``behaviour_tree.py``.
+    """
+
+    def __init__(self, detection_range: float, stop_range: float):
+        self.detection_range = detection_range
+        self.stop_range = stop_range
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        distance = (enemy.position - enemy.player.position).length()
+        if distance > self.detection_range:
+            return Status.FAILURE
+        if distance <= self.stop_range:
+            # Close enough to attack — stop closing and let the Sequence fall
+            # through to AttackNode. No movement this tick.
+            return Status.SUCCESS
+
+        # In detection range but still too far to shoot: keep closing.
+        # to_player points FROM enemy TO player, so normalizing it is the chase
+        # direction directly. (Recomputed here rather than reusing the distance
+        # vector above to keep the in-range path's intent obvious.)
+        direction = (enemy.player.position - enemy.position).normalized()
+        enemy.chase_step(direction, dt)
+        return Status.RUNNING
