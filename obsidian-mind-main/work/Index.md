@@ -19,10 +19,8 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 ## Active Projects
 
-- [[work/active/v1.3-asset-import-pipeline]] — Asset browser, drag-drop import, texture/model pickers, hot-reload | Planned | Blocked on: v1.2 ✓
-- [[work/active/v1.3-asset-import-pipeline]] — Asset browser, drag-drop import, texture/model pickers, hot-reload | Planned | Blocked on: v1.2
-- [[work/active/v1.4-enemy-behaviour-trees]] — Patrol/attack/flee/idle behaviour tree system | Planned | Blocked on: v1.3
-- [[work/active/v1.5-gameplay-systems]] — Trigger/zone system, weapon inventory API | Planned | Blocked on: v1.4
+- [[work/active/v1.5-gameplay-systems]] — Trigger/zone system, weapon inventory API | Planned | Blocked on: v1.4 ✓
+- [[work/active/v1.6-level-editor-refactor]] — Split `level_editor.py` into smaller modules | Planned | Blocked on: v1.3–v1.5 shipping + manual design review
 - [[work/active/v2.0-release]] — Modding, packaged runtime, gamepad input, procedural level gen — PUBLIC RELEASE | Planned | Blocked on: v1.5
 
 ## Review Prep
@@ -31,6 +29,8 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 ## Recently Completed
 
+- [[work/archive/2026/v1.4-enemy-behaviour-trees]] — Shipped 2026-06-30. Per-enemy behaviour trees: compositors+decorators, 5 leaf nodes, 4 named presets, `level.json` `behaviour` field, editor preset+waypoint UI. Wrap-up audit: 9/9 steps, 110/110 tests.
+- [[work/archive/2026/v1.3-asset-import-pipeline]] — Shipped 2026-06-26. Asset browser, drag-drop import, texture/model pickers, hot-reload. Cross-step audit: 7/7 steps.
 - [[work/active/v1.2-level-editor-overhaul]] — Shipped 2026-05-20. Game state machine, canonical teardown, JSON schema, 8 Unity-feel editor features.
 
 ## Completed

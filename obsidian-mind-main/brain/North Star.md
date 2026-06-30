@@ -46,15 +46,29 @@ All 7 Implementation-Order steps complete and verified by a cross-step integrati
 - Asset import (Step 6) — shipped as an **Import Asset toolbar button** + native file picker (Panda3D has no OS file-drop on any release); copy-on-import, extension routing, name-collision skip-with-notice, manifest rebuild, play-mode guard
 - `level.json` `model` field (Step 7) — optional, default `'cube'`, omitted-at-default for backwards-compat; resolved everywhere via `_resolve_model`
 
-One known risk carried forward (flagged, ships per decision): bare-string texture on the load path — works via Ursina's folder glob but not routed through `_resolve_texture` like models are. See [[work/active/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] and [[brain/Gotchas]].
+One known risk carried forward (flagged, ships per decision): bare-string texture on the load path — works via Ursina's folder glob but not routed through `_resolve_texture` like models are. See [[work/archive/2026/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] and [[brain/Gotchas]].
 
-See: [[work/active/v1.3-asset-import-pipeline]], [[work/archive/version-map]]
+See: [[work/archive/2026/v1.3-asset-import-pipeline]], [[work/archive/version-map]]
+
+## v1.4 Shipped — 2026-06-30
+All 9 Implementation-Order steps complete and verified by a wrap-up integration audit (re-derived from code, not session logs): 9/9 steps PASS, 7/7 cross-step traces clean, 8/8 hard-rule classes compliant, 110/110 unit tests green. Enemies are now driven by a per-enemy behaviour tree instead of a hardcoded detect→shoot block — composable, configured per-enemy in `level.json`, editable in the level editor, with the "default" preset reproducing the prior single-behaviour enemy exactly.
+
+**Shipped in v1.4:**
+- `Scripts/behaviour_tree.py` — pure compositor/decorator layer: `Status` enum + `BehaviourNode` ABC + 3 compositors (`Sequence`/`Selector`/`Parallel`) + 3 decorators (`Invert`/`Repeat`/`Cooldown`); zero Ursina/Panda3D imports (Steps 1 & 6)
+- `Scripts/behaviour_nodes.py` — the 5 leaf nodes (`IdleNode`, `AttackNode`, `ChaseNode`, `PatrolNode`, `FleeNode`); movement delegated to `Enemy.chase_step`/`patrol_step` which route through the shared `swept_move_blocked` helper — no duplicated raycast loop (Steps 2–5)
+- `Scripts/behaviour_tree_factory.py` — `BehaviourTreeFactory` with the 4 named presets (`default`, `patrol_then_attack`, `flee_when_low`, `aggressive`); unknown preset warns and falls back to default; default preset pinned to `enemy.py` tuned constants (Step 7)
+- `level.json` `"behaviour"` field — optional per-enemy `{tree, waypoints}` config, surfaced once in `Scripts/level_io.py`, omitted-at-default for full backwards-compat; editor load stores the raw config, runtime/play-spawn builds the tree (Step 8)
+- Level editor inspector behaviour UI — preset selector (4 buttons) + waypoint list editor (add/edit/delete, min-1 enforced via disable) shown only for `patrol_then_attack` enemies; `ChangeBehaviourCommand` snapshots the full per-entity config dict for clean multi-select undo/redo (Step 9)
+
+One known limitation carried forward (logged, ships per decision): the three decorators are unit-tested but unexercised by any shipping preset — no decorator runs in the live frame loop until a future preset uses one. See [[work/archive/2026/v1.4-enemy-behaviour-trees]] and [[brain/Key Decisions]].
+
+See: [[work/archive/2026/v1.4-enemy-behaviour-trees]], [[work/archive/version-map]]
 
 ## Current Focus
 
 _What am I working toward right now?_
 
-- **v1.4 — Enemy behaviour trees** (patrol / attack / flee state composition) is next per the v1.2–v2.0 roadmap. Not yet started or designed — gated on the manual test-checklist pass for v1.3 and a design pass before any code. See [[work/active/v1.4-enemy-behaviour-trees]].
+- **v1.5 — Trigger/zone system + Weapon inventory API** is next per the v1.2–v2.0 roadmap: volume entry/exit callbacks, and a multi-weapon/ammo-pickup/switch-animation inventory API. Not yet started or designed. See [[work/active/v1.5-gameplay-systems]].
 
 ## Goals
 
@@ -88,8 +102,8 @@ Immediate: v1.1 audit fixes [[work/audits/2026-05-20-full-audit]].
 
 Sequence to public release:
 - v1.2 — Level editor overhaul + Game state machine + schema expansion [[work/active/v1.2-level-editor-overhaul]]
-- v1.3 — Asset import pipeline + hot-reload [[work/active/v1.3-asset-import-pipeline]]
-- v1.4 — Enemy behaviour trees (patrol/attack/flee) [[work/active/v1.4-enemy-behaviour-trees]]
+- v1.3 — Asset import pipeline + hot-reload [[work/archive/2026/v1.3-asset-import-pipeline]]
+- v1.4 — Enemy behaviour trees (patrol/attack/flee) [[work/archive/2026/v1.4-enemy-behaviour-trees]]
 - v1.5 — Trigger/zone system + Weapon inventory API [[work/active/v1.5-gameplay-systems]]
 - v1.6 — Level editor refactor: split `level_editor.py` into smaller modules [[work/active/v1.6-level-editor-refactor]]
 - v2.0 — Modding + packaged runtime + gamepad + procedural gen — PUBLIC RELEASE [[work/active/v2.0-release]]
@@ -105,7 +119,8 @@ Record when focus changes, with date and reason.
 |------|-------|--------|
 | 2026-05-20 | v1.2 shipped — focus moves to v1.3 asset import pipeline | All 4 tracks complete; editor is now Unity-feel |
 | 2026-05-20 | Full v1.2–v2.0 roadmap planned | Post-audit; engine in clean state, unblocked for feature work |
-| 2026-06-24 | v1.2.6 cleanup closed out — focus moves to active v1.3 work (Steps 4–7) | Startup crash, resize/camera, texture thumbnail, and tray-merge fixes all verified; [[work/active/v1.3-asset-import-pipeline]] Steps 1–3 already done, picking up at the texture picker |
+| 2026-06-24 | v1.2.6 cleanup closed out — focus moves to active v1.3 work (Steps 4–7) | Startup crash, resize/camera, texture thumbnail, and tray-merge fixes all verified; [[work/archive/2026/v1.3-asset-import-pipeline]] Steps 1–3 already done, picking up at the texture picker |
 | 2026-06-26 | Captured v1.6 — level editor refactor — as a forward-looking planned milestone | Not started or designed yet; deliberately sequenced after v1.3–v1.5 feature work and gated on a manual design review. See [[work/active/v1.6-level-editor-refactor]] |
-| 2026-06-26 | v1.3 asset import pipeline shipped — focus moves to v1.4 enemy behaviour trees | Cross-step integration audit passed all 7 steps; one latent texture-load risk flagged (not blocking) and carried forward. See [[work/active/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] |
+| 2026-06-26 | v1.3 asset import pipeline shipped — focus moves to v1.4 enemy behaviour trees | Cross-step integration audit passed all 7 steps; one latent texture-load risk flagged (not blocking) and carried forward. See [[work/archive/2026/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] |
+| 2026-06-30 | v1.4 enemy behaviour trees shipped — focus moves to v1.5 trigger/zone + weapon inventory | Wrap-up integration audit passed all 9 steps (7/7 cross-step traces, 8/8 hard-rule classes, 110/110 unit tests); decorators shipped unit-tested but unexercised by any preset (logged). v1.3 + v1.4 docs archived to `work/archive/2026/`. See [[work/archive/2026/v1.4-enemy-behaviour-trees]] |
 |      | Created North Star | Initial setup |

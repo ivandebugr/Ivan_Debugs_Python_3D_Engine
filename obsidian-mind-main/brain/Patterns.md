@@ -36,7 +36,7 @@ Recurring patterns discovered across work.
 **Problem:** Procedural generators and data pipelines that import Ursina become hard to test standalone and create implicit startup dependencies (App must be running, window must be open).
 **Solution:** Any content-generation module (`LevelGenerator`, `AssetRegistry`, future `NavMeshBuilder`) must be pure Python — no Ursina import, no Panda3D import, no global state. They take plain Python data in and return plain Python data out. The layer that uses Ursina (level editor, `load_level()`) calls them and wires up the resulting data to entities.
 **Used in:** `Scripts/level_generator.py` (v2.0 design), `Scripts/asset_registry.py` (v1.3 design)
-**Source:** [[work/active/v2.0-release]], [[work/active/v1.3-asset-import-pipeline]]
+**Source:** [[work/active/v2.0-release]], [[work/archive/2026/v1.3-asset-import-pipeline]]
 
 ## Unified input manager hides device type from game logic — 2026-05-20
 **Problem:** `Player.update()` reads `held_keys['w']` etc. directly. Adding gamepad support requires touching every input read site, and the keyboard path must be preserved for players without a gamepad.
@@ -62,6 +62,18 @@ Recurring patterns discovered across work.
 **Solution:** Before any blanket `destroy()` loop, iterate `scene.entities[:]` and call `e.die()` on any entity that `isinstance(e, AliveEntity) and e.alive`. This fires cleanup and unregistration before Ursina's deferred destroy queue processes them.
 **Used in:** `main.py:main_menu()`
 **Source:** [[work/audits/2026-05-20-full-audit]]
+
+## Editor is a config store; runtime is a factory consumer — 2026-06-30
+**Problem:** A system where both the level editor and the running game read the same `level.json` field, but the editor only needs to *display and edit* a config while the runtime needs to *construct a live object* from it. Building the live object in the editor attaches framework-coupled state (game-state guards, collision registration, player references) to an entity that has none of that context — see [[brain/Gotchas]] "BehaviourTreeFactory.build() must never run on an editor placeholder".
+**Solution:** Split the two read paths by responsibility, both fed from the single canonical parser (`level_io.load_level_data`). The **editor load path** stores the raw config dict verbatim on the placeholder (`placeholder.behaviour_config = entry['behaviour']`) and constructs nothing. The **runtime / play-spawn path** is the only consumer that calls the factory (`BehaviourTreeFactory.build(config['tree'], config)`) — and only after it has built the real gameplay object. Serialization is symmetric: write the stored config back IFF it is non-empty, omit the key otherwise (backwards-compatible with pre-feature files). This generalises beyond behaviour trees: any v1.5+ system where the editor displays config and the runtime builds a live object (e.g. the planned trigger/zone system) should follow this shape — editor stores, runtime builds.
+**Used in:** `Scripts/level_io.py` (single parser), `main.py` (`load_level` stores → `start_game` builds), `Scripts/level_editor.py` (`load_existing_level`/`_restore_editor_level` store → `_spawn_gameplay_from_snapshot` builds), `Scripts/behaviour_tree_factory.py`
+**Source:** [[work/archive/2026/v1.4-enemy-behaviour-trees]]
+
+## Movement-threshold constants derived from max per-frame step, never magic numbers — 2026-06-30
+**Problem:** A "has the mover arrived?" distance check (`to_target.length() <= threshold`) with a hardcoded literal threshold. If the threshold is smaller than the distance the mover can cover in one slow frame (`speed * dt_max`), a single low-FPS frame can step the mover clean past the target without ever landing inside the radius — producing an infinite oscillation around the waypoint that never fires the arrival branch.
+**Solution:** Define the threshold as a **named module constant** whose value is *derived*, not guessed: `threshold >= speed * dt_max`, where `dt_max` is the worst-case frame delta the game tolerates (e.g. a 20 FPS floor → `dt_max = 0.05`). Document the derivation inline so a retune of speed forces a conscious re-derivation. `PatrolNode` uses `PATROL_WAYPOINT_THRESHOLD = 0.3` against `PATROL_SPEED_DEFAULT = 5` and `dt_max = 0.05` (`5 * 0.05 = 0.25`, cleared with margin).
+**Used in:** `Scripts/behaviour_nodes.py` (`PATROL_WAYPOINT_THRESHOLD`, derived from `PATROL_SPEED_DEFAULT` × the 20 FPS-floor `dt_max`)
+**Source:** [[work/archive/2026/v1.4-enemy-behaviour-trees]]
 
 ## Call setBin/setDepthTest/setDepthWrite on the Entity, never on .node() — 2026-06-24
 **Problem:** Ursina's `Entity` subclasses Panda3D's `NodePath` directly, but it's easy to assume render-bin/depth-test calls belong on the underlying Panda node instead.
