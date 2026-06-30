@@ -357,6 +357,50 @@ class ChangeBehaviourCommand(Command):
             self.editor._refresh_behaviour_ui()
 
 
+def _copy_actions(actions):
+    """Deep copy a trigger action list (list of flat dicts) so a stored snapshot
+    never aliases the live list the inspector mutates. None/empty → []."""
+    return [dict(a) for a in (actions or [])]
+
+
+class ChangeTriggerActionsCommand(Command):
+    """Apply new on_enter/on_exit action lists to ONE trigger; undo restores the
+    prior lists. v1.5 Step 6.
+
+    Whole-list snapshot granularity (same rationale as ChangeBehaviourCommand's
+    whole-dict snapshot): add/remove/change-action/edit-target is each ONE undo
+    step over both lists, so the trigger's action state can never end up half-
+    reverted. Both old and new are deep-copied at construction so the snapshots
+    never alias the live lists. Refreshes the trigger inspector on apply/undo —
+    the same in-command refresh pattern the other editor commands use."""
+
+    def __init__(self, editor, trigger, new_on_enter, new_on_exit):
+        self.editor      = editor
+        self.trigger     = trigger
+        self.old_enter   = _copy_actions(getattr(trigger, 'on_enter_actions', []))
+        self.old_exit    = _copy_actions(getattr(trigger, 'on_exit_actions', []))
+        self.new_enter   = _copy_actions(new_on_enter)
+        self.new_exit    = _copy_actions(new_on_exit)
+
+    def __repr__(self):
+        return f"ChangeTriggerActionsCommand(enter={len(self.new_enter)}, exit={len(self.new_exit)})"
+
+    def _apply(self):
+        self.trigger.on_enter_actions = _copy_actions(self.new_enter)
+        self.trigger.on_exit_actions  = _copy_actions(self.new_exit)
+        if self.editor is not None:
+            self.editor._refresh_trigger_ui()
+
+    def execute(self):
+        self._apply()
+
+    def undo(self):
+        self.trigger.on_enter_actions = _copy_actions(self.old_enter)
+        self.trigger.on_exit_actions  = _copy_actions(self.old_exit)
+        if self.editor is not None:
+            self.editor._refresh_trigger_ui()
+
+
 class UndoRedoStack:
     def __init__(self, max_depth=50):
         self._undo = deque(maxlen=max_depth)

@@ -15,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
     MoveEntityCommand, ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
-    ChangePropertyCommand, ChangeBehaviourCommand, _resolve_model
+    ChangePropertyCommand, ChangeBehaviourCommand, ChangeTriggerActionsCommand, _resolve_model
 )
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.session_logger import SessionLogger
@@ -893,17 +893,20 @@ class LevelEditor(Entity):
         self._insp_door_field.on_submit = lambda f=self._insp_door_field: self._apply_door_name(f.text)
 
         self._build_behaviour_ui()
+        self._build_trigger_ui()
 
     def _update_inspector_door_field(self):
         """Refresh the door-name field from the current selection. Blocks only —
-        hidden for empty / enemy / mixed selections, exactly like the model field.
-        Shows the shared name when all selected blocks agree, '---' otherwise.
+        hidden for empty / enemy / trigger / mixed selections, exactly like the
+        model field. Shows the shared name when all selected blocks agree, '---'
+        otherwise.
         """
         if getattr(self, '_insp_door_field', None) is None:
             return
         entities = list(self.selected)
-        has_enemy = any(e in self.enemies for e in entities)
-        if not entities or has_enemy:
+        # Only blocks are doors — hide for any selection containing a non-block.
+        has_nonblock = any((e in self.enemies or e in self.triggers) for e in entities)
+        if not entities or has_nonblock:
             self._insp_door_label.enabled = False
             self._insp_door_field.enabled = False
             return
@@ -930,7 +933,7 @@ class LevelEditor(Entity):
         for e in list(self.selected):
             if getattr(e, 'destroy_source', None) is not None:
                 continue
-            if e in self.enemies:        # enemies are never doors
+            if e in self.enemies or e in self.triggers:   # only blocks are doors
                 continue
             old = getattr(e, 'door_name', '')
             if old == value:
@@ -948,6 +951,7 @@ class LevelEditor(Entity):
             self._update_inspector_model_field()
             self._update_inspector_door_field()
             self._refresh_behaviour_ui()
+            self._refresh_trigger_ui()
             return
         entities = list(self.selected)
 
@@ -968,6 +972,7 @@ class LevelEditor(Entity):
         self._update_inspector_model_field()
         self._update_inspector_door_field()
         self._refresh_behaviour_ui()
+        self._refresh_trigger_ui()
 
     def _entity_texture_name(self, e):
         """Best-effort texture name for an entity, '' if none/unreadable."""
@@ -984,7 +989,10 @@ class LevelEditor(Entity):
         if getattr(self, '_insp_tex_swatch', None) is None:
             return
         entities = list(self.selected)
-        if not entities:
+        # Trigger volume colour/texture is editor chrome (not saved) — don't surface
+        # it as if it were an editable texture. Treat a trigger-containing selection
+        # like empty for the swatch.
+        if not entities or any(e in self.triggers for e in entities):
             self._insp_tex_swatch.texture = None
             self._insp_tex_swatch.color = color.dark_gray
             self._insp_tex_name.text = '---'
@@ -1034,8 +1042,10 @@ class LevelEditor(Entity):
         if getattr(self, '_insp_model_field', None) is None:
             return
         entities = list(self.selected)
-        has_enemy = any(e in self.enemies for e in entities)
-        if not entities or has_enemy:
+        # Blocks only — hide for enemy/trigger/mixed (triggers reuse this lower band
+        # for their action editor; only one section is ever enabled).
+        has_nonblock = any((e in self.enemies or e in self.triggers) for e in entities)
+        if not entities or has_nonblock:
             self._insp_model_label.enabled = False
             self._insp_model_field.enabled = False
             return
@@ -1411,6 +1421,211 @@ class LevelEditor(Entity):
         so the existing inspector-field guard does not cover it."""
         f = getattr(self, '_insp_door_field', None)
         return bool(f is not None and getattr(f, 'active', False))
+
+    # -------------------------------------------------------------------------
+    # Trigger action editor (v1.5 Step 6)
+    #
+    # Trigger-only inspector section, mutually exclusive with the Model field
+    # (blocks) and Behaviour section (enemies) — all three reuse the lower band
+    # and gate on list membership, so only one is ever enabled. Two sub-lists
+    # (on_enter / on_exit); each action is a transient row: a type button that
+    # cycles through ACTION_TYPES on click, an optional target InputField (only
+    # for open_door), and an [x] remove button. A persistent [+] add button per
+    # list appends a default action. Every edit pushes ONE ChangeTriggerActionsCommand
+    # snapshotting both whole lists (undo granularity mirrors ChangeBehaviourCommand).
+    # -------------------------------------------------------------------------
+    ACTION_TYPES = ['kill_plane', 'checkpoint', 'open_door', 'win_condition']
+
+    _TRIG_ENTER_LABEL_Y = -0.30   # "on_enter" header y
+    _TRIG_ENTER_TOP_Y   = -0.345  # first on_enter row y
+    _TRIG_EXIT_LABEL_Y  = -0.46   # "on_exit" header y (leaves room for ~2 enter rows)
+    _TRIG_EXIT_TOP_Y    = -0.505  # first on_exit row y
+    _TRIG_ROW_H         = 0.05    # vertical pitch between action rows
+
+    def _build_trigger_ui(self):
+        """Persistent trigger-section widgets (two list headers + two add buttons).
+        Action rows are transient (rebuilt each refresh, tracked in _trig_rows)."""
+        self._trig_enter_label = Text(
+            parent=self._inspector, text='on_enter',
+            position=(-.33, self._TRIG_ENTER_LABEL_Y),
+            color=color.light_gray, origin=(0, 0), z=-1, eternal=True, enabled=False,
+        )
+        self._trig_enter_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        self._trig_enter_add = Button(
+            parent=self._inspector, text='+',
+            position=(.30, self._TRIG_ENTER_LABEL_Y), scale=(.06, .045),
+            color=self._THEME_TILE_BG, z=-1, eternal=True, enabled=False,
+        )
+        self._trig_enter_add.text_entity.world_scale = Vec3(10, 10, 1)
+        self._trig_enter_add.on_click = lambda: self._on_add_trigger_action('on_enter')
+
+        self._trig_exit_label = Text(
+            parent=self._inspector, text='on_exit',
+            position=(-.33, self._TRIG_EXIT_LABEL_Y),
+            color=color.light_gray, origin=(0, 0), z=-1, eternal=True, enabled=False,
+        )
+        self._trig_exit_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        self._trig_exit_add = Button(
+            parent=self._inspector, text='+',
+            position=(.30, self._TRIG_EXIT_LABEL_Y), scale=(.06, .045),
+            color=self._THEME_TILE_BG, z=-1, eternal=True, enabled=False,
+        )
+        self._trig_exit_add.text_entity.world_scale = Vec3(10, 10, 1)
+        self._trig_exit_add.on_click = lambda: self._on_add_trigger_action('on_exit')
+
+        for w in (self._trig_enter_label, self._trig_enter_add,
+                  self._trig_exit_label, self._trig_exit_add):
+            try:
+                w.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_trigger_ui setBin {type(e).__name__}: {e}")
+
+        # Transient row widgets, rebuilt each refresh; tracked so input()'s focus
+        # check can see the target InputFields (NOT eternal — they must destroy()).
+        self._trig_rows = []   # list of {'type': Button, 'target': InputField|None, 'del': Button}
+
+    def _selected_trigger(self):
+        """The single selected trigger, or None (editor shows the action list only
+        for a single-trigger selection — multi-edit of action lists is out of scope)."""
+        trigs = [e for e in self.selected if e in self.triggers]
+        return trigs[0] if len(trigs) == 1 else None
+
+    def _set_trigger_section_visible(self, visible):
+        for w in (self._trig_enter_label, self._trig_enter_add,
+                  self._trig_exit_label, self._trig_exit_add):
+            w.enabled = visible
+
+    def _clear_trigger_rows(self):
+        """Destroy all transient trigger-row widgets (NOT eternal, so destroy works)."""
+        for row in getattr(self, '_trig_rows', []):
+            destroy(row['type'])
+            if row['target'] is not None:
+                destroy(row['target'])
+            destroy(row['del'])
+        self._trig_rows = []
+
+    def _refresh_trigger_ui(self):
+        """Show/hide + repopulate the trigger action editor for the current selection.
+        Single refresh path: called from _update_inspector AND from
+        ChangeTriggerActionsCommand on undo/redo."""
+        if getattr(self, '_trig_enter_label', None) is None:
+            return
+        trigger = self._selected_trigger()
+        show = trigger is not None
+        self._set_trigger_section_visible(show)
+        self._clear_trigger_rows()
+        if not show:
+            return
+        self._build_trigger_rows(trigger, 'on_enter',
+                                 self._TRIG_ENTER_TOP_Y, getattr(trigger, 'on_enter_actions', []))
+        self._build_trigger_rows(trigger, 'on_exit',
+                                 self._TRIG_EXIT_TOP_Y, getattr(trigger, 'on_exit_actions', []))
+
+    def _build_trigger_rows(self, trigger, which, top_y, actions):
+        """Build the transient action rows for one list (on_enter or on_exit)."""
+        for idx, action in enumerate(actions):
+            row_y = top_y - idx * self._TRIG_ROW_H
+            name = action.get('action', '?')
+            # Type button — click cycles to the next action type.
+            type_btn = Button(
+                parent=self._inspector, text=name,
+                position=(-.14, row_y), scale=(.34, .042),
+                color=self._THEME_TILE_BG, z=-1,
+            )
+            type_btn.text_entity.world_scale = Vec3(8, 8, 1)
+            type_btn.on_click = lambda w=which, i=idx: self._on_cycle_trigger_action(w, i)
+            # Target field — only for open_door (the one action that takes a param).
+            target_field = None
+            if name == 'open_door':
+                target_field = InputField(
+                    parent=self._inspector,
+                    position=(.18, row_y), scale=(.18, .042),
+                    default_value=str(action.get('target', '')), z=-1,
+                )
+                target_field.submit_on = ['enter']
+                target_field.on_submit = (
+                    lambda w=which, i=idx, f=target_field: self._on_trigger_target_edit(w, i, f.text)
+                )
+            del_btn = Button(
+                parent=self._inspector, text='x',
+                position=(.33, row_y), scale=(.05, .042),
+                color=self._THEME_TILE_BG, z=-1,
+            )
+            del_btn.text_entity.world_scale = Vec3(8, 8, 1)
+            del_btn.on_click = lambda w=which, i=idx: self._on_remove_trigger_action(w, i)
+            for wdg in (type_btn, del_btn) + ((target_field,) if target_field else ()):
+                try:
+                    wdg.setBin('fixed', 41)
+                except Exception as e:
+                    logger.log('ERROR', f"_build_trigger_rows setBin {type(e).__name__}: {e}")
+            self._trig_rows.append({'type': type_btn, 'target': target_field, 'del': del_btn})
+
+    def _trigger_lists(self, trigger):
+        """Return deep copies of (on_enter, on_exit) for mutation before committing."""
+        return ([dict(a) for a in getattr(trigger, 'on_enter_actions', [])],
+                [dict(a) for a in getattr(trigger, 'on_exit_actions', [])])
+
+    def _commit_trigger_lists(self, trigger, on_enter, on_exit):
+        """Push one ChangeTriggerActionsCommand and execute it (refreshes the UI)."""
+        cmd = ChangeTriggerActionsCommand(self, trigger, on_enter, on_exit)
+        cmd.execute()
+        self._history.push(cmd)
+
+    def _on_add_trigger_action(self, which):
+        trigger = self._selected_trigger()
+        if trigger is None:
+            return
+        on_enter, on_exit = self._trigger_lists(trigger)
+        target_list = on_enter if which == 'on_enter' else on_exit
+        target_list.append({'action': self.ACTION_TYPES[0]})   # default kill_plane
+        self._commit_trigger_lists(trigger, on_enter, on_exit)
+
+    def _on_remove_trigger_action(self, which, index):
+        trigger = self._selected_trigger()
+        if trigger is None:
+            return
+        on_enter, on_exit = self._trigger_lists(trigger)
+        target_list = on_enter if which == 'on_enter' else on_exit
+        if 0 <= index < len(target_list):
+            target_list.pop(index)
+            self._commit_trigger_lists(trigger, on_enter, on_exit)
+
+    def _on_cycle_trigger_action(self, which, index):
+        trigger = self._selected_trigger()
+        if trigger is None:
+            return
+        on_enter, on_exit = self._trigger_lists(trigger)
+        target_list = on_enter if which == 'on_enter' else on_exit
+        if 0 <= index < len(target_list):
+            cur = target_list[index].get('action', self.ACTION_TYPES[0])
+            nxt = self.ACTION_TYPES[(self.ACTION_TYPES.index(cur) + 1) % len(self.ACTION_TYPES)] \
+                if cur in self.ACTION_TYPES else self.ACTION_TYPES[0]
+            # Replace the action, dropping params that don't apply to the new type
+            # (e.g. a stale 'target' when cycling off open_door).
+            new_action = {'action': nxt}
+            if nxt == 'open_door':
+                new_action['target'] = target_list[index].get('target', '')
+            target_list[index] = new_action
+            self._commit_trigger_lists(trigger, on_enter, on_exit)
+
+    def _on_trigger_target_edit(self, which, index, value_str):
+        trigger = self._selected_trigger()
+        if trigger is None:
+            return
+        on_enter, on_exit = self._trigger_lists(trigger)
+        target_list = on_enter if which == 'on_enter' else on_exit
+        if 0 <= index < len(target_list) and target_list[index].get('action') == 'open_door':
+            target_list[index]['target'] = value_str.strip()
+            self._commit_trigger_lists(trigger, on_enter, on_exit)
+
+    def _trigger_typing(self):
+        """True while any trigger open_door target InputField is focused — gate
+        Delete / bookmark keys, same as the other inspector typing guards."""
+        for row in getattr(self, '_trig_rows', []):
+            f = row.get('target')
+            if f is not None and getattr(f, 'active', False):
+                return True
+        return False
 
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
@@ -3146,7 +3361,7 @@ class LevelEditor(Entity):
             # Also skip while typing in the hierarchy search box.
             if (any(f.active for f in self._insp_fields.values())
                     or self._hier_typing() or self._behaviour_typing()
-                    or self._door_name_typing()):
+                    or self._door_name_typing() or self._trigger_typing()):
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -3162,7 +3377,7 @@ class LevelEditor(Entity):
         if key in ('delete', 'backspace'):
             typing = (any(f.active for f in self._insp_fields.values())
                       or self._hier_typing() or self._behaviour_typing()
-                      or self._door_name_typing())
+                      or self._door_name_typing() or self._trigger_typing())
             mid_drag = (self._gizmo_drag_axis is not None
                         or self._box_selecting or self._dragging)
             if self.selected and not typing and not mid_drag:
