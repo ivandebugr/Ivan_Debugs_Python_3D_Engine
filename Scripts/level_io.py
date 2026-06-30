@@ -36,6 +36,14 @@ def _normalise_entry(entry):
         out['hp']         = entry.get('hp', DEFAULT_HP)
         out['enemy_type'] = entry.get('enemy_type', DEFAULT_ENEMY_TYPE)
         out['rotation_y'] = entry.get('rotation_y', 0)
+        # v1.4 Step 8: optional per-enemy behaviour-tree config. Absent → None
+        # (Enemy.__init__ then builds the "default" preset). Surfaced HERE — the
+        # single source of truth — so every read path (main.load_level,
+        # editor load/snapshot) sees it identically and the editor's
+        # play-in-editor snapshot, which re-parses saved dicts through this
+        # function, preserves it instead of silently dropping it (the bug that
+        # bit block 'rotation' — see brain/Gotchas.md).
+        out['behaviour']  = entry.get('behaviour', None)
     return out
 
 
@@ -45,7 +53,7 @@ def load_level_data(source):
     Accepts a file path (str/Path) or an already-parsed list (snapshot use).
     Every entry is guaranteed to have: type, position, rotation, scale,
     colour (0–1 floats), texture. Enemy entries additionally have: hp,
-    enemy_type, rotation_y.
+    enemy_type, rotation_y, behaviour (the raw behaviour-config dict or None).
 
     Raises FileNotFoundError when given a path that does not exist — caller
     is responsible for handling that case.

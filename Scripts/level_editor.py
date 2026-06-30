@@ -15,8 +15,9 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
     MoveEntityCommand, ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
-    ChangePropertyCommand, _resolve_model
+    ChangePropertyCommand, ChangeBehaviourCommand, _resolve_model
 )
+from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.session_logger import SessionLogger
 from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.asset_registry import asset_registry, CATEGORY_DIRS, CATEGORY_EXTENSIONS
@@ -798,12 +799,15 @@ class LevelEditor(Entity):
         except Exception as e:
             logger.log('ERROR', f"_build_inspector setBin model name {type(e).__name__}: {e}")
 
+        self._build_behaviour_ui()
+
     def _update_inspector(self):
         if not self.selected:
             for f in self._insp_fields.values():
                 f.text = ' '
             self._update_inspector_texture_swatch()
             self._update_inspector_model_field()
+            self._refresh_behaviour_ui()
             return
         entities = list(self.selected)
 
@@ -822,6 +826,7 @@ class LevelEditor(Entity):
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
         self._update_inspector_texture_swatch()
         self._update_inspector_model_field()
+        self._refresh_behaviour_ui()
 
     def _entity_texture_name(self, e):
         """Best-effort texture name for an entity, '' if none/unreadable."""
@@ -901,6 +906,362 @@ class LevelEditor(Entity):
             return
         name = next(iter(names))
         self._insp_model_name.text = (Path(name).stem if name else 'cube') or 'cube'
+
+    # -------------------------------------------------------------------------
+    # Behaviour-tree config (v1.4 Step 9)
+    #
+    # Enemy-only. Two stacked sections inside the inspector panel:
+    #   1. Preset selector — a row of 4 Buttons (one per BehaviourTreeFactory
+    #      preset). The active preset's button is tinted; clicking another pushes
+    #      one ChangeBehaviourCommand. Decision PART 0A: inline buttons, not the
+    #      asset-picker overlay — there are exactly 4 fixed string presets with no
+    #      thumbnail, so the overlay machinery the texture/model picker needs at
+    #      asset scale would be overkill.
+    #   2. Waypoint list — shown ONLY when the (single) selected enemy's preset is
+    #      "patrol_then_attack". Each waypoint is a row of 3 InputFields (x/y/z) +
+    #      a "×" delete button; a "+ Waypoint" button appends [0,1,0]. Reordering
+    #      (drag-to-reorder) is deliberately DEFERRED for Step 9 (decision PART 0B)
+    #      — add/edit/delete only.
+    #
+    # Gating (decision PART 0D) is list-membership `e in self.enemies`, identical
+    # to _update_inspector_model_field and _entity_snapshot — never a name check
+    # (Rule 1). The preset buttons apply to ALL selected enemies; the per-waypoint
+    # editor only renders for a SINGLE selected enemy (a coordinate UI is
+    # meaningless across a heterogeneous multi-selection).
+    #
+    # All persistent widgets are eternal=True (survive play-in-editor teardown,
+    # like the rest of the inspector). Transient per-refresh waypoint rows are NOT
+    # eternal — destroy() is a no-op on eternal entities, so they would leak on
+    # every rebuild (see gotcha: destroy() no-op on eternal entities).
+    # -------------------------------------------------------------------------
+
+    _BEHAV_PRESET_Y   = -0.38   # preset-button row y (reuses the model-field band:
+                                # the model field is hidden for enemies, so the two
+                                # never share screen space)
+    _BEHAV_WP_LABEL_Y = -0.44   # "Waypoints" header y
+    _BEHAV_WP_TOP_Y   = -0.49   # first waypoint row y
+    _BEHAV_WP_ROW_H   = 0.055   # vertical pitch between waypoint rows
+
+    def _build_behaviour_ui(self):
+        """Build the persistent (eternal) behaviour widgets once: the section
+        label, the 4 preset buttons, and the "Waypoints" header + "+ Waypoint"
+        button. Per-waypoint rows are NOT built here — they are rebuilt every
+        refresh by _rebuild_waypoint_rows because their count varies."""
+        self._behav_label = Text(
+            parent=self._inspector,
+            text='Behaviour',
+            position=(-.33, -.345),   # just below the Texture row (-.30); shown for
+                                      # enemies only, where the Model row (which also
+                                      # lives in the lower band) is hidden — so the
+                                      # two never overlap on screen.
+            color=color.light_gray,
+            origin=(0, 0),
+            z=-1,
+            eternal=True,
+            enabled=False,
+        )
+        self._behav_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._behav_label.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_behaviour_ui setBin label {type(e).__name__}: {e}")
+
+        # Preset buttons — one per BehaviourTreeFactory preset, evenly spaced.
+        self._behav_preset_buttons = {}
+        presets = BehaviourTreeFactory.PRESETS
+        n = len(presets)
+        span = 0.86                      # total horizontal span (panel-local)
+        step = span / n
+        x0 = -span / 2 + step / 2
+        for i, preset in enumerate(presets):
+            btn = Button(
+                parent=self._inspector,
+                text=self._behav_preset_short(preset),
+                position=(x0 + i * step, self._BEHAV_PRESET_Y),
+                scale=(step * 0.92, 0.05),
+                color=self._THEME_TILE_BG,
+                z=-1,
+                eternal=True,
+                enabled=False,
+            )
+            btn.text_entity.world_scale = Vec3(10, 10, 1)
+            # Capture preset by default-arg (loop-var binding) — no live-entity capture.
+            btn.on_click = lambda p=preset: self._on_preset_click(p)
+            try:
+                btn.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_behaviour_ui setBin btn {type(e).__name__}: {e}")
+            self._behav_preset_buttons[preset] = btn
+
+        # Waypoint section header + "+ Waypoint" button (persistent; rows are transient).
+        self._behav_wp_label = Text(
+            parent=self._inspector,
+            text='Waypoints',
+            position=(-.33, self._BEHAV_WP_LABEL_Y),
+            color=color.light_gray,
+            origin=(0, 0),
+            z=-1,
+            eternal=True,
+            enabled=False,
+        )
+        self._behav_wp_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._behav_wp_label.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_behaviour_ui setBin wp label {type(e).__name__}: {e}")
+
+        self._behav_add_button = Button(
+            parent=self._inspector,
+            text='+ Waypoint',
+            position=(.15, self._BEHAV_WP_LABEL_Y),
+            scale=(.30, 0.045),
+            color=self._THEME_TILE_BG,
+            z=-1,
+            eternal=True,
+            enabled=False,
+        )
+        self._behav_add_button.text_entity.world_scale = Vec3(10, 10, 1)
+        self._behav_add_button.on_click = self._on_add_waypoint
+        try:
+            self._behav_add_button.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_behaviour_ui setBin add btn {type(e).__name__}: {e}")
+
+        # Transient waypoint-row widgets, rebuilt each refresh. Tracked so they can
+        # be destroyed before rebuild (and so input()'s focus check can see the
+        # coordinate InputFields).
+        self._behav_wp_rows = []      # list of {'fields': [InputField,...], 'del': Button}
+
+    def _behav_preset_short(self, preset):
+        """Short button label for a preset (full names overflow a 4-button row)."""
+        return {
+            'default': 'default',
+            'patrol_then_attack': 'patrol',
+            'flee_when_low': 'flee',
+            'aggressive': 'aggro',
+        }.get(preset, preset)
+
+    def _behaviour_enemies(self):
+        """Selected entities that are enemies (decision PART 0D: membership test)."""
+        return [e for e in self.selected if e in self.enemies]
+
+    def _entity_preset(self, e):
+        """Current preset name for an enemy entity, defaulting to 'default'."""
+        cfg = getattr(e, 'behaviour_config', None)
+        if cfg:
+            return cfg.get('tree', 'default')
+        return 'default'
+
+    def _refresh_behaviour_ui(self):
+        """Show/hide + repopulate all behaviour widgets for the current selection.
+
+        Single refresh path (decision PART 4): called from _update_inspector on
+        selection change AND from ChangeBehaviourCommand on undo/redo — there is
+        no second refresh route. Hidden (enabled=False, never destroyed) for
+        non-enemy / empty selections, mirroring _update_inspector_model_field."""
+        if getattr(self, '_behav_label', None) is None:
+            return
+        enemies = self._behaviour_enemies()
+        # The behaviour section and the model field are mutually exclusive: model
+        # field shows for blocks only, behaviour for enemies only. The Behaviour
+        # label reuses the model row's y-band, so only one is ever enabled.
+        show = bool(enemies)
+        self._behav_label.enabled = show
+        for preset, btn in self._behav_preset_buttons.items():
+            btn.enabled = show
+        if not show:
+            self._set_waypoint_section_visible(False)
+            self._clear_waypoint_rows()
+            return
+
+        # Highlight the active preset. On a mixed-preset multi-selection no single
+        # button is highlighted (all default tint).
+        presets = {self._entity_preset(e) for e in enemies}
+        active = next(iter(presets)) if len(presets) == 1 else None
+        for preset, btn in self._behav_preset_buttons.items():
+            btn.color = color.azure if preset == active else self._THEME_TILE_BG
+
+        # Waypoint editor: only for a SINGLE enemy whose preset is patrol_then_attack.
+        single = enemies[0] if len(enemies) == 1 else None
+        if single is not None and self._entity_preset(single) == 'patrol_then_attack':
+            self._set_waypoint_section_visible(True)
+            self._rebuild_waypoint_rows(single)
+        else:
+            self._set_waypoint_section_visible(False)
+            self._clear_waypoint_rows()
+
+    def _set_waypoint_section_visible(self, visible):
+        self._behav_wp_label.enabled = visible
+        self._behav_add_button.enabled = visible
+
+    def _clear_waypoint_rows(self):
+        """Destroy all transient waypoint-row widgets. They are NOT eternal, so
+        destroy() actually removes them (eternal entities ignore destroy())."""
+        for row in getattr(self, '_behav_wp_rows', []):
+            for f in row['fields']:
+                destroy(f)
+            destroy(row['del'])
+        self._behav_wp_rows = []
+
+    def _waypoints_of(self, e):
+        """Current waypoint list for an enemy (list of [x,y,z] lists), possibly []."""
+        cfg = getattr(e, 'behaviour_config', None) or {}
+        wps = cfg.get('waypoints')
+        return wps if isinstance(wps, list) else []
+
+    def _rebuild_waypoint_rows(self, enemy):
+        """Rebuild the per-waypoint editor rows for `enemy` from its config.
+
+        Each row: 3 InputFields (x/y/z) + a "×" delete button. The "×" is DISABLED
+        (not hidden — layout stays stable, decision PART 0B) when only one waypoint
+        remains, enforcing the minimum of 1. There is no maximum."""
+        self._clear_waypoint_rows()
+        waypoints = self._waypoints_of(enemy)
+        col_x = (-.34, -.12, .10)        # x/y/z field columns (panel-local)
+        del_x = .32
+        for idx, point in enumerate(waypoints):
+            row_y = self._BEHAV_WP_TOP_Y - idx * self._BEHAV_WP_ROW_H
+            fields = []
+            for axis, cx in enumerate(col_x):
+                field = InputField(
+                    parent=self._inspector,
+                    position=(cx, row_y),
+                    scale=(.20, .045),
+                    default_value=str(round(point[axis], 3)),
+                    z=-1,
+                )
+                try:
+                    field.setBin('fixed', 41)
+                except Exception as e:
+                    logger.log('ERROR', f"_rebuild_waypoint_rows setBin field {type(e).__name__}: {e}")
+                # submit_on must be set or on_submit never fires; callback is no-arg
+                # and reads field.text itself (InputField gotcha). i/axis/field bound
+                # by default-arg so each row's callback edits the right coordinate.
+                field.submit_on = ['enter']
+                field.on_submit = (
+                    lambda i=idx, a=axis, f=field: self._on_waypoint_edit(i, a, f.text)
+                )
+                fields.append(field)
+            del_btn = Button(
+                parent=self._inspector,
+                text='x',
+                position=(del_x, row_y),
+                scale=(.05, .045),
+                color=self._THEME_TILE_BG,
+                z=-1,
+            )
+            del_btn.text_entity.world_scale = Vec3(10, 10, 1)
+            del_btn.on_click = lambda i=idx: self._on_delete_waypoint(i)
+            # Minimum-1 enforcement: disable (don't hide) the last remaining row's ×.
+            if len(waypoints) <= 1:
+                del_btn.disabled = True
+                del_btn.color = color.dark_gray
+            try:
+                del_btn.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_rebuild_waypoint_rows setBin del {type(e).__name__}: {e}")
+            self._behav_wp_rows.append({'fields': fields, 'del': del_btn})
+
+    # --- behaviour edit handlers (each pushes ONE whole-dict ChangeBehaviourCommand) ---
+
+    def _new_config_for(self, enemy, tree=None, waypoints=None):
+        """Build the next behaviour_config dict for `enemy`, starting from its
+        current config so unrelated keys survive. `tree`/`waypoints` override
+        when given. Decision PART 0C: callers snapshot the WHOLE dict."""
+        cfg = dict(getattr(enemy, 'behaviour_config', None) or {})
+        if tree is not None:
+            cfg['tree'] = tree
+        if waypoints is not None:
+            cfg['waypoints'] = [list(p) for p in waypoints]
+        cfg.setdefault('tree', 'default')
+        return cfg
+
+    def _on_preset_click(self, preset):
+        """Apply `preset` to all selected enemies as one ChangeBehaviourCommand.
+
+        Switching TO patrol_then_attack with no existing waypoints seeds a single
+        default [0,1,0] so the waypoint editor has a row to show. Switching AWAY
+        from patrol_then_attack KEEPS the waypoints key (decision PART 2) — switch
+        back and the route is still there."""
+        enemies = self._behaviour_enemies()
+        if not enemies:
+            return
+        # ChangeBehaviourCommand applies the SAME new_config dict to every selected
+        # enemy as one undo step. When seeding waypoints for patrol_then_attack on a
+        # multi-selection, reuse whichever enemy already has a route (else the
+        # default [0,1,0]); the per-waypoint editor is hidden for multi-selections
+        # anyway, so a shared seed is the right behaviour.
+        waypoints = None
+        if preset == 'patrol_then_attack':
+            existing = next((self._waypoints_of(e) for e in enemies if self._waypoints_of(e)), None)
+            waypoints = existing if existing else [[0, 1, 0]]
+        # Base the shared dict on the first enemy so unrelated keys are preserved.
+        new_config = self._new_config_for(enemies[0], tree=preset, waypoints=waypoints)
+        cmd = ChangeBehaviourCommand(self, enemies, new_config)
+        cmd.execute()
+        self._history.push(cmd)
+        logger.log('INFO', f"Behaviour preset set: {preset} on {len(enemies)} enemies")
+
+    def _on_add_waypoint(self):
+        """Append a default [0,1,0] waypoint to the single selected enemy."""
+        enemies = self._behaviour_enemies()
+        if len(enemies) != 1:
+            return
+        e = enemies[0]
+        waypoints = [list(p) for p in self._waypoints_of(e)] + [[0, 1, 0]]
+        new_config = self._new_config_for(e, tree='patrol_then_attack', waypoints=waypoints)
+        cmd = ChangeBehaviourCommand(self, [e], new_config)
+        cmd.execute()
+        self._history.push(cmd)
+        logger.log('INFO', f"Waypoint added: now {len(waypoints)} on enemy")
+
+    def _on_delete_waypoint(self, index):
+        """Remove waypoint `index` from the single selected enemy (min 1 enforced
+        at the button level — this is never reached for the last waypoint)."""
+        enemies = self._behaviour_enemies()
+        if len(enemies) != 1:
+            return
+        e = enemies[0]
+        waypoints = [list(p) for p in self._waypoints_of(e)]
+        if index < 0 or index >= len(waypoints) or len(waypoints) <= 1:
+            return
+        del waypoints[index]
+        new_config = self._new_config_for(e, tree='patrol_then_attack', waypoints=waypoints)
+        cmd = ChangeBehaviourCommand(self, [e], new_config)
+        cmd.execute()
+        self._history.push(cmd)
+        logger.log('INFO', f"Waypoint {index} deleted: now {len(waypoints)} on enemy")
+
+    def _on_waypoint_edit(self, index, axis, value_str):
+        """Set waypoint `index`'s `axis` coordinate from a submitted field value."""
+        enemies = self._behaviour_enemies()
+        if len(enemies) != 1:
+            return
+        try:
+            value = float(value_str)
+        except (ValueError, TypeError):
+            return
+        e = enemies[0]
+        waypoints = [list(p) for p in self._waypoints_of(e)]
+        if index < 0 or index >= len(waypoints) or axis not in (0, 1, 2):
+            return
+        if waypoints[index][axis] == value:
+            return    # no-op edit — don't push an empty undo step
+        waypoints[index][axis] = value
+        new_config = self._new_config_for(e, tree='patrol_then_attack', waypoints=waypoints)
+        cmd = ChangeBehaviourCommand(self, [e], new_config)
+        cmd.execute()
+        self._history.push(cmd)
+        logger.log('INFO', f"Waypoint {index} axis {axis} set to {value}")
+
+    def _behaviour_typing(self):
+        """True while any behaviour waypoint InputField is focused — gate Delete /
+        bookmark keys exactly like _hier_typing and the inspector-field check."""
+        for row in getattr(self, '_behav_wp_rows', []):
+            for f in row['fields']:
+                if getattr(f, 'active', False):
+                    return True
+        return False
 
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
@@ -2260,13 +2621,22 @@ class LevelEditor(Entity):
                 block_data['model'] = model_name
             data.append(block_data)
         for enemy in live_enemies:
-            data.append({
+            enemy_data = {
                 'type': 'enemy',
                 'position': [enemy.x, enemy.y, enemy.z],
                 'hp': getattr(enemy, 'enemy_hp', 100),
                 'enemy_type': getattr(enemy, 'enemy_type', 'default'),
                 'rotation_y': round(enemy.rotation_y, 2),
-            })
+            }
+            # v1.4 Step 8: write the behaviour key ONLY when this enemy carries a
+            # non-empty config (same omit-at-default pattern as 'model' above).
+            # Enemies with no custom behaviour write no key at all — so re-saving
+            # a pre-v1.4 level produces no spurious "behaviour": null/{} and the
+            # schema stays backwards-compatible with old loaders.
+            behaviour_config = getattr(enemy, 'behaviour_config', None)
+            if behaviour_config:
+                enemy_data['behaviour'] = behaviour_config
+            data.append(enemy_data)
         return data
 
     def _set_editor_ui_visible(self, visible):
@@ -2391,6 +2761,10 @@ class LevelEditor(Entity):
                 )
                 new_entity.enemy_hp   = entry['hp']
                 new_entity.enemy_type = entry['enemy_type']
+                # v1.4 Step 8: restore behaviour-config on the rebuilt placeholder
+                # so it survives the play-in-editor (F5) round-trip — same
+                # attribute load_existing_level/_build_level_data use.
+                new_entity.behaviour_config = entry['behaviour']
                 new_entity._original_color = color.red
                 self.enemies.append(new_entity)
             else:
@@ -2433,12 +2807,24 @@ class LevelEditor(Entity):
         game.enemies = []
         for entry in entries:
             if entry['type'] == 'enemy':
+                # v1.4 Step 9: build the behaviour tree from the saved config so a
+                # patrol enemy edited in the inspector actually patrols its edited
+                # waypoints when played via F5 — the SAME hand-off main.py's
+                # start_game() does (config is the raw {"tree":..,"waypoints":..}
+                # dict; the Factory converts waypoints to Vec3 internally).
+                behaviour_tree = None
+                config = entry['behaviour']
+                if config:
+                    behaviour_tree = BehaviourTreeFactory.build(
+                        config.get('tree', 'default'), config
+                    )
                 e = Enemy(
                     spawn_position=tuple(entry['position']),
                     player=game.player,
                     hp=entry['hp'],
                     enemy_type=entry['enemy_type'],
                     rotation_y=entry['rotation_y'],
+                    behaviour_tree=behaviour_tree,
                 )
                 game.enemies.append(e)
         game.start()
@@ -2553,7 +2939,8 @@ class LevelEditor(Entity):
             # FIXED: scene.focused_entity is never set by Ursina — bookmark keys fired
             # while typing numbers in inspector fields. Check InputField.active instead.
             # Also skip while typing in the hierarchy search box.
-            if any(f.active for f in self._insp_fields.values()) or self._hier_typing():
+            if (any(f.active for f in self._insp_fields.values())
+                    or self._hier_typing() or self._behaviour_typing()):
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -2567,7 +2954,8 @@ class LevelEditor(Entity):
         # Panda3D, so accept both. Skip while typing in an inspector field (backspace
         # edits text there) or mid-drag (gizmo / box-select / browser drag).
         if key in ('delete', 'backspace'):
-            typing = any(f.active for f in self._insp_fields.values()) or self._hier_typing()
+            typing = (any(f.active for f in self._insp_fields.values())
+                      or self._hier_typing() or self._behaviour_typing())
             mid_drag = (self._gizmo_drag_axis is not None
                         or self._box_selecting or self._dragging)
             if self.selected and not typing and not mid_drag:
@@ -2814,6 +3202,13 @@ class LevelEditor(Entity):
                     )
                     new_entity.enemy_hp   = entry['hp']
                     new_entity.enemy_type = entry['enemy_type']
+                    # v1.4 Step 8: store the raw behaviour-config dict (or None)
+                    # so it round-trips on save (_build_level_data reads the same
+                    # attribute). Editor placeholders are plain Entities with no
+                    # alive/collision/game-state context, so we store the config
+                    # only — NOT a live tree. Step 9 will add inspector UI to edit
+                    # it; this step is storage/round-trip plumbing only.
+                    new_entity.behaviour_config = entry['behaviour']
                     new_entity._original_color = color.red
                     self.enemies.append(new_entity)
                 else:

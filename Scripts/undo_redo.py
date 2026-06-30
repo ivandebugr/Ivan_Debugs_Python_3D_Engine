@@ -259,6 +259,80 @@ class ChangePropertyCommand(Command):
     def undo(self):    setattr(self.entity, self.prop, self.old_val)
 
 
+def _copy_behaviour_config(config):
+    """Deep-ish copy of a behaviour_config dict so a stored snapshot can never
+    alias the live dict the UI mutates in place.
+
+    behaviour_config is a flat dict whose only nested value is "waypoints" — a
+    list of 3-element [x, y, z] lists. A shallow dict() would share that list
+    (and its inner lists) with the live config, so a later in-place waypoint
+    edit would silently rewrite the snapshot and break undo. Copy the list and
+    each inner coordinate list explicitly. None passes through unchanged
+    (an enemy with no custom behaviour)."""
+    if config is None:
+        return None
+    out = dict(config)
+    if isinstance(out.get('waypoints'), list):
+        out['waypoints'] = [list(p) for p in out['waypoints']]
+    return out
+
+
+class ChangeBehaviourCommand(Command):
+    """Apply a new behaviour_config to all selected enemies; undo restores each
+    enemy's OWN prior config independently.
+
+    Granularity (v1.4 Step 9, decision PART 0C): the snapshot is the ENTIRE
+    behaviour_config dict, before and after — never a single field. A preset
+    switch that also seeds or clears the waypoint list is therefore ONE undo
+    step, and a single waypoint-coordinate edit is likewise one whole-dict
+    snapshot. This trades fine-grained undo for a config dict that can never end
+    up internally inconsistent (e.g. a "patrol_then_attack" tree with the
+    waypoints half-reverted).
+
+    Multi-enemy (decision PART 0A): like ChangeTextureCommand, this applies the
+    SAME new_config to every entity but snapshots each entity's prior config
+    individually (old_configs is per-entity), so undo restores each enemy to its
+    own previous state, not all to one shared snapshot.
+
+    Both old_configs and new_config are deep-copied at construction so the stored
+    snapshots never alias the live dict the inspector mutates in place.
+
+    After (re)applying, calls editor._refresh_behaviour_ui() so an undo/redo that
+    changes behaviour rebuilds the inspector's preset buttons + waypoint rows —
+    the same in-command refresh pattern PlaceEntityCommand/DeleteEntityCommand use
+    with editor._refresh_hierarchy()."""
+
+    def __init__(self, editor, entities, new_config):
+        self.editor      = editor
+        self.entities    = list(entities)
+        self.old_configs = [
+            _copy_behaviour_config(getattr(e, 'behaviour_config', None))
+            for e in self.entities
+        ]
+        self.new_config  = _copy_behaviour_config(new_config)
+
+    def __repr__(self):
+        tree = (self.new_config or {}).get('tree', None)
+        return f"ChangeBehaviourCommand(n={len(self.entities)}, tree={tree!r})"
+
+    def _apply(self):
+        for e in self.entities:
+            e.behaviour_config = _copy_behaviour_config(self.new_config)
+        if self.editor is not None:
+            self.editor._refresh_behaviour_ui()
+
+    def execute(self):
+        # UndoRedoStack.redo() re-runs execute() (like every other command here),
+        # so re-applying the new config on redo needs no separate redo() method.
+        self._apply()
+
+    def undo(self):
+        for e, cfg in zip(self.entities, self.old_configs):
+            e.behaviour_config = _copy_behaviour_config(cfg)
+        if self.editor is not None:
+            self.editor._refresh_behaviour_ui()
+
+
 class UndoRedoStack:
     def __init__(self, max_depth=50):
         self._undo = deque(maxlen=max_depth)

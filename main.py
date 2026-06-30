@@ -1,6 +1,7 @@
 from ursina import *
 from Scripts.player_controller import Player
 from Scripts.enemy import Enemy
+from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
@@ -161,6 +162,10 @@ def load_level():
             enemy_placeholder.enemy_hp       = entry['hp']
             enemy_placeholder.enemy_type     = entry['enemy_type']
             enemy_placeholder.enemy_rotation = entry['rotation_y']
+            # v1.4 Step 8: raw behaviour-config dict (or None). Stashed here on
+            # the placeholder; start_game() builds the tree from it and passes
+            # behaviour_tree= to Enemy. Same two-stage hand-off as hp/type/rot.
+            enemy_placeholder.behaviour_config = entry['behaviour']
         else:
             Entity(
                 model=_resolve_model(entry['model']),
@@ -301,12 +306,25 @@ def main_menu():
         game.player = Player(position=(0, 2, 0))
         game.enemies = []
         for placeholder in [e for e in scene.entities if e.name == 'level_enemy']:
+            # v1.4 Step 8: build the behaviour tree from the placeholder's
+            # stashed config. config is the full {"tree": ..., "waypoints": ...}
+            # dict; the Factory reads "tree" for the preset and "waypoints"
+            # straight from it (raw lists — it converts to Vec3 internally, so
+            # we must NOT pre-convert). Absent config → behaviour_tree=None →
+            # Enemy.__init__ builds the "default" preset itself.
+            behaviour_tree = None
+            config = getattr(placeholder, 'behaviour_config', None)
+            if config:
+                behaviour_tree = BehaviourTreeFactory.build(
+                    config.get('tree', 'default'), config
+                )
             enemy = Enemy(
                 spawn_position=placeholder.position,
                 player=game.player,
                 hp=getattr(placeholder, 'enemy_hp', 100),
                 enemy_type=getattr(placeholder, 'enemy_type', 'default'),
                 rotation_y=getattr(placeholder, 'enemy_rotation', 0),
+                behaviour_tree=behaviour_tree,
             )
             game.enemies.append(enemy)
             destroy(placeholder)
