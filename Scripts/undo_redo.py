@@ -75,6 +75,14 @@ def _resolve_model(name_or_path):
 def _restore_entity(editor, snap):
     """Reconstruct an editor entity from a snapshot dict; add to correct list."""
     from ursina import Entity, color
+    # v1.5 Step 6: trigger snapshots route through the editor's shared builder so
+    # the volume visuals + raw action lists are reconstructed identically to a fresh
+    # placement (single construction site). Detected by the is_trigger marker.
+    if snap.get('is_trigger', False):
+        return editor._make_trigger_entity(
+            snap['position'], snap.get('scale', (3, 2, 3)),
+            snap.get('on_enter', []), snap.get('on_exit', []),
+        )
     is_enemy = snap.get('is_enemy', False)
     e = Entity(
         model='cube',
@@ -103,6 +111,18 @@ class PlaceEntityCommand(Command):
     def __init__(self, editor, entity):
         self.editor = editor
         self.entity = entity
+        # v1.5 Step 6: trigger placeholders snapshot differently — _restore_entity
+        # routes is_trigger snapshots through editor._make_trigger_entity, so the
+        # snapshot carries the raw action lists + scale, not block/enemy fields.
+        if getattr(editor, 'triggers', None) is not None and entity in editor.triggers:
+            self._snapshot = {
+                'is_trigger': True,
+                'position': entity.position,
+                'scale': entity.scale,
+                'on_enter': [dict(a) for a in getattr(entity, 'on_enter_actions', [])],
+                'on_exit':  [dict(a) for a in getattr(entity, 'on_exit_actions', [])],
+            }
+            return
         is_enemy = entity in editor.enemies
         tex_name = ''
         if hasattr(entity, 'texture') and entity.texture:
@@ -119,7 +139,7 @@ class PlaceEntityCommand(Command):
         }
 
     def __repr__(self):
-        return f"PlaceEntityCommand(pos={list(self._snapshot['position'])}, enemy={self._snapshot['is_enemy']})"
+        return f"PlaceEntityCommand(pos={list(self._snapshot['position'])}, enemy={self._snapshot.get('is_enemy')}, trigger={self._snapshot.get('is_trigger', False)})"
 
     def execute(self):
         self.entity = _restore_entity(self.editor, self._snapshot)
@@ -130,6 +150,8 @@ class PlaceEntityCommand(Command):
             self.editor.blocks.remove(self.entity)
         elif self.entity in self.editor.enemies:
             self.editor.enemies.remove(self.entity)
+        elif self.entity in getattr(self.editor, 'triggers', []):
+            self.editor.triggers.remove(self.entity)
         from ursina import destroy
         destroy(self.entity)
         self.editor._refresh_hierarchy()
@@ -153,6 +175,8 @@ class DeleteEntityCommand(Command):
             self.editor.blocks.remove(self.entity)
         if self.entity in self.editor.enemies:
             self.editor.enemies.remove(self.entity)
+        if self.entity in getattr(self.editor, 'triggers', []):
+            self.editor.triggers.remove(self.entity)
         from ursina import destroy
         destroy(self.entity)
         self.editor._refresh_hierarchy()

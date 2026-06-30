@@ -39,13 +39,27 @@ class LevelEditor(Entity):
         {'name': 'Metal', 'model': 'cube', 'color': (0.627, 0.627, 0.706), 'scale': (1, 1, 1),     'type': 'block'},
         {'name': 'Wood',  'model': 'cube', 'color': (0.627, 0.392, 0.235), 'scale': (1, 1, 1),     'type': 'block'},
         {'name': 'Enemy', 'model': 'cube', 'color': (0.784, 0.235, 0.235), 'scale': (1.5, 3, 1.5), 'type': 'enemy'},
+        # v1.5 Step 6: invisible-in-game trigger volume. In the editor it renders as a
+        # semi-transparent orange box (texture_orange_test) so it can be seen/placed;
+        # at runtime TriggerZone is visible=False. Default 3x2x3 matches the spec JSON.
+        {'name': 'Trigger', 'model': 'cube', 'color': (0.95, 0.55, 0.15), 'scale': (3, 2, 3), 'type': 'trigger'},
     ]
+
+    # Editor-only visuals for trigger placeholders. Texture chosen for visibility;
+    # alpha makes the volume see-through so geometry inside it stays visible.
+    _TRIGGER_TEXTURE = 'texture_orange_test'
+    _TRIGGER_ALPHA   = 0.35
 
     def __init__(self):
         """Build all editor UI, load level and prefs; attach to app before calling app.run()."""
         super().__init__()
         self.blocks = []
         self.enemies = []
+        # v1.5 Step 6: triggers are a third tracked type, parallel to blocks/enemies.
+        # Editor placeholders are semi-transparent volumes carrying on_enter_actions/
+        # on_exit_actions raw lists (config-store role); the runtime/F5 factory turns
+        # them into live TriggerZones. Named 'trigger_*'; saved as type 'trigger'.
+        self.triggers = []
         self.filename = 'level.json'
         self.current_texture = 'white_cube'
         self.current_mode = 'block'
@@ -92,7 +106,7 @@ class LevelEditor(Entity):
         # Hierarchy search/filter + collapsible sections (Change B).
         self._hier_search_field = None     # InputField pinned above the list
         self._hier_filter = ''             # lower-cased substring; '' = show all
-        self._hier_collapsed = {'block': False, 'enemy': False}  # per-section fold state
+        self._hier_collapsed = {'block': False, 'enemy': False, 'trigger': False}  # per-section fold state
         self._hier_header_buttons = {}     # {'block': Button, 'enemy': Button}
         self._hier_swatches = []           # per-row colour swatch quads (parallel to _hier_buttons)
 
@@ -561,7 +575,7 @@ class LevelEditor(Entity):
     def _select(self, entity, additive=False):
         if not additive:
             self._deselect_all()
-        if entity in (self.blocks + self.enemies):
+        if entity in (self.blocks + self.enemies + self.triggers):
             self._snapshot_color(entity)
             self.selected.add(entity)
             entity.color = color.orange
@@ -576,6 +590,17 @@ class LevelEditor(Entity):
         self._update_hierarchy_highlight()
 
     def _entity_snapshot(self, e):
+        # v1.5 Step 6: trigger snapshot carries the raw action lists + scale so
+        # delete→undo restores the volume identically (_restore_entity routes
+        # is_trigger through _make_trigger_entity).
+        if e in self.triggers:
+            return {
+                'is_trigger': True,
+                'position': e.position,
+                'scale': (e.scale_x, e.scale_y, e.scale_z),
+                'on_enter': [dict(a) for a in getattr(e, 'on_enter_actions', [])],
+                'on_exit':  [dict(a) for a in getattr(e, 'on_exit_actions', [])],
+            }
         is_enemy = e in self.enemies
         tex_name = ''
         if hasattr(e, 'texture') and e.texture:
@@ -591,12 +616,42 @@ class LevelEditor(Entity):
             'is_enemy': is_enemy,
         }
 
+    def _make_trigger_entity(self, position, scale, on_enter, on_exit):
+        """Build (and track) an editor trigger placeholder — the single construction
+        site shared by drag-placement, level load, and F5-restore (DRY; avoids the
+        duplicate-parser drift level_io.py was created to kill).
+
+        The placeholder is a semi-transparent orange box so it is visible/clickable
+        in the editor (the runtime TriggerZone is visible=False). It is collidable so
+        the mouse picker and selection can hit it. on_enter/on_exit are the raw
+        action-dict lists stashed verbatim — config-store role, never live callbacks.
+        Appends to self.triggers and returns the entity.
+        """
+        tint = color.rgba(self.BUILTIN_MODELS[-1]['color'][0],
+                          self.BUILTIN_MODELS[-1]['color'][1],
+                          self.BUILTIN_MODELS[-1]['color'][2],
+                          self._TRIGGER_ALPHA)
+        e = Entity(
+            model='cube',
+            texture=self._TRIGGER_TEXTURE,
+            color=tint,
+            scale=tuple(scale),
+            position=tuple(position),
+            collider='box',
+            name='trigger_volume',
+        )
+        e._original_color = tint
+        e.on_enter_actions = [dict(a) for a in (on_enter or [])]
+        e.on_exit_actions  = [dict(a) for a in (on_exit or [])]
+        self.triggers.append(e)
+        return e
+
     def _finish_box_select(self):
         if self._box_start is None:
             return
         x0, x1 = sorted([self._box_start.x, mouse.x])
         y0, y1 = sorted([self._box_start.y, mouse.y])
-        for e in self.blocks + self.enemies:
+        for e in self.blocks + self.enemies + self.triggers:
             try:
                 screen_pos = e.screen_position
                 if x0 <= screen_pos.x <= x1 and y0 <= screen_pos.y <= y1:
@@ -1620,7 +1675,7 @@ class LevelEditor(Entity):
         totals — so the list reads honestly while searching."""
         flt = self._hier_filter
         rows = []
-        for section, members in (('block', self.blocks), ('enemy', self.enemies)):
+        for section, members in (('block', self.blocks), ('enemy', self.enemies), ('trigger', self.triggers)):
             if flt:
                 matched = [e for e in members if flt in self._hier_label(e).lower()]
             else:
@@ -1631,8 +1686,13 @@ class LevelEditor(Entity):
         return rows
 
     def _hier_label(self, e):
-        is_enemy = e in self.enemies
-        return f"{'E' if is_enemy else 'B'} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
+        if e in self.enemies:
+            tag = 'E'
+        elif e in self.triggers:
+            tag = 'T'
+        else:
+            tag = 'B'
+        return f"{tag} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
 
     def _build_hierarchy(self):
         self._hier_panel = Entity(
@@ -1718,8 +1778,8 @@ class LevelEditor(Entity):
         flt = self._hier_filter
         def _count(members):
             return sum(1 for e in members if not flt or flt in self._hier_label(e).lower())
-        section_count = {'block': _count(self.blocks), 'enemy': _count(self.enemies)}
-        section_name  = {'block': 'Blocks', 'enemy': 'Enemies'}
+        section_count = {'block': _count(self.blocks), 'enemy': _count(self.enemies), 'trigger': _count(self.triggers)}
+        section_name  = {'block': 'Blocks', 'enemy': 'Enemies', 'trigger': 'Triggers'}
 
         visible = visual_rows[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
         for slot, (kind, payload) in enumerate(visible):
@@ -2490,6 +2550,10 @@ class LevelEditor(Entity):
             new_entity.enemy_type = 'default'
             new_entity._original_color = asset_color
             self.enemies.append(new_entity)
+        elif asset['type'] == 'trigger':
+            # v1.5 Step 6: drop a trigger volume with empty action lists; the
+            # inspector wires actions afterwards. Shared builder handles tracking.
+            new_entity = self._make_trigger_entity(pos, asset['scale'], [], [])
         else:
             new_entity = Entity(
                 model=asset['model'],
@@ -2634,7 +2698,7 @@ class LevelEditor(Entity):
                     old_pos = self._gizmo_drag_start_pos[e]
                     new_pos = Vec3(e.position)
                     if old_pos != new_pos:
-                        etype = 'enemy' if e in self.enemies else 'block'
+                        etype = 'enemy' if e in self.enemies else ('trigger' if e in self.triggers else 'block')
                         logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
                         self._history.push(MoveEntityCommand(e, old_pos, new_pos))
             self._gizmo_drag_axis = None
@@ -2678,7 +2742,7 @@ class LevelEditor(Entity):
     # -------------------------------------------------------------------------
 
     def _build_level_data(self):
-        """Serialize current blocks and enemies to a list of dicts for save or play snapshot.
+        """Serialize current blocks, enemies and triggers to a list of dicts for save or play snapshot.
 
         Defensive filter: skip entities that have already been destroyed (destroy_source set).
         Accessing .color on a dead NodePath raises an assertion in development_mode.
@@ -2687,11 +2751,15 @@ class LevelEditor(Entity):
         data = []
         live_blocks = [b for b in self.blocks if getattr(b, 'destroy_source', None) is None]
         live_enemies = [e for e in self.enemies if getattr(e, 'destroy_source', None) is None]
-        dropped = (len(self.blocks) - len(live_blocks)) + (len(self.enemies) - len(live_enemies))
+        live_triggers = [t for t in self.triggers if getattr(t, 'destroy_source', None) is None]
+        dropped = ((len(self.blocks) - len(live_blocks))
+                   + (len(self.enemies) - len(live_enemies))
+                   + (len(self.triggers) - len(live_triggers)))
         if dropped:
             logger.log('WARN', f'_build_level_data: dropped {dropped} destroyed entity refs')
             self.blocks[:] = live_blocks
             self.enemies[:] = live_enemies
+            self.triggers[:] = live_triggers
         for block in live_blocks:
             actual_color = getattr(block, '_original_color', block.color)
             tex_name = ''
@@ -2738,6 +2806,19 @@ class LevelEditor(Entity):
             if behaviour_config:
                 enemy_data['behaviour'] = behaviour_config
             data.append(enemy_data)
+        for trigger in live_triggers:
+            # v1.5 Step 6: serialize the volume's transform + raw action lists.
+            # level_io defaults absent on_enter/on_exit to [], so always writing
+            # them (even empty) is harmless and keeps the schema explicit. The
+            # editor placeholder's colour/texture are editor chrome — NOT saved;
+            # the runtime TriggerZone is invisible.
+            data.append({
+                'type': 'trigger',
+                'position': [trigger.x, trigger.y, trigger.z],
+                'scale': [round(trigger.scale_x, 4), round(trigger.scale_y, 4), round(trigger.scale_z, 4)],
+                'on_enter': [dict(a) for a in getattr(trigger, 'on_enter_actions', [])],
+                'on_exit':  [dict(a) for a in getattr(trigger, 'on_exit_actions', [])],
+            })
         return data
 
     def _set_editor_ui_visible(self, visible):
@@ -2842,14 +2923,24 @@ class LevelEditor(Entity):
         if not self._play_level_snapshot:
             return
         # Destroy surviving refs (may still be alive if nothing cleared them)
-        for e in self.blocks + self.enemies:
+        for e in self.blocks + self.enemies + self.triggers:
             if getattr(e, 'destroy_source', None) is None:
                 destroy(e)
         self.blocks.clear()
         self.enemies.clear()
+        self.triggers.clear()
         self.selected.clear()
 
         for entry in load_level_data(self._play_level_snapshot):
+            if entry['type'] == 'trigger':
+                # v1.5 Step 6: rebuild the editor trigger volume from the snapshot
+                # so it survives the F5 play-in-editor round-trip (same role as the
+                # enemy/block rebuilds below).
+                self._make_trigger_entity(
+                    entry['position'], entry['scale'],
+                    entry['on_enter'], entry['on_exit'],
+                )
+                continue
             if entry['type'] == 'enemy':
                 new_entity = Entity(
                     model='cube',
@@ -2881,13 +2972,14 @@ class LevelEditor(Entity):
                 new_entity._original_color = new_entity.color
                 self.blocks.append(new_entity)
 
-        logger.log('INFO', f'Editor level restored: {len(self.blocks)} blocks, {len(self.enemies)} enemies')
+        logger.log('INFO', f'Editor level restored: {len(self.blocks)} blocks, {len(self.enemies)} enemies, {len(self.triggers)} triggers')
         self._refresh_hierarchy()
 
     def _spawn_gameplay_from_snapshot(self, level_data):
         from Scripts.player_controller import Player
         from Scripts.enemy import Enemy
         from Scripts.game import game
+        from Scripts.trigger_system import TriggerZone, build_actions
 
         entries = load_level_data(level_data)
 
@@ -2928,6 +3020,18 @@ class LevelEditor(Entity):
                     behaviour_tree=behaviour_tree,
                 )
                 game.enemies.append(e)
+        # v1.5 Step 6: factory-consume trigger entries into live TriggerZones — the
+        # runtime-equivalent F5 play path, mirroring main.start_game(). build_actions
+        # turns the raw action lists into zero-arg callbacks HERE (never at editor-
+        # load time). TriggerZone is an AliveEntity, torn down by return-to-menu.
+        for entry in entries:
+            if entry['type'] == 'trigger':
+                TriggerZone(
+                    position=tuple(entry['position']),
+                    scale=tuple(entry['scale']),
+                    on_enter=build_actions(entry['on_enter']),
+                    on_exit=build_actions(entry['on_exit']),
+                )
         game.start()
 
     # -------------------------------------------------------------------------
@@ -2966,7 +3070,7 @@ class LevelEditor(Entity):
         """Update the entity/collider stats readout from the editor's own level data."""
         if getattr(self, '_stats_text', None) is None:
             return
-        placed = self.blocks + self.enemies
+        placed = self.blocks + self.enemies + self.triggers
         entities = len(placed)
         colliders = sum(1 for e in placed if getattr(e, 'collider', None) is not None)
         self._stats_text.text = f'entities: {entities}   colliders: {colliders}'
@@ -3064,7 +3168,7 @@ class LevelEditor(Entity):
             if self.selected and not typing and not mid_drag:
                 for e in list(self.selected):
                     snapshot = self._entity_snapshot(e)
-                    etype = 'enemy' if e in self.enemies else 'block'
+                    etype = 'enemy' if e in self.enemies else ('trigger' if e in self.triggers else 'block')
                     logger.log('INFO', f"Entity deleted: type={etype} pos={[round(p, 3) for p in e.position]}")
                     cmd = DeleteEntityCommand(self, e, snapshot)
                     cmd.execute()
@@ -3163,7 +3267,7 @@ class LevelEditor(Entity):
             # Step 4/5: selection (shift) or tool-mode action
             if held_keys['shift']:
                 # Shift+click: add/remove from selection — same in both tool modes
-                if hovered in (self.blocks + self.enemies):
+                if hovered in (self.blocks + self.enemies + self.triggers):
                     if hovered in self.selected:
                         self.selected.discard(hovered)
                         hovered.color = getattr(hovered, '_original_color', color.white)
@@ -3178,7 +3282,7 @@ class LevelEditor(Entity):
             elif self._tool == 'move':
                 # FIXED (FIX 3 Move mode): select/deselect entities; clicking a surface
                 # never places a new block in Move mode.
-                if hovered in (self.blocks + self.enemies):
+                if hovered in (self.blocks + self.enemies + self.triggers):
                     self._select(hovered)
                     return
                 if self.selected:
@@ -3227,7 +3331,7 @@ class LevelEditor(Entity):
                 return
 
             if self._hier_panel and self._is_over_panel(self._hier_panel):
-                total = len(self.blocks) + len(self.enemies)
+                total = len(self._hier_visual_rows())
                 max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
                 delta = -1 if key == 'scroll up' else 1
                 self.hierarchy_scroll = max(0, min(self.hierarchy_scroll + delta, max_scroll))
@@ -3284,24 +3388,24 @@ class LevelEditor(Entity):
 
     def load_existing_level(self):
         """Destroy all current editor entities, then reload from level.json if it exists."""
-        for e in self.blocks + self.enemies:
+        for e in self.blocks + self.enemies + self.triggers:
             destroy(e)
         self.blocks.clear()
         self.enemies.clear()
+        self.triggers.clear()
         self.selected.clear()
 
         try:
             entries = load_level_data(self.filename)
             for entry in entries:
                 if entry['type'] == 'trigger':
-                    # v1.5 System A: full editor trigger placement (render as a
-                    # semi-transparent volume + inspector action lists + save
-                    # round-trip) is Step 6. Until then the editor is NOT
-                    # trigger-aware: skip the entry so it is neither mis-rendered
-                    # as a solid block (the else branch) nor silently re-saved as
-                    # one (the block-rotation corruption class — see
-                    # brain/Gotchas). The runtime (main.load_level/start_game)
-                    # already handles triggers; the editor catches up in Step 6.
+                    # v1.5 Step 6: editor is now trigger-aware. Build a semi-
+                    # transparent volume carrying the raw action lists; it round-
+                    # trips through _build_level_data on save.
+                    self._make_trigger_entity(
+                        entry['position'], entry['scale'],
+                        entry['on_enter'], entry['on_exit'],
+                    )
                     continue
                 if entry['type'] == 'enemy':
                     new_entity = Entity(
