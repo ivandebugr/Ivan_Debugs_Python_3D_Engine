@@ -11,7 +11,7 @@ This file is the authoritative operating manual loaded at the start of every Cla
 
 | Field            | Value                                                                 |
 |------------------|-----------------------------------------------------------------------|
-| Version          | 1.2.6 (see `CHANGELOG.md`)                                            |
+| Version          | 1.4 (see `CHANGELOG.md`)                                              |
 | Engine           | Ursina 8.3.0 (Panda3D 1.10.16)                                        |
 | Language         | Python 3.10+                                                          |
 | Genre            | First-person shooter                                                  |
@@ -458,7 +458,7 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `game.return_to_menu()` �
 
 ## Roadmap
 
-v1.3 shipped. v1.4 (enemy behaviour trees) in progress. Full history: `brain/North Star.md`.
+v1.4 shipped (enemy behaviour trees). v1.5 (trigger/zone system + weapon inventory API) in progress. Full history: `brain/North Star.md`.
 
 ### Open items — v1.3 remainder (before itch.io)
 - [ ] PyInstaller macOS `.app` build, documented in README
@@ -468,9 +468,9 @@ v1.3 shipped. v1.4 (enemy behaviour trees) in progress. Full history: `brain/Nor
 - [ ] Extract shader patch to `Scripts/compat.py`
 
 ### Open items — post-demo engine
-- [ ] Pluggable enemy behaviour trees — patrol / attack / flee state composition (v1.4, in progress)
-- [ ] Trigger/zone system — volume entry/exit callbacks (v1.5)
-- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations (v1.5)
+- [x] Pluggable enemy behaviour trees — patrol / attack / flee state composition (v1.4, shipped 2026-06-30)
+- [ ] Trigger/zone system — volume entry/exit callbacks (v1.5, in progress)
+- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations (v1.5, in progress)
 
 ---
 
