@@ -11,7 +11,7 @@ This file is the authoritative operating manual loaded at the start of every Cla
 
 | Field            | Value                                                                 |
 |------------------|-----------------------------------------------------------------------|
-| Version          | 1.4 (see `CHANGELOG.md`)                                              |
+| Version          | 1.5 (see `CHANGELOG.md`)                                              |
 | Engine           | Ursina 8.3.0 (Panda3D 1.10.16)                                        |
 | Language         | Python 3.10+                                                          |
 | Genre            | First-person shooter                                                  |
@@ -282,6 +282,12 @@ The same patch is duplicated in `level_editor.py` for standalone runs (compat.py
 | `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:76` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
 | `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:129-130` | Low | `left mouse down` fires `weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
 | `level_editor.py`: `_save_prefs()` has no error handling | `Scripts/level_editor.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
+| `checkpoint` action stores `game.respawn_point` with no consumer | `game.py:26`, `trigger_system.py:182` | Low | The `checkpoint` trigger action records `Vec3(player.position)` but nothing reads it — the death path is terminal (`trigger_game_over`). Store-only by design, accurately documented in code. A respawn-on-death mechanic would consume it. Decide: build the consumer or drop the action. (v1.5) |
+| v1.5 `open_door` + weapon/ammo pickups are code-complete but unexercised by `level.json` | `level.json`, `trigger_system.py`, `weapon.py` | Medium | Shipped level has 2 triggers (`kill_plane`, `win_condition`), **zero** door blocks / `open_door` triggers / pickups. Round-trip logic verified in code but never runs against real content. Player is still pre-given all 3 weapons in `Player.__init__` (temporary TODO) because no pickups exist to grant them. Place a door + pickup in a level, then remove the pre-give. (v1.5) |
+| v1.5 §5 combined manual regression not run | — | Medium | Static §1–§4 code audit passed; interactive combined-system playtest (pickup-near-trigger same-frame, kill-plane mid-switch, pause mid-reload, resize mid-firefight, WIN/GAME OVER over new HUD) deferred, not verified. Run before relying on v1.5 systems in shipped levels. |
+
+> Bullet pool `POOL_SIZE_PLAYER` reviewed in v1.5 and **kept at 30** — measured 25/30 peak
+> under sustained real Rifle/Shotgun fire, so the spec's suggested 30→50 bump was evidence-rejected.
 
 Full fix history (root causes, diagnosis, verification) lives in `CHANGELOG.md` — every entry in
 the table above has a corresponding dated changelog entry. Do not reopen a fixed item without new
@@ -465,7 +471,7 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `game.return_to_menu()` �
 
 ## Roadmap
 
-v1.4 shipped (enemy behaviour trees). v1.5 (trigger/zone system + weapon inventory API) in progress. Full history: `brain/North Star.md`.
+v1.5 shipped (trigger/zone system + weapon inventory API). v1.6 (level editor refactor — split `level_editor.py` into modules) is next. Full history: `brain/North Star.md`.
 
 ### Open items — v1.3 remainder (before itch.io)
 - [ ] PyInstaller macOS `.app` build, documented in README
@@ -476,8 +482,9 @@ v1.4 shipped (enemy behaviour trees). v1.5 (trigger/zone system + weapon invento
 
 ### Open items — post-demo engine
 - [x] Pluggable enemy behaviour trees — patrol / attack / flee state composition (v1.4, shipped 2026-06-30)
-- [ ] Trigger/zone system — volume entry/exit callbacks (v1.5, in progress)
-- [ ] Weapon inventory API — multi-weapon, ammo pickup, switch animations (v1.5, in progress)
+- [x] Trigger/zone system — volume entry/exit callbacks (v1.5, shipped 2026-07-01)
+- [x] Weapon inventory API — multi-weapon, ammo pickup, switch animations (v1.5, shipped 2026-07-01)
+- [ ] Level editor refactor — split `level_editor.py` into focused modules (v1.6, next)
 
 ---
 

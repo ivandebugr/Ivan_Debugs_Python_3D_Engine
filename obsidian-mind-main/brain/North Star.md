@@ -64,11 +64,26 @@ One known limitation carried forward (logged, ships per decision): the three dec
 
 See: [[work/archive/2026/v1.4-enemy-behaviour-trees]], [[work/archive/version-map]]
 
+## v1.5 Shipped — 2026-07-01
+Two independent gameplay systems, both data-driven via `level.json`. Wrap-up audit re-derived every item from the committed code (not the step-status table, not session reports): **13/13 steps PASS** (System A 6 + System B 7), all cross-system traces clean, 5/6 hard-rule classes compliant on first read with the one violation fixed as its own step.
+
+**Shipped in v1.5:**
+- **System A — trigger/zone system** (`Scripts/trigger_system.py`): `TriggerZone(AliveEntity)` invisible AABB volumes, `Layers.TRIGGER` bitmask (skipped by both the horizontal swept-move ray and the vertical ground/ceiling rays so triggers never block movement), actions `kill_plane`/`checkpoint`/`open_door`/`win_condition`, editor placement + inspector action editor.
+- **System B — weapon inventory** (`Scripts/weapon_inventory.py`, `Scripts/weapon.py`): `WeaponInventory` 3-slot switching with 0.2s slide anim; `Weapon` base class → `Pistol`/`Shotgun`/`Rifle` with per-weapon damage/fire-rate/ammo + reload + dry-click; `Layers.PICKUP` + `AmmoPickup`; ammo HUD counter; editor pickup placement.
+- **HUD/menu redesign**: shared `Scripts/ui_theme.py` palette+spacing reused across `PlayerHUD`/`PauseMenu`/`EndScreen`/`health_bar.py`; resize-aware positions; Inter-Bold font.
+
+The spec's own `TriggerZone`/`AmmoPickup` pseudocode was wrong (`self.intersects(player).hit`, standalone `register()`); the code correctly used the fixed pattern in both classes. Pool 30→50 resize correctly **not** applied (evidence-gated: 25/30 peak under real fire).
+
+Gaps carried forward (logged): **§5 combined manual regression not yet run**; `open_door` + pickups are code-complete but **unexercised by `level.json`** (no door/pickup content placed); `checkpoint`'s `game.respawn_point` is store-only (no consumer); player still pre-given all 3 weapons in `Player.__init__` (temporary TODO). See [[v1.5-gameplay-systems#Wrap-up audit — 2026-07-01]] and [[brain/Gotchas]].
+
+See: [[work/archive/2026/v1.5-gameplay-systems]], [[work/archive/version-map]]
+
 ## Current Focus
 
 _What am I working toward right now?_
 
-- **v1.5 — Trigger/zone system + Weapon inventory API** is next per the v1.2–v2.0 roadmap: volume entry/exit callbacks, and a multi-weapon/ammo-pickup/switch-animation inventory API. Not yet started or designed. See [[work/active/v1.5-gameplay-systems]].
+- **v1.6 — Level editor refactor** is next per the v1.2–v2.0 roadmap: split the monolithic `Scripts/level_editor.py` into smaller focused modules. Not yet started or designed; gated on a manual design review. See [[work/active/v1.6-level-editor-refactor]].
+- **Before v1.6, two v1.5 tails remain open** (neither blocks v1.6, both logged): run the §5 combined manual regression, and place real door/pickup content in a level to actually exercise `open_door` + pickups. See [[work/archive/2026/v1.5-gameplay-systems#Wrap-up audit — 2026-07-01]].
 
 ## Goals
 
@@ -104,7 +119,7 @@ Sequence to public release:
 - v1.2 — Level editor overhaul + Game state machine + schema expansion [[work/active/v1.2-level-editor-overhaul]]
 - v1.3 — Asset import pipeline + hot-reload [[work/archive/2026/v1.3-asset-import-pipeline]]
 - v1.4 — Enemy behaviour trees (patrol/attack/flee) [[work/archive/2026/v1.4-enemy-behaviour-trees]]
-- v1.5 — Trigger/zone system + Weapon inventory API [[work/active/v1.5-gameplay-systems]]
+- v1.5 — Trigger/zone system + Weapon inventory API [[work/archive/2026/v1.5-gameplay-systems]]
 - v1.6 — Level editor refactor: split `level_editor.py` into smaller modules [[work/active/v1.6-level-editor-refactor]]
 - v2.0 — Modding + packaged runtime + gamepad + procedural gen — PUBLIC RELEASE [[work/active/v2.0-release]]
 - v2.x — Networked multiplayer (own milestone, post-release)
@@ -123,4 +138,5 @@ Record when focus changes, with date and reason.
 | 2026-06-26 | Captured v1.6 — level editor refactor — as a forward-looking planned milestone | Not started or designed yet; deliberately sequenced after v1.3–v1.5 feature work and gated on a manual design review. See [[work/active/v1.6-level-editor-refactor]] |
 | 2026-06-26 | v1.3 asset import pipeline shipped — focus moves to v1.4 enemy behaviour trees | Cross-step integration audit passed all 7 steps; one latent texture-load risk flagged (not blocking) and carried forward. See [[work/archive/2026/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] |
 | 2026-06-30 | v1.4 enemy behaviour trees shipped — focus moves to v1.5 trigger/zone + weapon inventory | Wrap-up integration audit passed all 9 steps (7/7 cross-step traces, 8/8 hard-rule classes, 110/110 unit tests); decorators shipped unit-tested but unexercised by any preset (logged). v1.3 + v1.4 docs archived to `work/archive/2026/`. See [[work/archive/2026/v1.4-enemy-behaviour-trees]] |
+| 2026-07-01 | v1.5 trigger/zone + weapon inventory shipped — focus moves to v1.6 level editor refactor | Wrap-up audit re-derived from committed code: 13/13 steps PASS, one hard-rule violation (PICKUP in COLLISION_MATRIX) fixed as its own step (`6b97cd4`). Two tails logged and carried forward (neither blocks v1.6): §5 combined manual regression not run; `open_door`/pickups code-complete but unexercised by `level.json`. System B + HUD landed as one squashed commit (interwoven working-tree snapshot from parallel worktrees, never branched). Stray `Co-Authored-By: Claude` trailer stripped from a v1.2.2 ancestor across `version_1.2–1.5` + force-pushed. v1.5 doc archived. See [[work/archive/2026/v1.5-gameplay-systems]] |
 |      | Created North Star | Initial setup |
