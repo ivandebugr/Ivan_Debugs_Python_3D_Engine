@@ -52,7 +52,7 @@ class Layers:
 COLLISION_MATRIX = {
     Layers.PLAYER_BULLET: Layers.ENEMY | Layers.WALL,
     Layers.ENEMY_BULLET:  Layers.PLAYER | Layers.WALL,
-    Layers.PLAYER:        Layers.WALL | Layers.ENEMY_BULLET | Layers.PICKUP,
+    Layers.PLAYER:        Layers.WALL | Layers.ENEMY_BULLET,
     Layers.ENEMY:         Layers.WALL | Layers.PLAYER_BULLET,
 }
 
