@@ -1,6 +1,7 @@
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
-from Scripts.weapon import Weapon
+from Scripts.weapon import Pistol, Shotgun, Rifle
+from Scripts.weapon_inventory import WeaponInventory
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import Layers, collision_manager, swept_move_blocked
 from Scripts.game import game, Game
@@ -31,7 +32,13 @@ class Player(FirstPersonController):
         self.collider = BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))
         self.skin_width = 0.1
         collision_manager.add(self, Layers.PLAYER)
-        self.weapon = Weapon(self)
+        self.inventory = WeaponInventory(self)
+        self.inventory.give(Pistol(self), slot=0)
+        # Temporary: Shotgun/Rifle given directly here so they're testable in-game
+        # before Step 13's weapon_pickup entities exist. Remove once pickups grant them.
+        self.inventory.give(Shotgun(self), slot=1)
+        self.inventory.give(Rifle(self), slot=2)
+        self.inventory.switch_to(0)
 
         self.debug_lines = []
         self.create_collider_visualization()
@@ -86,13 +93,17 @@ class Player(FirstPersonController):
             camera.rotation_x -= mouse.velocity[1] * self.mouse_sensitivity[1] * time.dt
             camera.rotation_x = clamp(camera.rotation_x, -90, 90)
 
-        # Triggers are non-physical (v1.5): a kill-plane/fall-catcher volume below
-        # the world must let the player fall THROUGH it so intersects() fires and
-        # kills mid-fall — never act as a floor the player lands on. The horizontal
-        # swept test already skips Layers.TRIGGER (collision authority #2); apply the
-        # same rule to the vertical ground/ceiling rays (authority #3) so triggers
-        # block nothing on any axis. Pass instances, never the class (Hard Constraint 2).
-        vertical_ignore = [self] + collision_manager.query_layer(Layers.TRIGGER)
+        # Triggers and pickups are non-physical (v1.5): a kill-plane/fall-catcher
+        # volume below the world must let the player fall THROUGH it so intersects()
+        # fires and kills mid-fall, and an AmmoPickup's BoxCollider must never act as
+        # a floor/ceiling either — never a floor the player lands on. The horizontal
+        # swept test already skips Layers.TRIGGER and Layers.PICKUP (collision
+        # authority #2); apply the same rule to the vertical ground/ceiling rays
+        # (authority #3) so neither blocks on any axis. Pass instances, never the
+        # class (Hard Constraint 2).
+        vertical_ignore = ([self]
+                           + collision_manager.query_layer(Layers.TRIGGER)
+                           + collision_manager.query_layer(Layers.PICKUP))
 
         ground_hit = raycast(
             self.position + (0, -0.1, 0),
@@ -137,17 +148,25 @@ class Player(FirstPersonController):
         # global input() handler presses R to return to the menu, which destroys this
         # Player synchronously — but Ursina then continues the SAME input dispatch into
         # the per-entity loop and calls this Player.input('r'). Without the guard,
-        # self.position = (...) runs on the just-destroyed NodePath and raises
-        # 'entity has been destroyed by: _clear_gameplay_entities'. Gating on PLAYING
-        # makes the R-to-menu and R-to-reset handlers mutually exclusive.
+        # self.inventory.active_weapon.reload() runs on the just-destroyed Player and
+        # raises 'entity has been destroyed by: _clear_gameplay_entities'. Gating on
+        # PLAYING makes the R-to-menu and R-to-reload handlers mutually exclusive.
         if game.state != Game.PLAYING:
             return
         if key == 'left mouse down':
-            self.weapon.shoot()
+            if self.inventory.active_weapon:
+                self.inventory.active_weapon.shoot()
+        if key in ('1', '2', '3'):
+            self.inventory.switch_to(int(key) - 1)
+        if key == 'scroll up':
+            self.inventory.next_weapon()
+        if key == 'scroll down':
+            self.inventory.prev_weapon()
         if key == 'space' and self.grounded:
             self.vertical_speed = self.jump_force
         if key == 'r':
-            self.position = (0, 2, 0)
+            if self.inventory.active_weapon:
+                self.inventory.active_weapon.reload()
         if key == 'c':
             self.show_colliders = not self.show_colliders
             self.toggle_collider_visualization()

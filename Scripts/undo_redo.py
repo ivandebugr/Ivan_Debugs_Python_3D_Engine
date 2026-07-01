@@ -83,6 +83,10 @@ def _restore_entity(editor, snap):
             snap['position'], snap.get('scale', (3, 2, 3)),
             snap.get('on_enter', []), snap.get('on_exit', []),
         )
+    # v1.5 Step 13: pickup snapshots route through the editor's shared builder,
+    # same pattern as is_trigger above — single construction site.
+    if snap.get('is_pickup', False):
+        return editor._make_pickup_entity(snap['position'], snap.get('pickup_config', {}))
     is_enemy = snap.get('is_enemy', False)
     e = Entity(
         model='cube',
@@ -123,6 +127,15 @@ class PlaceEntityCommand(Command):
                 'on_exit':  [dict(a) for a in getattr(entity, 'on_exit_actions', [])],
             }
             return
+        # v1.5 Step 13: pickup placeholders snapshot differently — same is_pickup
+        # marker pattern as is_trigger above.
+        if getattr(editor, 'pickups', None) is not None and entity in editor.pickups:
+            self._snapshot = {
+                'is_pickup': True,
+                'position': entity.position,
+                'pickup_config': dict(getattr(entity, 'pickup_config', {})),
+            }
+            return
         is_enemy = entity in editor.enemies
         tex_name = ''
         if hasattr(entity, 'texture') and entity.texture:
@@ -152,6 +165,8 @@ class PlaceEntityCommand(Command):
             self.editor.enemies.remove(self.entity)
         elif self.entity in getattr(self.editor, 'triggers', []):
             self.editor.triggers.remove(self.entity)
+        elif self.entity in getattr(self.editor, 'pickups', []):
+            self.editor.pickups.remove(self.entity)
         from ursina import destroy
         destroy(self.entity)
         self.editor._refresh_hierarchy()
@@ -177,6 +192,8 @@ class DeleteEntityCommand(Command):
             self.editor.enemies.remove(self.entity)
         if self.entity in getattr(self.editor, 'triggers', []):
             self.editor.triggers.remove(self.entity)
+        if self.entity in getattr(self.editor, 'pickups', []):
+            self.editor.pickups.remove(self.entity)
         from ursina import destroy
         destroy(self.entity)
         self.editor._refresh_hierarchy()
@@ -399,6 +416,36 @@ class ChangeTriggerActionsCommand(Command):
         self.trigger.on_exit_actions  = _copy_actions(self.old_exit)
         if self.editor is not None:
             self.editor._refresh_trigger_ui()
+
+
+class ChangePickupConfigCommand(Command):
+    """Apply a new pickup config (pickup_type/weapon_type/amount) to ONE pickup
+    placeholder; undo restores the prior config. v1.5 Step 13.
+
+    Whole-dict snapshot granularity (same rationale as ChangeTriggerActionsCommand):
+    the three fields always change together as a single undo step. Refreshes the
+    pickup inspector on apply/undo — same in-command refresh pattern as the other
+    editor commands."""
+
+    def __init__(self, editor, pickup, new_config):
+        self.editor      = editor
+        self.pickup      = pickup
+        self.old_config  = dict(getattr(pickup, 'pickup_config', {}))
+        self.new_config  = dict(new_config)
+
+    def __repr__(self):
+        return f"ChangePickupConfigCommand(new={self.new_config})"
+
+    def _apply(self, config):
+        self.pickup.pickup_config = dict(config)
+        if self.editor is not None:
+            self.editor._refresh_pickup_ui()
+
+    def execute(self):
+        self._apply(self.new_config)
+
+    def undo(self):
+        self._apply(self.old_config)
 
 
 class UndoRedoStack:

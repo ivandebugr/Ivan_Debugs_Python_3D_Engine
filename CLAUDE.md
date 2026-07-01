@@ -103,6 +103,13 @@ Scripts/
                              Weapon (parented to camera); module-level pool singletons;
                              get_enemy_bullet_pool() accessor; reset_bullet_pools() teardown helper.
                              _pooled param deleted. Pool parks at Vec3(0,-10000,0).
+                             **Viewmodel camera**: VIEWMODEL_MASK=BitMask32.bit(7);
+                             _setup_viewmodel_camera() (module singleton, idempotent, called from
+                             Weapon.__init__) clears bit 7 from main camera mask + adds a 2nd Panda
+                             camera (reuses base.camLens, parented to base.cam) on its own display
+                             region at sort 15. Gun is routed onto bit 7 only + depth-test/write OFF
+                             → renders in a later pass, on top of world, no wall clipping. Region
+                             clear-depth stays OFF (clearing blanked the world on macOS GL 2.1).
   enemy.py                 — ENEMY_HP_DEFAULT/SHOOT_COOLDOWN/DETECTION_RANGE/ATTACK_RANGE/
                              OCCLUSION_INTERVAL TUNE constants; VALID_ENEMY_TYPES tuple;
                              Enemy(AliveEntity): hp/enemy_type/rotation_y params,
@@ -275,7 +282,6 @@ The same patch is duplicated in `level_editor.py` for standalone runs (compat.py
 | `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:76` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
 | `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:129-130` | Low | `left mouse down` fires `weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
 | `level_editor.py`: `_save_prefs()` has no error handling | `Scripts/level_editor.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
-| `weapon.py`: gun viewmodel clips through walls/objects when near them | `weapon.py:192-203` | Low | `Weapon` is `parent=camera` at `position=(0.5,-0.5,1)`, so its far end sits ~1.5u ahead of the camera and pokes through world geometry when the camera approaches a wall. Pre-existing (not a v1.5 change). Standard fix: depth-clear render bin on the `Weapon` Entity — `self.setBin('fixed', 100); self.setDepthTest(False)` (same pattern as Hard Constraint 11 gizmo handles). Game-feel polish, not a crash; deferred out of the v1.5 trigger session to keep System A surgical |
 
 Full fix history (root causes, diagnosis, verification) lives in `CHANGELOG.md` — every entry in
 the table above has a corresponding dated changelog entry. Do not reopen a fixed item without new

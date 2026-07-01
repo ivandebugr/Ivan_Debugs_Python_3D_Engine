@@ -62,6 +62,16 @@ def _normalise_entry(entry):
         # sites can iterate without a guard.
         out['on_enter'] = list(entry.get('on_enter', []))
         out['on_exit']  = list(entry.get('on_exit', []))
+    if out['type'] == 'pickup':
+        # v1.5 Step 13: weapon/ammo pickup. pickup_type is 'weapon' or 'ammo';
+        # weapon_type is the WEAPON_TYPES key (weapon.py) the pickup grants/tops
+        # up; amount only matters for pickup_type == 'ammo'. Same config-store
+        # role as trigger on_enter/on_exit — the editor stashes this dict verbatim
+        # on its placeholder and the runtime factory (main.start_game / editor
+        # _spawn_gameplay_from_snapshot) builds a live AmmoPickup from it.
+        out['pickup_type'] = entry.get('pickup_type', 'ammo')
+        out['weapon_type'] = entry.get('weapon_type', 'pistol')
+        out['amount']      = entry.get('amount', 30)
     return out
 
 

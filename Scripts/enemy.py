@@ -27,7 +27,7 @@ class Enemy(AliveEntity):
 
         super().__init__(
             model='cube',
-            color=color.red,
+
             scale=(1.5, 3, 1.5),
             position=spawn_position,
             rotation_y=rotation_y,

@@ -5,3 +5,5 @@ logs/
 .vscode/
 .claude
 assets/manifest.json
+.DS_Store
+.worktrees/

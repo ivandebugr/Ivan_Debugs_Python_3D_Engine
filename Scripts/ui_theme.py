@@ -1,0 +1,55 @@
+"""Shared HUD/menu palette + spacing constants — v1.5 UI redesign.
+
+Single source of truth for PlayerHUD, PauseMenu, EndScreen (main.py) and
+HealthBar (health_bar.py). All colours are 0-1 floats per the Ursina 8.3.0
+color.rgb() footgun (CLAUDE.md Compatibility section) — never 0-255 ints here.
+"""
+
+from ursina import color
+
+# Bold weight for titles/buttons only — Ursina's bundled OpenSans-Regular.ttf
+# has no bold variant, which flattens visual hierarchy against hint/body text.
+# Static instance (wght=700) generated from Google Fonts' Inter variable font
+# via fontTools.varLib.instancer — Panda3D's FreeType loader renders the
+# default (Regular) instance of a variable font, it does not expose axis
+# control, so a static-weight file is required (not the variable source).
+FONT_BOLD = 'assets/fonts/Inter-Bold.ttf'
+
+# Backgrounds — one dark cool-gray family replaces the four ad hoc
+# overlay-black values previously scattered across PauseMenu/EndScreen.
+# Spaced further apart than the first pass so panels visibly separate from
+# the viewport background (window.color, set in main.py) instead of reading flat.
+BG_PANEL       = color.rgb(40/255, 43/255, 48/255)     # button / panel fill
+BG_OVERLAY     = color.rgba(8/255, 9/255, 11/255, 0.92)     # pause + end-screen backdrop — darker than BG_PANEL so it reads as a layer above the menu
+BORDER_PANEL   = color.rgb(64/255, 67/255, 73/255)     # button border tint (Ursina Button has no border draw, kept for reference/tint use)
+
+# Text
+TEXT_PRIMARY   = color.rgb(232/255, 230/255, 223/255)
+TEXT_SECONDARY = color.rgb(154/255, 152/255, 143/255)
+TEXT_MUTED     = color.rgb(102/255, 100/255, 92/255)
+
+# Health bar — ratio-based full/mid/low, amber-forward (replaces the old
+# green/orange/red ramp so it reads as one coherent accent instead of a
+# traffic light against the new neutral panels).
+HEALTH_FULL    = color.rgb(201/255, 162/255, 39/255)
+HEALTH_MID     = color.rgb(201/255, 162/255, 39/255)
+HEALTH_LOW     = color.rgb(180/255, 90/255, 40/255)
+HEALTH_BG      = color.rgb(38/255, 40/255, 44/255)
+
+# Win / lose accents — same panel layout, differentiated by a single
+# accent colour (title text + top border) rather than a redesign.
+ACCENT_WIN     = color.rgb(124/255, 201/255, 156/255)
+ACCENT_LOSE    = color.rgb(224/255, 132/255, 126/255)
+
+CROSSHAIR_COLOR = color.rgb(216/255, 86/255, 79/255)
+
+# Spacing scale (Ursina UI units, screen = -0.5..0.5 on the short axis).
+SPACING_XS   = 0.01
+SPACING_SM   = 0.02
+SPACING_MD   = 0.04
+SPACING_LG   = 0.06
+
+BUTTON_SCALE      = (0.3, 0.1)
+BUTTON_GAP        = 0.15   # vertical distance between stacked button centers
+
+HUD_MARGIN        = 0.04   # inset from screen edge for corner-anchored HUD elements

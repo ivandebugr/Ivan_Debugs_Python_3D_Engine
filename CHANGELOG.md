@@ -5,6 +5,56 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5] - 2026-06-30 (in progress)
+
+### Fixed
+- FPS gun viewmodel clipped through walls and level blocks when the player stood flush against
+  them. Root cause: `Weapon` is `parent=camera` at local `position=(0.5,-0.5,1)`, so its far end
+  sits ~1.5u ahead of the camera and physically intersects world geometry in world space — a
+  depth-order problem the geometry causes, not a draw-order one. Depth-state-only fixes
+  (`always_on_top`, `setBin('fixed', 100)` + `setDepthTest(False)`) could NOT fix it because the
+  gun shared the world's render pass: other world geometry in the same pass still painted over it.
+  Fix is the standard Unity/Unreal dual-camera viewmodel pattern (`Scripts/weapon.py`):
+  `VIEWMODEL_MASK = BitMask32.bit(7)`; `_setup_viewmodel_camera()` (module-level idempotent
+  singleton, called from `Weapon.__init__`) clears bit 7 from the main camera's mask so it renders
+  everything except the gun, then adds a second Panda3D camera (camera-mask = bit 7 only, reusing
+  `base.camLens`, parented to `base.cam` so fov/aspect/transform track the main view) on its own
+  display region at sort 15 (after world=0 and render2d=10, before UI=20). The gun is hidden from
+  all masks then shown only to `VIEWMODEL_MASK`, with `setDepthTest(False)`/`setDepthWrite(False)`
+  — because the viewmodel pass runs after the whole world pass, an always-pass gun lands on top
+  regardless of wall proximity. The display region's clear-depth is intentionally left OFF: on
+  macOS GL 2.1 enabling it blanked the already-rendered world (verified via headless Panda3D
+  render tests). Verified in the live game: gun visible, no clipping. See `brain/Gotchas.md`.
+
+### Added
+- **System A — trigger/zone system** (Steps 1–6, committed earlier in this branch). `Layers.TRIGGER`
+  bitmask; `TriggerZone(AliveEntity)` with `kill_plane` / `checkpoint` / `open_door` / `win_condition`
+  actions; both the horizontal swept-move ray and the vertical ground/ceiling ray skip `Layers.TRIGGER`
+  so a trigger volume never blocks movement or fall detection. Level-editor trigger placement
+  (placeholder, inspector action editor, hierarchy section, save/load).
+- **System B — weapon inventory** (Steps 7–13). `WeaponInventory` (`Scripts/weapon_inventory.py`)
+  with 3 slots, `switch_to()`/`next_weapon()`/`prev_weapon()`, and a 0.2s slide animation; replaces
+  the single `self.weapon = Weapon(self)` in `Player.__init__`. `Weapon` is now a base class
+  (viewmodel + `ammo`/`reload()` scaffold); `Pistol` (dmg 25, cd 0.15s, infinite ammo), `Shotgun`
+  (5 pellets ×15 dmg, ±5° spread, cd 0.8s, 8 ammo), `Rifle` (dmg 40, cd 0.08s, 24 ammo), each with
+  ammo decrement, dry-click-on-empty, and reload. `Layers.PICKUP` + `AmmoPickup(AliveEntity)`
+  (weapon-grant and ammo-topup variants); level-editor pickup placement mirroring the trigger pattern.
+  Ammo HUD counter (`PlayerHUD.ammo_text`, polled from the global `update()`, `INF`/`RELOADING`/`n/max`).
+  `POOL_SIZE_PLAYER` left at 30 — the spec's suggested 30→50 bump was not applied; measured pool
+  usage peaked at 25/30 under sustained real-play fire (see `v1.5-gameplay-systems.md` step notes).
+- FPS gun 3D model assets (`3d models/gun.obj`, `gun.mtl`).
+
+### Changed
+- **HUD / menu redesign.** Shared UI constants extracted to `Scripts/ui_theme.py` (palette + spacing)
+  and reused across `PlayerHUD`, `PauseMenu`, `EndScreen`, and `health_bar.py`. HUD/menu positions
+  recomputed from `window.aspect_ratio` for resize-awareness. `Inter-Bold` font added
+  (`assets/fonts/Inter-Bold.ttf`).
+
+> **Note:** System B and the HUD redesign arrived as an integrated working-tree snapshot (parallel
+> worktrees, never committed to their own branches) and were committed together. Per-step commit
+> granularity for Steps 7–13 was not recoverable. This entry documents what landed; a wrap-up audit
+> verifies it against the code before v1.5 ships.
+
 ## [1.2.6] - 2026-06-22 (wip, see [1.2.7])
 
 ### Fixed

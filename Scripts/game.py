@@ -62,7 +62,7 @@ class Game:
         mouse.locked = False
         if self.hud:
             self.hud.hide()
-        screen = EndScreen(title)
+        screen = EndScreen(title, is_win=is_win)
         if is_win:
             self.win_screen = screen
         else:

@@ -15,12 +15,14 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
     MoveEntityCommand, ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
-    ChangePropertyCommand, ChangeBehaviourCommand, ChangeTriggerActionsCommand, _resolve_model
+    ChangePropertyCommand, ChangeBehaviourCommand, ChangeTriggerActionsCommand,
+    ChangePickupConfigCommand, _resolve_model
 )
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.session_logger import SessionLogger
 from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.asset_registry import asset_registry, CATEGORY_DIRS, CATEGORY_EXTENSIONS
+from Scripts.weapon import WEAPON_TYPES
 
 logger = SessionLogger()
 
@@ -43,12 +45,28 @@ class LevelEditor(Entity):
         # semi-transparent orange box (texture_orange_test) so it can be seen/placed;
         # at runtime TriggerZone is visible=False. Default 3x2x3 matches the spec JSON.
         {'name': 'Trigger', 'model': 'cube', 'color': (0.95, 0.55, 0.15), 'scale': (3, 2, 3), 'type': 'trigger'},
+        # v1.5 Step 13: invisible-in-game weapon/ammo pickup. Small sphere so it
+        # reads as a distinct entity type from Trigger's flat box. At runtime
+        # AmmoPickup is visible=False; default config is an ammo pickup for the
+        # pistol (matches AmmoPickup's own constructor defaults in weapon.py).
+        {'name': 'Pickup', 'model': 'sphere', 'color': (0.25, 0.85, 0.95), 'scale': (0.6, 0.6, 0.6), 'type': 'pickup'},
     ]
+    # Lookup by 'type' — assumes exactly one BUILTIN_MODELS entry per type (true
+    # for trigger/pickup; block/enemy each have multiple entries and are not
+    # looked up this way). Used by _make_pickup_entity for its default model/color/scale.
+    BUILTIN_MODELS_BY_TYPE = {asset['type']: asset for asset in reversed(BUILTIN_MODELS)}
 
     # Editor-only visuals for trigger placeholders. Texture chosen for visibility;
     # alpha makes the volume see-through so geometry inside it stays visible.
+    # Colour duplicated from BUILTIN_MODELS[-2]['color'] as its own constant — a
+    # BUILTIN_MODELS[-1] lookup broke the moment Pickup was appended after Trigger
+    # (v1.5 Step 13), so this reads by name, not fragile list position.
     _TRIGGER_TEXTURE = 'texture_orange_test'
     _TRIGGER_ALPHA   = 0.35
+    _TRIGGER_COLOR   = (0.95, 0.55, 0.15)
+
+    # Default pickup config stashed on a freshly-placed placeholder (v1.5 Step 13).
+    _PICKUP_DEFAULT_CONFIG = {'pickup_type': 'ammo', 'weapon_type': 'pistol', 'amount': 30}
 
     def __init__(self):
         """Build all editor UI, load level and prefs; attach to app before calling app.run()."""
@@ -60,6 +78,10 @@ class LevelEditor(Entity):
         # on_exit_actions raw lists (config-store role); the runtime/F5 factory turns
         # them into live TriggerZones. Named 'trigger_*'; saved as type 'trigger'.
         self.triggers = []
+        # v1.5 Step 13: pickups are a fourth tracked type, same config-store role as
+        # triggers — placeholder carries a single pickup_config dict (pickup_type/
+        # weapon_type/amount); the runtime/F5 factory turns it into a live AmmoPickup.
+        self.pickups = []
         self.filename = 'level.json'
         self.current_texture = 'white_cube'
         self.current_mode = 'block'
@@ -106,7 +128,7 @@ class LevelEditor(Entity):
         # Hierarchy search/filter + collapsible sections (Change B).
         self._hier_search_field = None     # InputField pinned above the list
         self._hier_filter = ''             # lower-cased substring; '' = show all
-        self._hier_collapsed = {'block': False, 'enemy': False, 'trigger': False}  # per-section fold state
+        self._hier_collapsed = {'block': False, 'enemy': False, 'trigger': False, 'pickup': False}  # per-section fold state
         self._hier_header_buttons = {}     # {'block': Button, 'enemy': Button}
         self._hier_swatches = []           # per-row colour swatch quads (parallel to _hier_buttons)
 
@@ -575,7 +597,7 @@ class LevelEditor(Entity):
     def _select(self, entity, additive=False):
         if not additive:
             self._deselect_all()
-        if entity in (self.blocks + self.enemies + self.triggers):
+        if entity in (self.blocks + self.enemies + self.triggers + self.pickups):
             self._snapshot_color(entity)
             self.selected.add(entity)
             entity.color = color.orange
@@ -600,6 +622,15 @@ class LevelEditor(Entity):
                 'scale': (e.scale_x, e.scale_y, e.scale_z),
                 'on_enter': [dict(a) for a in getattr(e, 'on_enter_actions', [])],
                 'on_exit':  [dict(a) for a in getattr(e, 'on_exit_actions', [])],
+            }
+        # v1.5 Step 13: pickup snapshot carries the raw config dict so delete→undo
+        # restores the placeholder identically (_restore_entity routes is_pickup
+        # through _make_pickup_entity). Same marker pattern as is_trigger above.
+        if e in self.pickups:
+            return {
+                'is_pickup': True,
+                'position': e.position,
+                'pickup_config': dict(getattr(e, 'pickup_config', {})),
             }
         is_enemy = e in self.enemies
         tex_name = ''
@@ -627,9 +658,9 @@ class LevelEditor(Entity):
         action-dict lists stashed verbatim — config-store role, never live callbacks.
         Appends to self.triggers and returns the entity.
         """
-        tint = color.rgba(self.BUILTIN_MODELS[-1]['color'][0],
-                          self.BUILTIN_MODELS[-1]['color'][1],
-                          self.BUILTIN_MODELS[-1]['color'][2],
+        tint = color.rgba(self._TRIGGER_COLOR[0],
+                          self._TRIGGER_COLOR[1],
+                          self._TRIGGER_COLOR[2],
                           self._TRIGGER_ALPHA)
         # Resolve the volume texture to an ABSOLUTE path. A bare string
         # ('texture_orange_test') only works when application.asset_folder points at
@@ -658,12 +689,40 @@ class LevelEditor(Entity):
         self.triggers.append(e)
         return e
 
+    def _make_pickup_entity(self, position, pickup_config):
+        """Build (and track) an editor pickup placeholder — the single construction
+        site shared by drag-placement, level load, F5-restore, and undo/redo
+        (same DRY rationale as _make_trigger_entity).
+
+        The placeholder is a small solid sphere so it reads as visibly distinct
+        from a trigger's flat box in the editor (the runtime AmmoPickup is
+        visible=False). Collidable so the mouse picker and selection can hit it.
+        pickup_config is the single raw config dict stashed verbatim — config-store
+        role, never a live AmmoPickup. Appends to self.pickups and returns the entity.
+        """
+        asset = self.BUILTIN_MODELS_BY_TYPE['pickup']
+        tint = color.rgb(*asset['color'])
+        config = dict(self._PICKUP_DEFAULT_CONFIG)
+        config.update(pickup_config or {})
+        e = Entity(
+            model=asset['model'],
+            color=tint,
+            scale=asset['scale'],
+            position=tuple(position),
+            collider='box',
+            name='pickup_volume',
+        )
+        e._original_color = tint
+        e.pickup_config = config
+        self.pickups.append(e)
+        return e
+
     def _finish_box_select(self):
         if self._box_start is None:
             return
         x0, x1 = sorted([self._box_start.x, mouse.x])
         y0, y1 = sorted([self._box_start.y, mouse.y])
-        for e in self.blocks + self.enemies + self.triggers:
+        for e in self.blocks + self.enemies + self.triggers + self.pickups:
             try:
                 screen_pos = e.screen_position
                 if x0 <= screen_pos.x <= x1 and y0 <= screen_pos.y <= y1:
@@ -906,6 +965,7 @@ class LevelEditor(Entity):
 
         self._build_behaviour_ui()
         self._build_trigger_ui()
+        self._build_pickup_ui()
 
     def _update_inspector_door_field(self):
         """Refresh the door-name field from the current selection. Blocks only —
@@ -964,6 +1024,7 @@ class LevelEditor(Entity):
             self._update_inspector_door_field()
             self._refresh_behaviour_ui()
             self._refresh_trigger_ui()
+            self._refresh_pickup_ui()
             return
         entities = list(self.selected)
 
@@ -985,6 +1046,7 @@ class LevelEditor(Entity):
         self._update_inspector_door_field()
         self._refresh_behaviour_ui()
         self._refresh_trigger_ui()
+        self._refresh_pickup_ui()
 
     def _entity_texture_name(self, e):
         """Best-effort texture name for an entity, '' if none/unreadable."""
@@ -1639,6 +1701,156 @@ class LevelEditor(Entity):
                 return True
         return False
 
+    # -------------------------------------------------------------------------
+    # Pickup config editor (v1.5 Step 13)
+    #
+    # Pickup-only inspector section, mutually exclusive with the Model field
+    # (blocks), Behaviour section (enemies), and trigger action lists — all reuse
+    # the lower band and gate on list membership, so only one is ever enabled.
+    # Unlike triggers' repeating action lists, a pickup's config is three scalar
+    # fields: a Type toggle (ammo/weapon), a Weapon toggle (pistol/shotgun/rifle),
+    # and an Amount field (ammo pickups only). Every edit pushes ONE
+    # ChangePickupConfigCommand snapshotting the whole config dict (same
+    # whole-dict granularity as ChangeTriggerActionsCommand/ChangeBehaviourCommand).
+    # -------------------------------------------------------------------------
+    PICKUP_TYPES = ['ammo', 'weapon']
+
+    _PICKUP_TYPE_Y   = -0.30   # "Type" row y
+    _PICKUP_WEAPON_Y = -0.36   # "Weapon" row y
+    _PICKUP_AMOUNT_Y = -0.42   # "Amount" row y (ammo pickups only)
+
+    def _build_pickup_ui(self):
+        """Persistent pickup-section widgets: Type toggle, Weapon toggle, Amount field."""
+        self._pickup_type_label = Text(
+            parent=self._inspector, text='type',
+            position=(-.33, self._PICKUP_TYPE_Y),
+            color=color.light_gray, origin=(0, 0), z=-1, eternal=True, enabled=False,
+        )
+        self._pickup_type_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        self._pickup_type_btn = Button(
+            parent=self._inspector, text='ammo',
+            position=(.10, self._PICKUP_TYPE_Y), scale=(.34, .042),
+            color=self._THEME_TILE_BG, z=-1, eternal=True, enabled=False,
+        )
+        self._pickup_type_btn.text_entity.world_scale = Vec3(8, 8, 1)
+        self._pickup_type_btn.on_click = self._on_cycle_pickup_type
+
+        self._pickup_weapon_label = Text(
+            parent=self._inspector, text='weapon',
+            position=(-.33, self._PICKUP_WEAPON_Y),
+            color=color.light_gray, origin=(0, 0), z=-1, eternal=True, enabled=False,
+        )
+        self._pickup_weapon_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        self._pickup_weapon_btn = Button(
+            parent=self._inspector, text='pistol',
+            position=(.10, self._PICKUP_WEAPON_Y), scale=(.34, .042),
+            color=self._THEME_TILE_BG, z=-1, eternal=True, enabled=False,
+        )
+        self._pickup_weapon_btn.text_entity.world_scale = Vec3(8, 8, 1)
+        self._pickup_weapon_btn.on_click = self._on_cycle_pickup_weapon
+
+        self._pickup_amount_label = Text(
+            parent=self._inspector, text='amount',
+            position=(-.33, self._PICKUP_AMOUNT_Y),
+            color=color.light_gray, origin=(0, 0), z=-1, eternal=True, enabled=False,
+        )
+        self._pickup_amount_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        self._pickup_amount_field = InputField(
+            parent=self._inspector,
+            position=(.10, self._PICKUP_AMOUNT_Y), scale=(.34, .042),
+            default_value='30', z=-1, eternal=True, enabled=False,
+        )
+        self._pickup_amount_field.submit_on = ['enter']
+        self._pickup_amount_field.on_submit = (
+            lambda f=self._pickup_amount_field: self._on_pickup_amount_edit(f.text)
+        )
+
+        for w in (self._pickup_type_label, self._pickup_type_btn,
+                  self._pickup_weapon_label, self._pickup_weapon_btn,
+                  self._pickup_amount_label, self._pickup_amount_field):
+            try:
+                w.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_pickup_ui setBin {type(e).__name__}: {e}")
+
+    def _selected_pickup(self):
+        """The single selected pickup, or None (editor shows the config editor only
+        for a single-pickup selection — multi-edit is out of scope, same rule as
+        _selected_trigger)."""
+        picks = [e for e in self.selected if e in self.pickups]
+        return picks[0] if len(picks) == 1 else None
+
+    def _set_pickup_section_visible(self, visible, show_amount):
+        for w in (self._pickup_type_label, self._pickup_type_btn,
+                  self._pickup_weapon_label, self._pickup_weapon_btn):
+            w.enabled = visible
+        self._pickup_amount_label.enabled = visible and show_amount
+        self._pickup_amount_field.enabled = visible and show_amount
+
+    def _refresh_pickup_ui(self):
+        """Show/hide + repopulate the pickup config editor for the current selection.
+        Single refresh path: called from _update_inspector AND from
+        ChangePickupConfigCommand on undo/redo."""
+        if getattr(self, '_pickup_type_btn', None) is None:
+            return
+        pickup = self._selected_pickup()
+        show = pickup is not None
+        if not show:
+            self._set_pickup_section_visible(False, False)
+            return
+        config = getattr(pickup, 'pickup_config', self._PICKUP_DEFAULT_CONFIG)
+        is_ammo = config.get('pickup_type', 'ammo') == 'ammo'
+        self._set_pickup_section_visible(True, is_ammo)
+        self._pickup_type_btn.text = config.get('pickup_type', 'ammo')
+        self._pickup_weapon_btn.text = config.get('weapon_type', 'pistol')
+        self._pickup_amount_field.text = str(config.get('amount', 30))
+
+    def _commit_pickup_config(self, pickup, config):
+        """Push one ChangePickupConfigCommand and execute it (refreshes the UI)."""
+        cmd = ChangePickupConfigCommand(self, pickup, config)
+        cmd.execute()
+        self._history.push(cmd)
+
+    def _on_cycle_pickup_type(self):
+        pickup = self._selected_pickup()
+        if pickup is None:
+            return
+        config = dict(getattr(pickup, 'pickup_config', self._PICKUP_DEFAULT_CONFIG))
+        cur = config.get('pickup_type', 'ammo')
+        config['pickup_type'] = self.PICKUP_TYPES[(self.PICKUP_TYPES.index(cur) + 1) % len(self.PICKUP_TYPES)] \
+            if cur in self.PICKUP_TYPES else self.PICKUP_TYPES[0]
+        self._commit_pickup_config(pickup, config)
+
+    def _on_cycle_pickup_weapon(self):
+        pickup = self._selected_pickup()
+        if pickup is None:
+            return
+        config = dict(getattr(pickup, 'pickup_config', self._PICKUP_DEFAULT_CONFIG))
+        weapon_names = list(WEAPON_TYPES.keys())
+        cur = config.get('weapon_type', 'pistol')
+        config['weapon_type'] = weapon_names[(weapon_names.index(cur) + 1) % len(weapon_names)] \
+            if cur in weapon_names else weapon_names[0]
+        self._commit_pickup_config(pickup, config)
+
+    def _on_pickup_amount_edit(self, value_str):
+        pickup = self._selected_pickup()
+        if pickup is None:
+            return
+        try:
+            amount = int(value_str)
+        except ValueError:
+            self._refresh_pickup_ui()   # revert the field to the last valid value
+            return
+        config = dict(getattr(pickup, 'pickup_config', self._PICKUP_DEFAULT_CONFIG))
+        config['amount'] = amount
+        self._commit_pickup_config(pickup, config)
+
+    def _pickup_typing(self):
+        """True while the pickup amount InputField is focused — gate Delete /
+        bookmark keys, same as the other inspector typing guards."""
+        f = getattr(self, '_pickup_amount_field', None)
+        return bool(f is not None and getattr(f, 'active', False))
+
     def _apply_inspector_value(self, key, value_str):
         # Read current selection at call time (not capture time) so the lambda
         # always operates on whatever is selected when Enter is pressed.
@@ -1902,7 +2114,7 @@ class LevelEditor(Entity):
         totals — so the list reads honestly while searching."""
         flt = self._hier_filter
         rows = []
-        for section, members in (('block', self.blocks), ('enemy', self.enemies), ('trigger', self.triggers)):
+        for section, members in (('block', self.blocks), ('enemy', self.enemies), ('trigger', self.triggers), ('pickup', self.pickups)):
             if flt:
                 matched = [e for e in members if flt in self._hier_label(e).lower()]
             else:
@@ -1917,6 +2129,8 @@ class LevelEditor(Entity):
             tag = 'E'
         elif e in self.triggers:
             tag = 'T'
+        elif e in self.pickups:
+            tag = 'P'
         else:
             tag = 'B'
         return f"{tag} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
@@ -2005,8 +2219,8 @@ class LevelEditor(Entity):
         flt = self._hier_filter
         def _count(members):
             return sum(1 for e in members if not flt or flt in self._hier_label(e).lower())
-        section_count = {'block': _count(self.blocks), 'enemy': _count(self.enemies), 'trigger': _count(self.triggers)}
-        section_name  = {'block': 'Blocks', 'enemy': 'Enemies', 'trigger': 'Triggers'}
+        section_count = {'block': _count(self.blocks), 'enemy': _count(self.enemies), 'trigger': _count(self.triggers), 'pickup': _count(self.pickups)}
+        section_name  = {'block': 'Blocks', 'enemy': 'Enemies', 'trigger': 'Triggers', 'pickup': 'Pickups'}
 
         visible = visual_rows[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
         for slot, (kind, payload) in enumerate(visible):
@@ -2781,6 +2995,10 @@ class LevelEditor(Entity):
             # v1.5 Step 6: drop a trigger volume with empty action lists; the
             # inspector wires actions afterwards. Shared builder handles tracking.
             new_entity = self._make_trigger_entity(pos, asset['scale'], [], [])
+        elif asset['type'] == 'pickup':
+            # v1.5 Step 13: drop a pickup with the default config (ammo/pistol/30);
+            # the inspector edits it afterwards. Shared builder handles tracking.
+            new_entity = self._make_pickup_entity(pos, {})
         else:
             new_entity = Entity(
                 model=asset['model'],
@@ -2925,7 +3143,9 @@ class LevelEditor(Entity):
                     old_pos = self._gizmo_drag_start_pos[e]
                     new_pos = Vec3(e.position)
                     if old_pos != new_pos:
-                        etype = 'enemy' if e in self.enemies else ('trigger' if e in self.triggers else 'block')
+                        etype = ('enemy' if e in self.enemies else
+                                 'trigger' if e in self.triggers else
+                                 'pickup' if e in self.pickups else 'block')
                         logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
                         self._history.push(MoveEntityCommand(e, old_pos, new_pos))
             self._gizmo_drag_axis = None
@@ -2979,14 +3199,17 @@ class LevelEditor(Entity):
         live_blocks = [b for b in self.blocks if getattr(b, 'destroy_source', None) is None]
         live_enemies = [e for e in self.enemies if getattr(e, 'destroy_source', None) is None]
         live_triggers = [t for t in self.triggers if getattr(t, 'destroy_source', None) is None]
+        live_pickups = [p for p in self.pickups if getattr(p, 'destroy_source', None) is None]
         dropped = ((len(self.blocks) - len(live_blocks))
                    + (len(self.enemies) - len(live_enemies))
-                   + (len(self.triggers) - len(live_triggers)))
+                   + (len(self.triggers) - len(live_triggers))
+                   + (len(self.pickups) - len(live_pickups)))
         if dropped:
             logger.log('WARN', f'_build_level_data: dropped {dropped} destroyed entity refs')
             self.blocks[:] = live_blocks
             self.enemies[:] = live_enemies
             self.triggers[:] = live_triggers
+            self.pickups[:] = live_pickups
         for block in live_blocks:
             actual_color = getattr(block, '_original_color', block.color)
             tex_name = ''
@@ -3045,6 +3268,18 @@ class LevelEditor(Entity):
                 'scale': [round(trigger.scale_x, 4), round(trigger.scale_y, 4), round(trigger.scale_z, 4)],
                 'on_enter': [dict(a) for a in getattr(trigger, 'on_enter_actions', [])],
                 'on_exit':  [dict(a) for a in getattr(trigger, 'on_exit_actions', [])],
+            })
+        for pickup in live_pickups:
+            # v1.5 Step 13: serialize the pickup's position + raw config dict. The
+            # editor placeholder's colour/model are editor chrome — NOT saved; the
+            # runtime AmmoPickup is invisible with its own fixed scale.
+            config = getattr(pickup, 'pickup_config', self._PICKUP_DEFAULT_CONFIG)
+            data.append({
+                'type': 'pickup',
+                'position': [pickup.x, pickup.y, pickup.z],
+                'pickup_type': config.get('pickup_type', 'ammo'),
+                'weapon_type': config.get('weapon_type', 'pistol'),
+                'amount':      config.get('amount', 30),
             })
         return data
 
@@ -3150,12 +3385,13 @@ class LevelEditor(Entity):
         if not self._play_level_snapshot:
             return
         # Destroy surviving refs (may still be alive if nothing cleared them)
-        for e in self.blocks + self.enemies + self.triggers:
+        for e in self.blocks + self.enemies + self.triggers + self.pickups:
             if getattr(e, 'destroy_source', None) is None:
                 destroy(e)
         self.blocks.clear()
         self.enemies.clear()
         self.triggers.clear()
+        self.pickups.clear()
         self.selected.clear()
 
         for entry in load_level_data(self._play_level_snapshot):
@@ -3167,6 +3403,16 @@ class LevelEditor(Entity):
                     entry['position'], entry['scale'],
                     entry['on_enter'], entry['on_exit'],
                 )
+                continue
+            if entry['type'] == 'pickup':
+                # v1.5 Step 13: rebuild the editor pickup sphere from the snapshot
+                # so it survives the F5 play-in-editor round-trip (same role as
+                # the trigger rebuild above).
+                self._make_pickup_entity(entry['position'], {
+                    'pickup_type': entry['pickup_type'],
+                    'weapon_type': entry['weapon_type'],
+                    'amount':      entry['amount'],
+                })
                 continue
             if entry['type'] == 'enemy':
                 new_entity = Entity(
@@ -3199,7 +3445,7 @@ class LevelEditor(Entity):
                 new_entity._original_color = new_entity.color
                 self.blocks.append(new_entity)
 
-        logger.log('INFO', f'Editor level restored: {len(self.blocks)} blocks, {len(self.enemies)} enemies, {len(self.triggers)} triggers')
+        logger.log('INFO', f'Editor level restored: {len(self.blocks)} blocks, {len(self.enemies)} enemies, {len(self.triggers)} triggers, {len(self.pickups)} pickups')
         self._refresh_hierarchy()
 
     def _spawn_gameplay_from_snapshot(self, level_data):
@@ -3207,6 +3453,7 @@ class LevelEditor(Entity):
         from Scripts.enemy import Enemy
         from Scripts.game import game
         from Scripts.trigger_system import TriggerZone, build_actions
+        from Scripts.weapon import AmmoPickup
 
         entries = load_level_data(level_data)
 
@@ -3259,6 +3506,16 @@ class LevelEditor(Entity):
                     on_enter=build_actions(entry['on_enter']),
                     on_exit=build_actions(entry['on_exit']),
                 )
+        # v1.5 Step 13: factory-consume pickup entries into live AmmoPickups — the
+        # F5-play-equivalent of main.start_game()'s pickup loop.
+        for entry in entries:
+            if entry['type'] == 'pickup':
+                AmmoPickup(
+                    position=tuple(entry['position']),
+                    pickup_type=entry['pickup_type'],
+                    weapon_type=entry['weapon_type'],
+                    amount=entry['amount'],
+                )
         game.start()
 
     # -------------------------------------------------------------------------
@@ -3297,7 +3554,7 @@ class LevelEditor(Entity):
         """Update the entity/collider stats readout from the editor's own level data."""
         if getattr(self, '_stats_text', None) is None:
             return
-        placed = self.blocks + self.enemies + self.triggers
+        placed = self.blocks + self.enemies + self.triggers + self.pickups
         entities = len(placed)
         colliders = sum(1 for e in placed if getattr(e, 'collider', None) is not None)
         self._stats_text.text = f'entities: {entities}   colliders: {colliders}'
@@ -3373,7 +3630,8 @@ class LevelEditor(Entity):
             # Also skip while typing in the hierarchy search box.
             if (any(f.active for f in self._insp_fields.values())
                     or self._hier_typing() or self._behaviour_typing()
-                    or self._door_name_typing() or self._trigger_typing()):
+                    or self._door_name_typing() or self._trigger_typing()
+                    or self._pickup_typing()):
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -3389,13 +3647,16 @@ class LevelEditor(Entity):
         if key in ('delete', 'backspace'):
             typing = (any(f.active for f in self._insp_fields.values())
                       or self._hier_typing() or self._behaviour_typing()
-                      or self._door_name_typing() or self._trigger_typing())
+                      or self._door_name_typing() or self._trigger_typing()
+                      or self._pickup_typing())
             mid_drag = (self._gizmo_drag_axis is not None
                         or self._box_selecting or self._dragging)
             if self.selected and not typing and not mid_drag:
                 for e in list(self.selected):
                     snapshot = self._entity_snapshot(e)
-                    etype = 'enemy' if e in self.enemies else ('trigger' if e in self.triggers else 'block')
+                    etype = ('enemy' if e in self.enemies else
+                             'trigger' if e in self.triggers else
+                             'pickup' if e in self.pickups else 'block')
                     logger.log('INFO', f"Entity deleted: type={etype} pos={[round(p, 3) for p in e.position]}")
                     cmd = DeleteEntityCommand(self, e, snapshot)
                     cmd.execute()
@@ -3494,7 +3755,7 @@ class LevelEditor(Entity):
             # Step 4/5: selection (shift) or tool-mode action
             if held_keys['shift']:
                 # Shift+click: add/remove from selection — same in both tool modes
-                if hovered in (self.blocks + self.enemies + self.triggers):
+                if hovered in (self.blocks + self.enemies + self.triggers + self.pickups):
                     if hovered in self.selected:
                         self.selected.discard(hovered)
                         hovered.color = getattr(hovered, '_original_color', color.white)
@@ -3509,7 +3770,7 @@ class LevelEditor(Entity):
             elif self._tool == 'move':
                 # FIXED (FIX 3 Move mode): select/deselect entities; clicking a surface
                 # never places a new block in Move mode.
-                if hovered in (self.blocks + self.enemies + self.triggers):
+                if hovered in (self.blocks + self.enemies + self.triggers + self.pickups):
                     self._select(hovered)
                     return
                 if self.selected:
@@ -3615,11 +3876,12 @@ class LevelEditor(Entity):
 
     def load_existing_level(self):
         """Destroy all current editor entities, then reload from level.json if it exists."""
-        for e in self.blocks + self.enemies + self.triggers:
+        for e in self.blocks + self.enemies + self.triggers + self.pickups:
             destroy(e)
         self.blocks.clear()
         self.enemies.clear()
         self.triggers.clear()
+        self.pickups.clear()
         self.selected.clear()
 
         try:
@@ -3633,6 +3895,16 @@ class LevelEditor(Entity):
                         entry['position'], entry['scale'],
                         entry['on_enter'], entry['on_exit'],
                     )
+                    continue
+                if entry['type'] == 'pickup':
+                    # v1.5 Step 13: editor is now pickup-aware. Build a small
+                    # solid sphere carrying the raw pickup config; it round-trips
+                    # through _build_level_data on save.
+                    self._make_pickup_entity(entry['position'], {
+                        'pickup_type': entry['pickup_type'],
+                        'weapon_type': entry['weapon_type'],
+                        'amount':      entry['amount'],
+                    })
                     continue
                 if entry['type'] == 'enemy':
                     new_entity = Entity(

@@ -1,12 +1,13 @@
 from ursina import *
+from Scripts.ui_theme import HEALTH_FULL, HEALTH_MID, HEALTH_LOW, HEALTH_BG, TEXT_PRIMARY
 
-# TUNE: named color constants — swap these to experiment with bar appearance
-# Ursina 8.3.0 color.rgb() takes 0–1 floats (same bug class as the level.json
-# colour-inflation fix in v1.2.3). Out-of-range channels clamp to 1.0 → white.
-BAR_COLOR_FULL  = color.rgb(50/255, 200/255, 50/255)
-BAR_COLOR_MID   = color.rgb(220/255, 150/255, 0)
-BAR_COLOR_LOW   = color.rgb(200/255, 50/255, 50/255)
-BAR_BG_COLOR    = color.dark_gray
+# v1.5 UI redesign: palette now lives in Scripts/ui_theme.py, shared with
+# PlayerHUD/PauseMenu/EndScreen. Kept as local aliases so call sites below
+# don't need to change.
+BAR_COLOR_FULL  = HEALTH_FULL
+BAR_COLOR_MID   = HEALTH_MID
+BAR_COLOR_LOW   = HEALTH_LOW
+BAR_BG_COLOR    = HEALTH_BG
 
 
 class HealthBar(Entity):
@@ -55,7 +56,7 @@ class HealthBar(Entity):
                 text=f"{int(self.value)}",
                 position=(0, 0.5, 0),
                 scale=10 / self.scale_x,
-                color=color.white,
+                color=TEXT_PRIMARY,
                 billboard=True,
             )
         else:
@@ -71,7 +72,7 @@ class HealthBar(Entity):
                     self.position.y + text_pos[1],
                 ),
                 scale=text_scale,
-                color=color.white,
+                color=TEXT_PRIMARY,
                 z=-1,
             )
 

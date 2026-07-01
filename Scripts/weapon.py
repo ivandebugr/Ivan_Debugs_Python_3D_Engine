@@ -1,8 +1,11 @@
 from ursina import *
+from ursina.shaders.unlit_shader import unlit_shader
+from panda3d.core import BitMask32, Camera as PandaCamera, NodePath, Quat
 from Scripts.collision_system import (
     AliveEntity, Layers, can_hit, collision_manager
 )
 import time as _time
+import random
 
 
 POOL_SIZE_PLAYER = 30
@@ -186,12 +189,91 @@ _enemy_bullet_pool  = BulletPool(EnemyBullet,  size=POOL_SIZE_ENEMY)
 
 
 # ---------------------------------------------------------------------------
-# Weapon
+# Viewmodel camera (dual-camera FPS gun rendering)
+# ---------------------------------------------------------------------------
+#
+# Depth tricks (always_on_top / setBin) only change *draw order* — they cannot
+# stop the gun's geometry from physically intersecting a wall in world space.
+# When the camera is flush against a wall, the gun's far end is literally inside
+# the wall, so the wall is drawn over it.
+#
+# The fix is the standard Unity/Unreal approach: render the gun with a SECOND
+# camera in its own pass that clears the depth buffer first, so the viewmodel is
+# composited on top of the world regardless of world depth.
+#
+# Mechanism (Panda3D camera bitmasks + a dedicated display region):
+#   - VIEWMODEL_MASK is a single dedicated draw bit.
+#   - The main camera's mask has that bit cleared → it renders everything EXCEPT
+#     the gun.
+#   - The gun's draw mask is set to ONLY that bit → only the viewmodel camera
+#     sees it.
+#   - The viewmodel camera shares the main camera's transform (parented to
+#     base.cam) and draws in a display region sorted after the world (0) but
+#     before the UI (20), with clear-depth on so the gun always wins.
+
+VIEWMODEL_MASK = BitMask32.bit(7)   # dedicated draw bit for viewmodel geometry
+
+_viewmodel_camera = None            # singleton NodePath(PandaCamera); reused across Weapon instances
+
+
+def _setup_viewmodel_camera():
+    """Create (once) the second camera + display region that renders the gun on top.
+
+    Idempotent — safe to call on every Weapon construction (each new game spawns a
+    fresh Player → fresh Weapon). Returns the viewmodel camera NodePath, or None if
+    the Panda3D window/camera are not ready yet (callers fall back gracefully)."""
+    global _viewmodel_camera
+    if _viewmodel_camera is not None and not _viewmodel_camera.is_empty():
+        return _viewmodel_camera
+
+    base = getattr(application, 'base', None)
+    if base is None or not hasattr(base, 'win') or base.win is None:
+        return None
+
+    # Main camera stops drawing viewmodel geometry.
+    main_cam_node = base.camNode
+    main_cam_node.set_camera_mask(main_cam_node.get_camera_mask() & ~VIEWMODEL_MASK)
+
+    # Second camera that renders ONLY the viewmodel layer. Reuse the main lens so
+    # fov + aspect ratio always match the world view (and auto-track window resize).
+    vm_cam = PandaCamera('viewmodel_camera')
+    vm_cam.set_camera_mask(VIEWMODEL_MASK)
+    vm_cam.set_lens(base.camLens)
+
+    vm_np = NodePath(vm_cam)
+    vm_np.reparent_to(base.cam)   # share the main camera's world transform exactly
+
+    # Dedicated display region, drawn AFTER the world (sort 0) and Ursina's render2d
+    # (sort 10) but BEFORE the UI region (sort 20). Leave clear-depth OFF: the gun
+    # itself runs with depth-test off (set in Weapon.__init__), so because this pass
+    # draws after the whole world pass it always lands on top — and NOT clearing
+    # depth/colour keeps the already-rendered world visible underneath.
+    dr = base.win.make_display_region()
+    dr.set_sort(15)
+    dr.set_camera(vm_np)
+
+    _viewmodel_camera = vm_np
+    return vm_np
+
+
+# ---------------------------------------------------------------------------
+# Weapon (base class — viewmodel rendering, ammo, reload; shoot() is per-subclass)
 # ---------------------------------------------------------------------------
 
 class Weapon(Entity):
-    def __init__(self, player, model='cube', texture='white_cube',
-                 scale=(0.3, 0.2, 1), position=(0.5, -0.5, 1), **kwargs):
+    """Base class for player weapons: viewmodel camera setup + ammo/reload.
+
+    Subclasses (Pistol, Shotgun, Rifle — v1.5 Steps 8-10) set damage/cooldown/
+    speed/ammo class attributes and implement shoot(). `ammo=-1` means infinite.
+    """
+    damage       = 25
+    cooldown     = 0.15
+    bullet_speed = 50
+    max_ammo     = -1   # -1 = infinite
+    reload_time  = 1.0
+
+    def __init__(self, player, model='3d models/gun.obj', texture=None,
+                 scale=0.06, position=(0.5, -0.5, 0.8), **kwargs):
         super().__init__(
             parent=camera,
             model=model,
@@ -201,29 +283,238 @@ class Weapon(Entity):
             rotation=(0, 0, 0),
             **kwargs
         )
+        # Dual-camera viewmodel: route the gun onto the dedicated viewmodel draw
+        # layer so only the second camera (a later pass) renders it. Depth state
+        # alone could not fix the clipping in the single-camera setup, because the
+        # gun shared the world pass; isolating it in a later pass is what works.
+        _setup_viewmodel_camera()
+        self.hide(BitMask32.all_on())   # invisible to the main camera...
+        self.show(VIEWMODEL_MASK)       # ...visible only to the viewmodel camera
+        # Depth test/write off: the viewmodel pass runs after the whole world pass,
+        # so an always-pass gun lands on top regardless of how close a wall is.
+        self.setDepthTest(False)
+        self.setDepthWrite(False)
+        self.shader = unlit_shader  # vertex colors from MTL; no scene lighting on viewmodel
         self.player       = player
         self.original_pos = Vec3(position)
-        self.cooldown     = 0.15
         self.last_shot    = 0
-        self.damage       = 25
+        self.ammo         = self.max_ammo
+        self.reloading    = False
 
     def shoot(self):
-        if _time.time() - self.last_shot < self.cooldown:
+        """Base shoot: cooldown/ammo gate + single bullet. Shotgun overrides for spread."""
+        if not self._ready_to_fire():
             return
+        self._spawn_bullet(camera.forward)
+        self._consume_shot()
 
-        bullet = _player_bullet_pool.acquire(
+    def _ready_to_fire(self) -> bool:
+        """Cooldown/reload/ammo gate shared by every weapon's shoot()."""
+        if _time.time() - self.last_shot < self.cooldown:
+            return False
+        if self.reloading:
+            return False
+        if self.ammo == 0:
+            return False   # dry-click: out of ammo, caller may play a sound
+        return True
+
+    def _spawn_bullet(self, direction):
+        """Acquire one pooled bullet travelling along `direction`."""
+        return _player_bullet_pool.acquire(
             position=self.world_position + camera.forward,
-            direction=camera.forward,
-            speed=50,
+            direction=direction,
+            speed=self.bullet_speed,
             damage=self.damage,
             player=self.player
         )
-        if bullet is None:
-            return   # pool exhausted
 
+    def _consume_shot(self):
+        """Decrement ammo (if finite), play the recoil animation, stamp last_shot."""
+        if self.ammo > 0:
+            self.ammo -= 1
+        self._play_shoot_animation()
+        self.last_shot = _time.time()
+
+    def reload(self):
+        """Restore ammo to max_ammo after reload_time. No-op for infinite-ammo weapons."""
+        if self.max_ammo < 0 or self.reloading or self.ammo == self.max_ammo:
+            return
+        self.reloading = True
+        invoke(self._finish_reload, delay=self.reload_time)
+
+    def _finish_reload(self):
+        self.ammo      = self.max_ammo
+        self.reloading = False
+
+    def _play_shoot_animation(self):
         self.animate_position(self.original_pos + Vec3(0, 0, -0.2), duration=0.05)
         self.animate_position(self.original_pos, delay=0.05, duration=0.15, curve=curve.out_quad)
-        self.last_shot = _time.time()
+
+
+# ---------------------------------------------------------------------------
+# Pistol — v1.5 Step 8. Refactor of the original single Weapon class.
+# ---------------------------------------------------------------------------
+
+class Pistol(Weapon):
+    damage       = 25
+    cooldown     = 0.15
+    bullet_speed = 50
+    max_ammo     = -1   # infinite, matches pre-inventory behaviour
+
+
+# ---------------------------------------------------------------------------
+# Shotgun — v1.5 Step 9. 5 pellets per shot, ±5° spread.
+# ---------------------------------------------------------------------------
+
+PELLET_COUNT  = 5
+SPREAD_DEGREES = 5
+
+class Shotgun(Weapon):
+    damage       = 15
+    cooldown     = 0.8
+    bullet_speed = 30
+    max_ammo     = 8
+    reload_time  = 1.5
+
+    def shoot(self):
+        if not self._ready_to_fire():
+            return
+        for _ in range(PELLET_COUNT):
+            self._spawn_bullet(self._spread_direction())
+        self._consume_shot()
+
+    def _spread_direction(self):
+        """camera.forward jittered by up to ±SPREAD_DEGREES on each of two axes.
+
+        Vec3 (a raw Panda3D LVector3f here) has no rotate() method — build the
+        jitter with a Quat axis-angle rotation instead, same approach the mouse-ray
+        code uses for deriving vectors from camera axes (mouse.direction was
+        removed in Ursina 8.3.0; see brain/Gotchas.md).
+        """
+        yaw   = random.uniform(-SPREAD_DEGREES, SPREAD_DEGREES)
+        pitch = random.uniform(-SPREAD_DEGREES, SPREAD_DEGREES)
+        direction = Vec3(camera.forward)
+        yaw_quat = Quat()
+        yaw_quat.setFromAxisAngle(yaw, Vec3(camera.up))
+        direction = Vec3(yaw_quat.xform(direction))
+        pitch_quat = Quat()
+        pitch_quat.setFromAxisAngle(pitch, Vec3(camera.right))
+        direction = Vec3(pitch_quat.xform(direction))
+        return direction.normalized()
+
+
+# ---------------------------------------------------------------------------
+# Rifle — v1.5 Step 10. High-speed single bullet, no spread.
+# ---------------------------------------------------------------------------
+
+class Rifle(Weapon):
+    damage       = 40
+    cooldown     = 0.08
+    bullet_speed = 80
+    max_ammo     = 24
+    reload_time  = 1.2
+    # Uses the base Weapon.shoot() — single bullet along camera.forward, no spread.
+
+
+# level.json "weapon_type" string → Weapon subclass. Used by AmmoPickup to resolve
+# both weapon_pickup (spawn a new weapon) and ammo_pickup (top up an owned one)
+# without ever comparing entity.name (Hard Constraint 1) — isinstance() against
+# these classes is the dispatch mechanism.
+WEAPON_TYPES = {
+    'pistol':  Pistol,
+    'shotgun': Shotgun,
+    'rifle':   Rifle,
+}
+
+
+# ---------------------------------------------------------------------------
+# AmmoPickup — v1.5 Step 12. Registered as Layers.PICKUP (not a damage path).
+# ---------------------------------------------------------------------------
+
+class AmmoPickup(AliveEntity):
+    """Invisible-collider pickup for a weapon or ammo top-up.
+
+    pickup_type='weapon': first time the player overlaps it, gives a fresh
+    instance of WEAPON_TYPES[weapon_type] into the player's inventory (first
+    empty slot, or does nothing if the inventory is full).
+    pickup_type='ammo': adds `amount` to an ALREADY-OWNED weapon of the matching
+    type (isinstance() check — no name-based dispatch, per Hard Constraint 1).
+    No effect if the player doesn't own that weapon type.
+
+    Registered as Layers.PICKUP via collision_manager.add() (not standalone
+    register()) so AliveEntity.die() tears down the spatial-grid entry the same
+    way TriggerZone does (brain/Gotchas "CollisionManager.add() vs register()").
+    Overlap is checked with self.intersects() per frame — same corrected pattern
+    as TriggerZone (intersects()'s first arg is a traversal target, not the
+    entity to test against; see trigger_system.py). Dies after one collection —
+    pickups are level-placed, not shot at pool frequency, so no pool needed.
+    """
+
+    def __init__(self, position, pickup_type='ammo', weapon_type='pistol',
+                 amount=30, **kwargs):
+        super().__init__(
+            position=position,
+            scale=(0.6, 0.6, 0.6),
+            collider='box',
+            visible=False,
+            **kwargs,
+        )
+        collision_manager.add(self, Layers.PICKUP)
+        self.pickup_type = pickup_type   # 'weapon' or 'ammo'
+        self.weapon_type = weapon_type   # key into WEAPON_TYPES
+        self.amount      = amount        # only used for pickup_type == 'ammo'
+
+    def update(self):
+        if not self.alive:
+            return
+
+        from Scripts.game import game, Game
+        if game.state != Game.PLAYING:
+            return
+
+        player = game.player
+        if player is None:
+            return
+
+        hit_info = self.intersects()
+        if not (hit_info.hit and player in hit_info.entities):
+            return
+
+        if self._collect(player):
+            self.die()
+
+    def _collect(self, player) -> bool:
+        """Attempt to apply this pickup to `player`; return True if consumed."""
+        weapon_cls = WEAPON_TYPES.get(self.weapon_type)
+        if weapon_cls is None:
+            return False
+
+        inventory = getattr(player, 'inventory', None)
+        if inventory is None:
+            return False
+
+        if self.pickup_type == 'weapon':
+            return self._give_weapon(player, inventory, weapon_cls)
+        return self._give_ammo(inventory, weapon_cls)
+
+    def _give_weapon(self, player, inventory, weapon_cls) -> bool:
+        for slot, occupant in enumerate(inventory.slots):
+            if isinstance(occupant, weapon_cls):
+                return False   # already own this weapon type
+        for slot, occupant in enumerate(inventory.slots):
+            if occupant is None:
+                inventory.give(weapon_cls(player), slot)
+                return True
+        return False   # inventory full
+
+    def _give_ammo(self, inventory, weapon_cls) -> bool:
+        for occupant in inventory.slots:
+            if isinstance(occupant, weapon_cls):
+                if occupant.max_ammo < 0:
+                    return False   # infinite-ammo weapon — nothing to add
+                occupant.ammo = min(occupant.ammo + self.amount, occupant.max_ammo)
+                return True
+        return False   # player doesn't own this weapon type — no effect
 
 
 def get_enemy_bullet_pool() -> BulletPool:
