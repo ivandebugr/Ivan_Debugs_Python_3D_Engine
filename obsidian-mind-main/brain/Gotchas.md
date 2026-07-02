@@ -160,7 +160,8 @@ Things that have bitten before and will bite again.
 **Symptom:** Editor startup crash — `IndexError: list index out of range` in `Text.align()` at `ursina/text.py:408`.
 **Root cause:** Ursina's `Text.start_tag`/`end_tag` default to `'<'`/`'>'` with `use_tags=True`. A literal `'<'` or `'>'` parses as an empty tag pair with zero content lines, and an empty string also produces zero lines — either case leaves `Text.align()` indexing `linewidths[-1]` into an empty list.
 **Fix:** Never construct or set a `Text` entity's `.text` to `''`. Use `enabled=False`/`True` to hide/show a `Text` instead. For literal `<`/`>` glyphs, pass `use_tags=False` to the constructor (read from kwargs before the initial `self.text = text` assignment, so it takes effect immediately).
-**Source:** CLAUDE.md Hard Constraint 17; CHANGELOG [1.2.6]
+**Nuance confirmed 2026-07-01 (v1.5 wrap-up audit):** `Text.__init__` itself is safe with `text=''` at construction — the constructor guards with `if text != '': self.text = text`, so an empty string passed as the constructor kwarg never reaches `text_setter`/`align()` and `text_nodes` just stays `[]`. The documented crash is specifically about *mutating* an already-built `Text`'s `.text` to `''` after construction (non-empty `text_nodes` → a different path reaches `align()`). The `Text(text='', enabled=False, ...)` "start hidden, fill in later" placeholder pattern (used for `PlayerHUD.ammo_text`) is therefore crash-free — verified empirically in a live Ursina instance during the audit. Still follow the original fix (never *set* `.text = ''` after construction); this only narrows what's actually unsafe.
+**Source:** CLAUDE.md Hard Constraint 17; CHANGELOG [1.2.6]; v1.5 wrap-up audit
 
 ## `window.on_resize` is dead code in Ursina 8.3.0 — 2026-06-24
 **Context:** Level editor window resize broke the 3D viewport + toolbar overlap; root-cause investigation during the v1.2.6 fix session.
