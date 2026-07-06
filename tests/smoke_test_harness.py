@@ -123,6 +123,16 @@ class GameTestHarness:
         constructed by the time `app.run()` is reached, so neutering only the
         final blocking call leaves a live app we can drive with step()/input().
         We restore the original `run` afterwards so nothing else is affected."""
+        # Ursina derives application.asset_folder (and fonts_folder) from
+        # sys.argv[0]'s parent at first import. Under `python -m tests.smoke_
+        # test_harness`, argv[0] is THIS file, so assets resolved against
+        # tests/ — which broke every launch the moment main.py started loading
+        # a real font (v1.5 Inter-Bold). Point argv[0] at the target module
+        # BEFORE the first ursina import below, exactly what `python main.py`
+        # would have produced; restore it after launch.
+        original_argv0 = sys.argv[0]
+        sys.argv[0] = str(module_path)
+
         import ursina.main as _ursina_main
 
         # `ursina.main.Ursina` is wrapped by an @singleton decorator, so the
@@ -154,6 +164,7 @@ class GameTestHarness:
                 ns = runpy.run_path(str(module_path), run_name="__main__")
         finally:
             real_cls.run = original_run
+            sys.argv[0] = original_argv0
 
         self.app = ns.get("app")
 
