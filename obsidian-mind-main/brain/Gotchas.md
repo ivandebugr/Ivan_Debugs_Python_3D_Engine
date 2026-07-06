@@ -211,3 +211,24 @@ Things that have bitten before and will bite again.
 **Root cause:** Ursina's `load_texture` recursively globs the `assets/` folders and resolves a bare filename (e.g. `floor_stone.png`) to the real file; `load_model` does NOT — a bare path string double-nests against `application.asset_folder` and fails (that was the Step-4 model bug, fixed with `_resolve_model`). So the same code shape is safe for textures and broken for models. Verified headless: bare `floor_stone.png` loads the real 64×64 image; `''` → `.texture = None`, no crash; `Texture.name` carries the filename-with-extension, which is what `_build_level_data` saves.
 **Latent risk:** Texture resolution relies on filenames being globally unique across `assets/` subfolders. If two subfolders ever hold the same filename, the bare-string glob could pick the wrong one. Safe fix when convenient: route those four sites through `_resolve_texture` the way models already go through `_resolve_model`. Not blocking — shipped per decision.
 **Source:** [[work/archive/2026/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]]; CLAUDE.md (Step 4 `_resolve_model`/`_resolve_texture` notes)
+
+## Editor F5 leak — live TriggerZone/AmmoPickup + parked bullets survive play-mode exit — 2026-07-06
+**Context:** v1.6 whole-project audit (2026-07-06), Track A editor review. Play-in-editor (F5) spawns live gameplay entities via `_spawn_gameplay_from_snapshot()`.
+**Symptom:** Exiting play mode (F5/Esc) does not tear down `TriggerZone`/`AmmoPickup` entities spawned during play, nor parked bullet-pool entities. They leak into the next play session.
+**Root cause:** `_exit_play_mode`'s teardown sweep predates v1.5 — it never learned about the trigger/pickup entity types or the bullet pools that a play session warms up.
+**Fix:** Not yet fixed — item 2 on [[work/active/v1.6-fix-backlog]]. Watch for this if adding more pooled or level-spawned entity types before it's addressed.
+**Source:** v1.6 audit report, 2026-07-06; [[work/active/v1.6-level-editor-refactor]]
+
+## `start_game()` has a duplicated teardown path — 2026-07-06
+**Context:** v1.6 whole-project audit (2026-07-06). Also long-listed in the CLAUDE.md tech-debt table.
+**Symptom:** `main.py:401-409` — `start_game()` duplicates player teardown logic that should route through `_clear_gameplay_entities()`. Divergence risk: a teardown fix applied to one site silently misses the other.
+**Root cause:** Inline teardown block predates the canonical `_clear_gameplay_entities()` consolidation and was never re-routed.
+**Fix:** Not yet fixed — item 3 on [[work/active/v1.6-fix-backlog]]. Should call `game.return_to_menu()` before respawning, not repeat teardown inline.
+**Source:** v1.6 audit report, 2026-07-06; CLAUDE.md tech-debt table
+
+## Editor `window.color` has no 0–255 clamp — 2026-07-06
+**Context:** v1.6 whole-project audit (2026-07-06), minor finding.
+**Symptom:** `level_editor.py:4118` — `window.color` set unguarded; an out-of-range value renders wrong (same clamp-to-white family as the `color.rgb()` 0–1 gotcha above).
+**Root cause:** No validation on the assignment path.
+**Fix:** Not yet fixed — low severity, item 6 on [[work/active/v1.6-fix-backlog]].
+**Source:** v1.6 audit report, 2026-07-06

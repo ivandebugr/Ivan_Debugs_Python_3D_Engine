@@ -62,3 +62,13 @@ Architectural or workflow decisions worth recalling. Link to the full [[Decision
 **Decision:** The user explicitly chose to place v1.6 (splitting `level_editor.py` into smaller modules) after v1.3, v1.4, and v1.5 ship — not interleaved with that feature work — and to gate it on a manual system-design review of the other scripts that the user does personally, rather than starting from an agent-proposed module breakdown.
 **Rationale:** Stated directly by the user when capturing the milestone: refactoring a file that's still absorbing new features creates a moving target, and the module boundaries should come from the user's own review of the codebase, not from an agent guessing at architecture.
 **Source:** [[work/active/v1.6-level-editor-refactor]]
+
+## v1.6 scope widened to whole-project audit, at Ivan's explicit request — 2026-07-06
+**Decision:** The original v1.6 definition (split `level_editor.py` only, gated on Ivan's personal manual design review, not an agent-proposed breakdown) is widened for this session to a whole-project architecture audit plus a level-editor module-boundary *proposal* plus a forward-looking graphics/content/fix review. The "Ivan picks the module boundary, not the agent" gate from the original v1.6 decision still holds — three candidate breakdowns (A/B/C) were produced as options, no candidate was selected by the audit itself.
+**Rationale:** Stated directly by Ivan when requesting the audit — the project has grown past what a single-file refactor review captures, and a periodic whole-project pass plus forward-look (graphics feasibility, content gaps, consolidated fix backlog) was wanted alongside the editor-specific work.
+**Source:** [[work/active/v1.6-level-editor-refactor]]; v1.6 audit report, 2026-07-06.
+
+## Pre-v1.6 closure pass sequenced before the editor split — 2026-07-06
+**Decision:** Before any level_editor.py refactor work begins, a curated level (`levels/v1.json`) is built along with a checkpoint-consumer feature and removal of the weapon pre-grant. This closes both open v1.5 tails (§5 combined manual regression not run; `open_door`/pickups unexercised by content), gives the `patrol_then_attack`/`flee_when_low`/`aggressive` presets their first live run, and exercises `Cooldown` in the live frame loop for the first time via a new `cautious` preset.
+**Rationale:** The audit's reasoning: this is the highest-leverage single move available — one piece of content closes multiple open items at once, and it produces the realistic level that v1.6's own regression pass will need to test against regardless of which module-boundary candidate is chosen.
+**Source:** v1.6 audit report, Track C2, 2026-07-06; [[work/active/v1.6-fix-backlog]].

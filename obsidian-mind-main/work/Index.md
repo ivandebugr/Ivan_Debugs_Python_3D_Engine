@@ -21,6 +21,7 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 - [[work/active/v1.5-gameplay-systems]] — Trigger/zone system, weapon inventory API | Planned | Blocked on: v1.4 ✓
 - [[work/active/v1.6-level-editor-refactor]] — Split `level_editor.py` into smaller modules | Planned | Blocked on: v1.3–v1.5 shipping + manual design review
+- [[work/active/v1.6-fix-backlog]] — 16-item priority-ordered fix list from the 2026-07-06 whole-project audit | Active | Items 1+5 in the pre-v1.6 closure pass
 - [[work/active/v2.0-release]] — Modding, packaged runtime, gamepad input, procedural level gen — PUBLIC RELEASE | Planned | Blocked on: v1.5
 
 ## Review Prep

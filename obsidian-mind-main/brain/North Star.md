@@ -78,12 +78,24 @@ Gaps carried forward (logged): **§5 combined manual regression not yet run**; `
 
 See: [[work/archive/2026/v1.5-gameplay-systems]], [[work/archive/version-map]]
 
+## v1.6 Audit Complete — 2026-07-06
+Whole-project architecture audit run (Fable 5, xHigh effort), widened beyond the original single-file refactor scope at Ivan's request. Read-only — no code changed this session.
+
+**Findings:**
+- Track A: `level_editor.py` confirmed as the only file at god-file scale (3957 lines, ~20 concerns already sectioned by banner comments). No other file has grown to a comparable size. Both v1.5 tails confirmed still open. New findings logged to Gotchas (editor F5 leak, `start_game()` duplicate teardown, and several minor items — see [[work/active/v1.6-fix-backlog|fix backlog]]).
+- Track B: three candidate module-boundary breakdowns produced (panels-as-collaborators / state-chrome-interaction layers / strangler extraction) — **no candidate selected**, pending Ivan's manual review per the standing v1.6 gate.
+- Track C: graphics recommendations checked against the actual GLSL 1.20 / macOS GL 2.1 ceiling (distance fog already built and unused; blob shadows and a texture pass are cheap wins; real lighting/post-processing blocked without a verified Core Profile context — a 1-day timeboxed spike was proposed to check feasibility). Content recommendation: one curated level closes 5 open items at once (see [[brain/Key Decisions]]).
+
+**Next:** Pre-v1.6 closure pass (curated level + checkpoint consumer + tail closure) runs first. v1.6 module-boundary decision (Candidate A/B/C) remains open until Ivan reviews Track B.
+
+See: v1.6 audit report, 2026-07-06.
+
 ## Current Focus
 
 _What am I working toward right now?_
 
-- **v1.6 — Level editor refactor** is next per the v1.2–v2.0 roadmap: split the monolithic `Scripts/level_editor.py` into smaller focused modules. Not yet started or designed; gated on a manual design review. See [[work/active/v1.6-level-editor-refactor]].
-- **Before v1.6, two v1.5 tails remain open** (neither blocks v1.6, both logged): run the §5 combined manual regression, and place real door/pickup content in a level to actually exercise `open_door` + pickups. See [[work/archive/2026/v1.5-gameplay-systems#Wrap-up audit — 2026-07-01]].
+- **Pre-v1.6 closure pass** — curated level (`levels/v1.json`), checkpoint consumer, weapon pre-grant removal, §5 regression. Prerequisite before the editor split begins.
+- **v1.6 module-boundary decision** — pending Ivan's manual review of the three candidates from the 2026-07-06 audit. See [[work/active/v1.6-level-editor-refactor]].
 
 ## Goals
 
@@ -139,4 +151,5 @@ Record when focus changes, with date and reason.
 | 2026-06-26 | v1.3 asset import pipeline shipped — focus moves to v1.4 enemy behaviour trees | Cross-step integration audit passed all 7 steps; one latent texture-load risk flagged (not blocking) and carried forward. See [[work/archive/2026/v1.3-asset-import-pipeline#Final Integration Audit — 2026-06-26]] |
 | 2026-06-30 | v1.4 enemy behaviour trees shipped — focus moves to v1.5 trigger/zone + weapon inventory | Wrap-up integration audit passed all 9 steps (7/7 cross-step traces, 8/8 hard-rule classes, 110/110 unit tests); decorators shipped unit-tested but unexercised by any preset (logged). v1.3 + v1.4 docs archived to `work/archive/2026/`. See [[work/archive/2026/v1.4-enemy-behaviour-trees]] |
 | 2026-07-01 | v1.5 trigger/zone + weapon inventory shipped — focus moves to v1.6 level editor refactor | Wrap-up audit re-derived from committed code: 13/13 steps PASS, one hard-rule violation (PICKUP in COLLISION_MATRIX) fixed as its own step (`6b97cd4`). Two tails logged and carried forward (neither blocks v1.6): §5 combined manual regression not run; `open_door`/pickups code-complete but unexercised by `level.json`. System B + HUD landed as one squashed commit (interwoven working-tree snapshot from parallel worktrees, never branched). Stray `Co-Authored-By: Claude` trailer stripped from a v1.2.2 ancestor across `version_1.2–1.5` + force-pushed. v1.5 doc archived. See [[work/archive/2026/v1.5-gameplay-systems]] |
+| 2026-07-06 | v1.6 widened to whole-project audit; pre-v1.6 closure pass identified as prerequisite | Ivan's explicit request; audit surfaced a higher-leverage move before the editor split |
 |      | Created North Star | Initial setup |
