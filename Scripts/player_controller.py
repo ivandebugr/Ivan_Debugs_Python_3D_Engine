@@ -140,6 +140,11 @@ class Player(FirstPersonController):
         self.handle_horizontal_movement()
 
         self.health_bar.value = self.health
+        # Single death authority: kill planes / bullets only modify health;
+        # this check alone decides game over. A post-checkpoint kill-plane
+        # respawn (trigger_system._build_kill_plane) charges a health cost
+        # instead of zeroing — if that cost lands on 0, the player dies here
+        # at the checkpoint (one fall too many, by design).
         if self.health <= 0:
             game.trigger_game_over()
 

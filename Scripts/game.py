@@ -20,9 +20,9 @@ class Game:
         self.win_screen       = None
         self.game_over_screen = None
         # v1.5: written by the trigger `checkpoint` action (player.position snapshot).
-        # Forward declaration — no consumer yet, like Layers.PICKUP. A respawn-on-death
-        # mechanic would read this, but the death path is terminal (trigger_game_over),
-        # so nothing reads it this version. Reset in return_to_menu() so it never leaks.
+        # Consumed by the `kill_plane` action (pre-v1.6 closure pass): when set,
+        # a kill plane teleports the player back here at a health cost instead of
+        # zeroing health outright. Reset in return_to_menu() so it never leaks.
         self.respawn_point    = None
 
     def __repr__(self):

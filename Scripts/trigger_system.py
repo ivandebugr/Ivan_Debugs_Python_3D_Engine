@@ -90,18 +90,39 @@ class TriggerZone(AliveEntity):
 # (checkpoint, open_door, win_condition, play_sound) register here in later steps.
 
 
-def _build_kill_plane(action: dict):
-    """`kill_plane`: set player.health = 0 on enter.
+# TUNE: HP lost per kill-plane respawn once a checkpoint is set. 4 falls from
+# full health end the run (100 -> 75 -> 50 -> 25 -> 0 = game over).
+KILL_PLANE_RESPAWN_COST = 25
 
-    Player.update() checks `health <= 0` every frame and calls the idempotent
-    game.trigger_game_over() — so this builder only needs to zero the health; it
-    must NOT call trigger_game_over() itself (keeps the single death authority in
-    the player controller).
+
+def _build_kill_plane(action: dict):
+    """`kill_plane`: respawn at the last checkpoint at a health cost, or die.
+
+    Pre-checkpoint (game.respawn_point is None — the player has not crossed a
+    `checkpoint` trigger this session): set player.health = 0, the original
+    terminal behaviour. Post-checkpoint: teleport the player back to
+    respawn_point, zero their fall velocity, and charge KILL_PLANE_RESPAWN_COST
+    HP — health cost chosen over brief invulnerability (see brain/Key Decisions,
+    pre-v1.6 closure pass): it needs no timer state threaded through the bullet
+    damage paths, and repeated falls still end the run.
+
+    Either way this builder only ever MODIFIES HEALTH / POSITION — it must NOT
+    call trigger_game_over() itself. Player.update() checks `health <= 0` every
+    frame and fires the idempotent game.trigger_game_over(), so a respawn whose
+    cost lands on exactly 0 dies through the same single death authority in the
+    player controller (one fall too many).
     """
     def fire():
         player = game.player
-        if player is not None:
+        if player is None:
+            return
+        if game.respawn_point is None:
+            # No checkpoint crossed yet — terminal, as before v1.6.
             player.health = 0
+            return
+        player.position = Vec3(game.respawn_point)
+        player.vertical_speed = 0
+        player.health = max(player.health - KILL_PLANE_RESPAWN_COST, 0)
     return fire
 
 
@@ -182,10 +203,11 @@ def _build_win_condition(action: dict):
 def _build_checkpoint(action: dict):
     """`checkpoint`: snapshot player.position into game.respawn_point on enter.
 
-    Forward-declaration consumer (see Game.respawn_point): nothing reads
-    respawn_point yet — the death path is terminal — so this only records the
-    value. Snapshot by value (Vec3(...)) so respawn_point freezes the crossing
-    position rather than tracking the live player.
+    Consumed by `kill_plane` (pre-v1.6 closure pass): once respawn_point is
+    set, falling into a kill plane teleports the player back here at a health
+    cost instead of ending the game — see _build_kill_plane. Snapshot by value
+    (Vec3(...)) so respawn_point freezes the crossing position rather than
+    tracking the live player.
     """
     def fire():
         player = game.player
