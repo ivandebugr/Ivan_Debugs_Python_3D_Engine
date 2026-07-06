@@ -24,7 +24,7 @@ import math
 import unittest
 
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
-from Scripts.behaviour_tree import Selector, Sequence, Status
+from Scripts.behaviour_tree import Cooldown, Selector, Sequence, Status
 from Scripts.behaviour_nodes import (
     AttackNode,
     ChaseNode,
@@ -32,6 +32,8 @@ from Scripts.behaviour_nodes import (
     IdleNode,
     PatrolNode,
 )
+import Scripts.behaviour_tree as behaviour_tree_module
+import Scripts.behaviour_nodes as behaviour_nodes_module
 
 
 DT = 0.016
@@ -262,6 +264,91 @@ class TestFactoryPresets(unittest.TestCase):
         self.assertEqual(default_enemy.chase_calls, [])
 
 
+class FakeClock:
+    """Controllable stand-in for time.time() (same shape as the decorators
+    suite's FakeClock). Installed onto BOTH time-reading modules — Cooldown
+    lives in behaviour_tree, AttackNode in behaviour_nodes — so the preset's
+    two wall-clock timers advance in lockstep."""
+
+    def __init__(self, start=1000.0):
+        self.now = start
+
+    def time(self):
+        return self.now
+
+    def advance(self, seconds):
+        self.now += seconds
+
+
+class TestCautiousPreset(unittest.TestCase):
+    """Pre-v1.6 closure pass: the 'cautious' preset — first preset to wire a
+    decorator (Cooldown) into a shipping tree."""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self._saved = (behaviour_tree_module._time, behaviour_nodes_module._time)
+        behaviour_tree_module._time = self.clock
+        behaviour_nodes_module._time = self.clock
+
+    def tearDown(self):
+        behaviour_tree_module._time, behaviour_nodes_module._time = self._saved
+
+    def test_cautious_builds_cooldown_wrapped_attack(self):
+        tree = BehaviourTreeFactory.build("cautious", {})
+        self.assertIsInstance(tree, Selector)
+        # Shape: Selector([Sequence([Chase, Cooldown(Attack)]), Idle]).
+        self.assertEqual([type(c).__name__ for c in tree.children],
+                         ["Sequence", "IdleNode"])
+        chase, cooldown = tree.children[0].children
+        self.assertIsInstance(chase, ChaseNode)
+        self.assertIsInstance(cooldown, Cooldown)
+        self.assertIsInstance(cooldown.child, AttackNode)
+        # Engagement envelope pinned to the tuned constants (same as default).
+        self.assertEqual((chase.detection_range, chase.stop_range), (100, 30))
+        self.assertEqual((cooldown.child.attack_range, cooldown.child.cooldown),
+                         (30, 1.0))
+        self.assertEqual(cooldown.seconds, 3.0)
+
+    def test_cautious_cooldown_gates_fire_rate(self):
+        # In-range enemy: fires once, then the 3s Cooldown window replays the
+        # resolved SUCCESS without re-ticking AttackNode — even after the
+        # AttackNode's own 1.0s cooldown has elapsed.
+        tree = BehaviourTreeFactory.build("cautious", {})
+        enemy = MockEnemy(Vec(0, 0, 0), MockPlayer(Vec(10, 0, 0)))
+
+        self.assertIs(tree.tick(enemy, DT), Status.SUCCESS)
+        self.assertEqual(enemy.shoot_count, 1, "first in-range tick fires")
+
+        self.clock.advance(1.5)   # past AttackNode's 1.0s, inside Cooldown's 3.0s
+        self.assertIs(tree.tick(enemy, DT), Status.SUCCESS)
+        self.assertEqual(enemy.shoot_count, 1,
+                         "Cooldown window suppresses the second shot")
+
+        self.clock.advance(2.0)   # 3.5s total — window elapsed
+        self.assertIs(tree.tick(enemy, DT), Status.SUCCESS)
+        self.assertEqual(enemy.shoot_count, 2, "fires again once the window elapses")
+
+    def test_cautious_reevaluates_from_child_zero_each_tick(self):
+        # Stateless re-evaluation: after a shot, if the player leaves detection
+        # range, the NEXT tick must re-run ChaseNode (child 0), fail the
+        # Sequence there, and fall through to Idle — without ever consulting
+        # the Cooldown branch (no cursor resumes at the rate-limited attack).
+        tree = BehaviourTreeFactory.build("cautious", {})
+        player = MockPlayer(Vec(10, 0, 0))
+        enemy = MockEnemy(Vec(0, 0, 0), player)
+
+        tree.tick(enemy, DT)
+        self.assertEqual(enemy.shoot_count, 1)
+
+        player.position = Vec(500, 0, 0)          # leaves detection range
+        self.clock.advance(10.0)                   # Cooldown window long gone
+        self.assertIs(tree.tick(enemy, DT), Status.SUCCESS)  # Idle fallback
+        self.assertEqual(enemy.shoot_count, 1,
+                         "out-of-range tick must not reach the AttackNode")
+        self.assertEqual(enemy.chase_calls, [],
+                         "out of detection range — chase FAILs without stepping")
+
+
 class TestUnknownPreset(unittest.TestCase):
     """OUTPUT item 6: unknown preset warns and returns the default tree."""
 
@@ -298,7 +385,7 @@ class TestUnknownPreset(unittest.TestCase):
         import io
         import contextlib
         # Every preset with an empty config dict — none may KeyError.
-        for preset in ("default", "flee_when_low", "aggressive"):
+        for preset in ("default", "flee_when_low", "aggressive", "cautious"):
             with self.subTest(preset=preset):
                 tree = BehaviourTreeFactory.build(preset, {})
                 self.assertIsInstance(tree, Selector)

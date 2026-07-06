@@ -4,7 +4,7 @@ This is **Layer 3** of the three-layer design (see
 ``docs/v1.4-enemy-behaviour-trees.md``). Layer 1 (``behaviour_tree.py``) ships
 the compositors/decorators; Layer 2 (``behaviour_nodes.py``) ships the leaf
 nodes. This module ships the ``BehaviourTreeFactory`` — it composes those parts
-into the four named enemy presets and is the single place ``Enemy.__init__``
+into the five named enemy presets and is the single place ``Enemy.__init__``
 calls to build a tree.
 
 Why a separate file (not folded into ``behaviour_tree.py``)
@@ -68,7 +68,7 @@ from Scripts.behaviour_nodes import (
     IdleNode,
     PatrolNode,
 )
-from Scripts.behaviour_tree import BehaviourNode, Selector, Sequence
+from Scripts.behaviour_tree import BehaviourNode, Cooldown, Selector, Sequence
 
 # Tuned defaults — pinned to enemy.py's TUNE constants, not literals, so the
 # "default" preset tracks whatever those are tuned to (see module docstring).
@@ -121,7 +121,8 @@ class BehaviourTreeFactory:
 
     # Recognised preset names — used only to decide the unknown-preset warning;
     # the actual construction lives in the if/elif chain in build().
-    PRESETS = ("default", "patrol_then_attack", "flee_when_low", "aggressive")
+    PRESETS = ("default", "patrol_then_attack", "flee_when_low", "aggressive",
+               "cautious")
 
     @staticmethod
     def build(preset_name: str, config: dict, waypoint_factory=None) -> BehaviourNode:
@@ -199,6 +200,30 @@ class BehaviourTreeFactory:
             # 150/40/0.4): wider detection, longer reach, much faster fire rate.
             return Selector([
                 Sequence([ChaseNode(150, 40), AttackNode(40, 0.4)]),
+                IdleNode(),
+            ])
+
+        if preset_name == "cautious":
+            # Same engagement envelope as "default" (tuned constants), but the
+            # attack cycle is rate-limited by the Cooldown decorator: after the
+            # AttackNode resolves, Cooldown replays that resolved status for
+            # 3.0s WITHOUT re-ticking the node, so the enemy fires at most once
+            # per 3s instead of once per ENEMY_SHOOT_COOLDOWN (1.0s today) —
+            # it takes a shot, then holds fire and re-evaluates. First preset
+            # to exercise a decorator in the live frame loop (pre-v1.6 closure
+            # pass; see brain/Key Decisions "Decorators ship unit-tested but
+            # unexercised"). Note stop_range == attack_range and both nodes
+            # read the same position each tick, so the wrapped AttackNode can
+            # only resolve SUCCESS here — the Cooldown FAILURE-replay case is
+            # unreachable in this preset shape.
+            return Selector([
+                Sequence([
+                    ChaseNode(ENEMY_DETECTION_RANGE, ENEMY_ATTACK_RANGE),
+                    Cooldown(
+                        AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
+                        seconds=3.0,  # cautious fire interval — 3× the default cadence
+                    ),
+                ]),
                 IdleNode(),
             ])
 
