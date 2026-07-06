@@ -1,6 +1,6 @@
 from ursina import *
 from ursina.prefabs.first_person_controller import FirstPersonController
-from Scripts.weapon import Pistol, Shotgun, Rifle
+from Scripts.weapon import Pistol
 from Scripts.weapon_inventory import WeaponInventory
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import Layers, collision_manager, swept_move_blocked
@@ -33,11 +33,9 @@ class Player(FirstPersonController):
         self.skin_width = 0.1
         collision_manager.add(self, Layers.PLAYER)
         self.inventory = WeaponInventory(self)
+        # Slot 0 starts with the infinite-ammo Pistol (the pre-inventory default
+        # weapon); Shotgun/Rifle are granted by level-placed weapon pickups.
         self.inventory.give(Pistol(self), slot=0)
-        # Temporary: Shotgun/Rifle given directly here so they're testable in-game
-        # before Step 13's weapon_pickup entities exist. Remove once pickups grant them.
-        self.inventory.give(Shotgun(self), slot=1)
-        self.inventory.give(Rifle(self), slot=2)
         self.inventory.switch_to(0)
 
         self.debug_lines = []
