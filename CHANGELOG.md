@@ -5,6 +5,64 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.5.1] - 2026-07-06 — pre-v1.6 closure pass
+
+Closes both v1.5 tails (§5 combined regression; door/pickup content) before the v1.6 editor
+split begins, per the 2026-07-06 audit's sequencing decision. All steps in-app verified through
+`tests/smoke_test_harness.py` driving the real Ursina dispatch; 113/113 unit tests green.
+
+### Added
+- **`cautious` behaviour preset** (`Scripts/behaviour_tree_factory.py`) — the first shipping
+  preset to use a decorator in the live frame loop. Shape:
+  `Selector([Sequence([ChaseNode(tuned), Cooldown(AttackNode(tuned), 3.0)]), Idle])` — same
+  engagement envelope as `default` (tuned constants 100/30/1.0) with fire cadence rate-limited
+  to one shot per 3s by `Cooldown`. Live smoke check: 3 fire attempts in 7.5s vs a default
+  enemy's 8; zero attempts once the player left detection range (child-0 re-evaluation holds).
+- **Checkpoint consumer** (`Scripts/trigger_system.py`) — `game.respawn_point` (store-only since
+  v1.5) is now read by `kill_plane`: once a `checkpoint` trigger has fired, falling into a kill
+  plane teleports the player back to the recorded point at a cost of `KILL_PLANE_RESPAWN_COST`
+  (25 HP) instead of ending the game. Pre-checkpoint falls stay terminal. Health cost chosen over
+  brief invulnerability (no timer state in the damage paths; repeated falls still end the run —
+  the fourth fall from full health dies at the checkpoint through the player controller's single
+  death authority). Smoke-verified: terminal pre-checkpoint, 100→75 respawn, 4-fall drain to
+  GAME OVER.
+- **Curated level `levels/v1.json`**, shipped as the live `level.json` — the first level to
+  exercise doors, pickups, and non-default presets together: armory room gated by an
+  `open_door` pressure plate (`door_name: armory_door`) holding a `flee_when_low` enemy and the
+  Shotgun weapon/ammo pickups; NE patrol courtyard (placed >60u from spawn so the patrol branch
+  is actually observable) with two `patrol_then_attack` enemies on real multi-waypoint routes
+  guarding the Rifle pickups; checkpoint at a walled corridor mouth; lava pit (visual block +
+  `kill_plane` trigger) crossed on rising platforms; walled arena with an `aggressive` enemy and
+  the `win_condition` trigger. Intro enemy uses the new `cautious` preset (`default` already had
+  its live run in the v1.5 level). World-edge kill plane retained at y=-25.
+
+### Changed
+- **Weapon pre-grant removed** (`Scripts/player_controller.py`) — the player now starts with only
+  the slot-0 Pistol; Shotgun/Rifle are granted by the curated level's weapon pickups. Empty-slot
+  switching verified as a no-op; pickup-grant path verified live.
+
+### Fixed
+- **Smoke harness asset resolution** (`tests/smoke_test_harness.py`) — Ursina derives
+  `application.asset_folder` from `sys.argv[0]`, so `python -m tests.smoke_test_harness` resolved
+  assets against `tests/` and every scenario crashed at launch in Ursina's font setter — broken
+  since v1.5 added the Inter-Bold font. The harness now points `argv[0]` at the launched module
+  before the first ursina import. All four scenarios pass again.
+
+### Verified (closes the v1.5 §5 combined regression)
+- Full curated-level playthrough via the harness: 5 enemies spawn with the intended trees;
+  patrol enemies walked ~20u of route each in 4s and stayed in the courtyard; low-HP flee enemy
+  opened distance; door slid fully open; all 4 pickups granted/topped-up and consumed; checkpoint
+  recorded; lava respawn at exactly 75 HP; aggressive enemy contained in the arena; win trigger
+  fired over the new HUD; R returned to menu cleanly.
+- §5 combos: weapon pickup inside a trigger volume firing on the same entry frame; kill-plane
+  fall mid weapon-switch animation; pause (Esc) mid-reload with clean completion after resume;
+  programmatic window resize (1280→900→1280) mid-firefight; WIN and GAME OVER over the new HUD
+  followed by R-teardown (`win_then_r` / `gameover_then_r` scenarios).
+- Editor: `editor_f5_roundtrip` passes against the new level (load → play-in-editor → exit).
+- Remaining human-only checks (not blockers, recommended before itch.io): game-feel pass on the
+  platform jumps and enemy difficulty, OS-drag window resize (only the programmatic path is
+  covered), and visual readability of the lava/plate/pedestal markers.
+
 ## [1.5] - 2026-06-30 (in progress)
 
 ### Fixed

@@ -282,9 +282,7 @@ The same patch is duplicated in `level_editor.py` for standalone runs (compat.py
 | `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:76` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
 | `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:129-130` | Low | `left mouse down` fires `weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
 | `level_editor.py`: `_save_prefs()` has no error handling | `Scripts/level_editor.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
-| `checkpoint` action stores `game.respawn_point` with no consumer | `game.py:26`, `trigger_system.py:182` | Low | The `checkpoint` trigger action records `Vec3(player.position)` but nothing reads it — the death path is terminal (`trigger_game_over`). Store-only by design, accurately documented in code. A respawn-on-death mechanic would consume it. Decide: build the consumer or drop the action. (v1.5) |
-| v1.5 `open_door` + weapon/ammo pickups are code-complete but unexercised by `level.json` | `level.json`, `trigger_system.py`, `weapon.py` | Medium | Shipped level has 2 triggers (`kill_plane`, `win_condition`), **zero** door blocks / `open_door` triggers / pickups. Round-trip logic verified in code but never runs against real content. Player is still pre-given all 3 weapons in `Player.__init__` (temporary TODO) because no pickups exist to grant them. Place a door + pickup in a level, then remove the pre-give. (v1.5) |
-| v1.5 §5 combined manual regression not run | — | Medium | Static §1–§4 code audit passed; interactive combined-system playtest (pickup-near-trigger same-frame, kill-plane mid-switch, pause mid-reload, resize mid-firefight, WIN/GAME OVER over new HUD) deferred, not verified. Run before relying on v1.5 systems in shipped levels. |
+| Game-feel playtest of `levels/v1.json` not yet done by a human | `levels/v1.json` | Low | The 2026-07-06 closure pass verified all mechanics via the smoke harness (see CHANGELOG [1.5.1]); platform-jump feel, enemy difficulty, marker readability, and OS-drag window resize still want one hands-on pass before itch.io |
 
 > Bullet pool `POOL_SIZE_PLAYER` reviewed in v1.5 and **kept at 30** — measured 25/30 peak
 > under sustained real Rifle/Shotgun fire, so the spec's suggested 30→50 bump was evidence-rejected.
@@ -475,7 +473,7 @@ v1.5 shipped (trigger/zone system + weapon inventory API). v1.6 (level editor re
 
 ### Open items — v1.3 remainder (before itch.io)
 - [ ] PyInstaller macOS `.app` build, documented in README
-- [ ] One curated 5-enemy level saved as `levels/v1.json`
+- [x] One curated 5-enemy level saved as `levels/v1.json` (pre-v1.6 closure pass, 2026-07-06)
 - [ ] 1 shot SFX + 1 ambient track (CC-0 from freesound/Pixabay)
 - [ ] itch.io page with 2 screenshots + 30-second clip
 - [ ] Extract shader patch to `Scripts/compat.py`

@@ -90,12 +90,22 @@ Whole-project architecture audit run (Fable 5, xHigh effort), widened beyond the
 
 See: v1.6 audit report, 2026-07-06.
 
+## Pre-v1.6 Closure Pass Complete — 2026-07-06
+Both v1.5 tails are closed and the editor split is unblocked. Shipped as CHANGELOG [1.5.1]:
+- **`cautious` preset** — first live decorator use (`Cooldown` 3.0s over the tuned default envelope); in-gameplay smoke check per the standing v1.4 decorator decision (3 attempts/7.5s vs default's 8). `Invert`/`Repeat` remain unexercised.
+- **Checkpoint consumer** — `kill_plane` respawns at the last checkpoint for 25 HP once one is crossed; terminal before that (see [[brain/Key Decisions]]).
+- **Curated level `levels/v1.json`** (shipped as `level.json`) — first content to exercise doors, pickups, and all of patrol/flee/aggressive/cautious together; closes the v1.3-remainder curated-level item too.
+- **Weapon pre-grant removed** — Pistol-only start; Shotgun/Rifle gated behind level pickups.
+- **§5 combined regression run** against the new level via the smoke harness (playthrough + pickup-in-trigger same-frame, kill-plane mid-switch, pause mid-reload, resize mid-firefight, WIN/GAME-OVER + R). Harness itself fixed en route (argv[0]/asset_folder — see [[brain/Gotchas]]).
+
+Remaining human-only item (logged in CLAUDE.md tech debt, low): one hands-on game-feel pass of `levels/v1.json` (jump feel, difficulty, marker readability, OS-drag resize) before itch.io.
+
 ## Current Focus
 
 _What am I working toward right now?_
 
-- **Pre-v1.6 closure pass** — curated level (`levels/v1.json`), checkpoint consumer, weapon pre-grant removal, §5 regression. Prerequisite before the editor split begins.
-- **v1.6 module-boundary decision** — pending Ivan's manual review of the three candidates from the 2026-07-06 audit. See [[work/active/v1.6-level-editor-refactor]].
+- **v1.6 module-boundary decision** — pending Ivan's manual review of the three candidates (A/B/C) from the 2026-07-06 audit. The pre-v1.6 closure pass is done, so this is the only gate left before the editor split starts. See [[work/active/v1.6-level-editor-refactor]].
+- **Hands-on playtest of `levels/v1.json`** — mechanics are harness-verified; game-feel is not.
 
 ## Goals
 
@@ -152,4 +162,5 @@ Record when focus changes, with date and reason.
 | 2026-06-30 | v1.4 enemy behaviour trees shipped — focus moves to v1.5 trigger/zone + weapon inventory | Wrap-up integration audit passed all 9 steps (7/7 cross-step traces, 8/8 hard-rule classes, 110/110 unit tests); decorators shipped unit-tested but unexercised by any preset (logged). v1.3 + v1.4 docs archived to `work/archive/2026/`. See [[work/archive/2026/v1.4-enemy-behaviour-trees]] |
 | 2026-07-01 | v1.5 trigger/zone + weapon inventory shipped — focus moves to v1.6 level editor refactor | Wrap-up audit re-derived from committed code: 13/13 steps PASS, one hard-rule violation (PICKUP in COLLISION_MATRIX) fixed as its own step (`6b97cd4`). Two tails logged and carried forward (neither blocks v1.6): §5 combined manual regression not run; `open_door`/pickups code-complete but unexercised by `level.json`. System B + HUD landed as one squashed commit (interwoven working-tree snapshot from parallel worktrees, never branched). Stray `Co-Authored-By: Claude` trailer stripped from a v1.2.2 ancestor across `version_1.2–1.5` + force-pushed. v1.5 doc archived. See [[work/archive/2026/v1.5-gameplay-systems]] |
 | 2026-07-06 | v1.6 widened to whole-project audit; pre-v1.6 closure pass identified as prerequisite | Ivan's explicit request; audit surfaced a higher-leverage move before the editor split |
+| 2026-07-06 | Pre-v1.6 closure pass shipped ([1.5.1]) — both v1.5 tails closed, editor split unblocked | Curated level + checkpoint consumer + cautious preset + §5 regression all landed and harness-verified in one session; only the v1.6 module-boundary choice (Ivan's review) remains before the split |
 |      | Created North Star | Initial setup |

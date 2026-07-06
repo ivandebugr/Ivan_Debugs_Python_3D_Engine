@@ -232,3 +232,17 @@ Things that have bitten before and will bite again.
 **Root cause:** No validation on the assignment path.
 **Fix:** Not yet fixed — low severity, item 6 on [[work/active/v1.6-fix-backlog]].
 **Source:** v1.6 audit report, 2026-07-06
+
+## Ursina asset_folder derives from sys.argv[0], not cwd — 2026-07-06
+**Context:** Pre-v1.6 closure pass: every `tests/smoke_test_harness.py` scenario crashed at `launch_main()` in Ursina's `font_setter` (`AttributeError: 'NoneType' object has no attribute 'parent'`), broken silently since v1.5 added `assets/fonts/Inter-Bold.ttf`.
+**Symptom:** Assets that resolve fine under `python main.py` fail when the same code is launched via `python -m tests.smoke_test_harness`, a wrapper script, or any other entry point in a different folder.
+**Root cause:** `ursina.application` computes `asset_folder` (and `fonts_folder`) from `sys.argv[0]`'s parent **at first import** — not from the cwd and not from the module being run. Under `python -m tests.smoke_test_harness`, argv[0] is the harness file, so every asset resolved against `tests/`.
+**Fix:** Set `sys.argv[0]` to the target module's path *before the first ursina import* (the harness now does this in `_run_module_without_blocking`, restored after launch). Any future launcher/driver script must do the same.
+**Source:** CHANGELOG [1.5.1]; `tests/smoke_test_harness.py`
+
+## patrol_then_attack is invisible unless the route is >60u from wherever the player stands — 2026-07-06
+**Context:** Authoring `levels/v1.json` — placing the two patrol enemies so their patrol behaviour is actually observable.
+**Symptom:** A patrol enemy placed anywhere near the play area never patrols — it beelines at the player from frame 0 and appears identical to `default`.
+**Root cause:** The preset's `ChaseNode(60, 25)` detection is pure distance — no line-of-sight check — and the ground plane is only 100×100 with the player spawning at its centre, so most legal positions are within 60u of spawn. The chase branch preempts the patrol branch whenever the player is inside detection.
+**Fix (design rule, not code):** Every waypoint of a patrol route must be >60u from the player spawn (and from wherever you want patrol to be watchable). In `levels/v1.json` the courtyard routes are pinned to the far NE corner (min spawn distance ≈61.5u), verified live: ~20u of route walked per enemy over 4s with the player at spawn. Walling a patroller in doesn't help — it just paces the wall (enemies shoot without LOS too; bullets are absorbed by walls).
+**Source:** `levels/v1.json`; CHANGELOG [1.5.1]; `Scripts/behaviour_tree_factory.py` (`patrol_then_attack` literals)

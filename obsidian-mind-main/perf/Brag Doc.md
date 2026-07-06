@@ -15,6 +15,9 @@ A running log of impact, wins, and growth. Each quarter is its own note — open
 |---------|-----------|--------|
 |         |           |        |
 
+## 2026-07-06 — Shipped the pre-v1.6 closure pass ([1.5.1])
+Closed both v1.5 tails in one session: authored the first curated level (`levels/v1.json` — doors, pickups, checkpoint/kill-plane gauntlet, all five behaviour presets live), built the checkpoint-respawn consumer, removed the weapon pre-grant, and ran the deferred §5 combined regression end-to-end through the smoke harness (which I also fixed — argv[0]/asset_folder had silently broken every scenario since v1.5). First decorator (`Cooldown`) exercised in the live frame loop with a measured 3-vs-8 fire-cadence proof. 113/113 unit tests; 7 clean commits. See [[brain/Key Decisions]] and CHANGELOG [1.5.1].
+
 ## 2026-05-20 — Shipped v1.2
 Shipped v1.2 across four tracks in a single session: Game state machine (`Scripts/game.py`) replacing all module-level globals; `_clear_gameplay_entities()` as the single canonical 6-step teardown; `level.json` schema expanded with block colour/rotation and enemy HP/type/rotation — all backwards-compatible; 8 Unity-feel editor features (configurable grid snap, command-pattern undo/redo stack, multi-select + box-select, inspector panel, hierarchy panel, transform gizmos, camera bookmarks persisted to `editor_prefs.json`, play-in-editor F5 toggle). Two new core modules: `Scripts/game.py`, `Scripts/undo_redo.py`. See [[work/active/v1.2-level-editor-overhaul]].
 
