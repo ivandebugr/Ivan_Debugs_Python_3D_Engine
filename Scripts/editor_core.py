@@ -218,7 +218,7 @@ class LevelEditor(Entity):
 
         # Stats strip — a legible, labelled entity/collider readout beside the toolbar
         # (replaces Ursina's tiny corner window.entity_counter/collider_counter, which
-        # are disabled in __main__). Counts the editor's own blocks/enemies so the
+        # are disabled in level_editor.py's launch block). Counts the editor's own blocks/enemies so the
         # labels can stay verbose; updated once a second from update() (see _STATS_*).
         self._stats_text = Text(
             text='entities: 0   colliders: 0',
@@ -265,8 +265,8 @@ class LevelEditor(Entity):
             eternal=True,
         )
 
-        # Top-left overlay (hint text + its backing panel). Assigned/built by __main__
-        # after construction via _attach_hint_background().
+        # Top-left overlay (hint text + its backing panel). Assigned/built by
+        # level_editor.py's launch block after construction via _attach_hint_background().
         self._hint_text = None
         self._hint_bg = None
 
@@ -585,7 +585,8 @@ class LevelEditor(Entity):
         # ('texture_orange_test') only works when application.asset_folder points at
         # the project root; the editor runs standalone with asset_folder='Scripts',
         # so the bare glob misses and the volume renders untextured. PROJECT_ROOT is
-        # the same absolute-path resolution the ground texture (below) already uses.
+        # the same absolute-path resolution the ground texture (level_editor.py's
+        # launch block) already uses.
         trig_tex = None
         try:
             tex_path = PROJECT_ROOT / 'assets' / 'textures' / f'{self._TRIGGER_TEXTURE}.png'
