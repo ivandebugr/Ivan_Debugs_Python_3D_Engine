@@ -11,7 +11,7 @@ This file is the authoritative operating manual loaded at the start of every Cla
 
 | Field            | Value                                                                 |
 |------------------|-----------------------------------------------------------------------|
-| Version          | 1.5 (see `CHANGELOG.md`)                                              |
+| Version          | 1.6 (see `CHANGELOG.md`)                                              |
 | Engine           | Ursina 8.3.0 (Panda3D 1.10.16)                                        |
 | Language         | Python 3.10+                                                          |
 | Genre            | First-person shooter                                                  |
@@ -70,7 +70,8 @@ See **Obsidian Mind Integration** below.
 
 ### Module Map
 ```
-main.py                    — App init, window setup, _patch_shaders_to_glsl120() (called twice),
+main.py                    — App init, window setup, shader patch via Scripts/compat.py
+                             patch_shaders_to_glsl120() (called twice),
                              _clear_gameplay_entities(), PlayerHUD, PauseMenu, EndScreen,
                              load_level(), main_menu(), global update()/input()
                              PlayerHUD: owns crosshair, hint_text, health_bar ref (not lifetime);
@@ -119,50 +120,93 @@ Scripts/
                              HealthBar._registry class list (maintained by __init__/on_destroy);
                              on_destroy() explicitly destroys camera.ui text (not cascade-destroyed).
                              No eternal=True anywhere in this file.
-  level_editor.py          — LevelEditor(Entity): EDITOR_GRID_SNAPS=(1.0,0.5,0.25,None) constant;
-                             snap/undo/redo/multi-select/inspector/hierarchy/gizmos/bookmarks/
-                             play-in-editor/drag-and-drop placement via asset browser Models tab.
+  level_editor.py          — Standalone editor entry point ONLY (v1.6 split, 103 lines).
+                             _launch(): prc multisample → compat shader patch BEFORE Ursina()
+                             (HC10) → hot-reloader disable (Ursina binds F5 to scene.clear!) →
+                             window setup → ground plane → LevelEditor() + EditorCamera + hint
+                             legend. __main__ = `app = _launch(); app.run()` — the module-level
+                             `app` name and trailing app.run() are load-bearing for
+                             tests/smoke_test_harness.py. Runnable: `python Scripts/level_editor.py`
+  editor_core.py           — LevelEditor(Entity) core class (v1.6 split): EDITOR_GRID_SNAPS=
+                             (1.0,0.5,0.25,None); BUILTIN_MODELS (Cube/Stone/Metal/Wood/Enemy/
+                             Trigger/Pickup synthetic Models-tab entries); toolbar; selection/
+                             box-select; grid snap; trigger/pickup placeholder factories
+                             (_make_trigger_entity/_make_pickup_entity); _build_level_data();
+                             save/load; prefs/bookmarks; input()/update() dispatchers (v1.2.4
+                             priority chain: gizmo → picker → panels → browser → tool action).
+                             Five collaborators reach shared state via editor back-ref: self
+                             .hierarchy/.gizmo/.browser/.inspector/.playmode (each own module).
                              **Tool modes**: self._tool = 'move'|'place'. Move: left-click selects only.
                              Place: left-click on collidable non-editor surface places a block.
                              [↖ Move]/[+ Place] toolbar buttons call _set_tool(mode).
-                             **Inspector**: 6 fields (pos_x/y/z, scl_x/y/z only). HP/rotation/colour/
-                             texture/enemy_type still round-trip through level.json — display-only
-                             simplification. Labels use world_scale=Vec3(15,15,1) + setBin('fixed',41)
-                             on the Entity (NOT scale= which inherits tiny panel scale → microscopic).
                              **Delete key**: accepts 'delete' AND 'backspace' (macOS). Editor
-                             placeholders use destroy() not die() — they are plain Entity, not AliveEntity.
+                             placeholders use destroy() not die() — plain Entity, not AliveEntity.
                              **_apply_layout()**: repositions all border-anchored UI from window.aspect_ratio;
                              invoked via wrapped window.update_aspect_ratio. Also refreshes camera lens.
                              Toolbar widths: _TOOLBAR_BTN_W_BASE × min(1, aspect/_TOOLBAR_REF_ASPECT).
-                             **Hierarchy panel**: single row-position formula _hier_row_y(visual_index) —
-                             NEVER add a second inline y formula or scroll indicator will drift.
+                             **Toolbar**: horizontal strip above inspector. _TOOLBAR_Y=0.475. No ▶ glyph.
+                             Toolbar buttons: play_button text always black; Move/Place black-when-active.
+                             Stats strip (_stats_text): 'entities: N  colliders: N', refreshed ~1/s.
+                             **eternal=True**: ALL persistent editor UI uses eternal=True (survives
+                             play-in-editor teardown). Level blocks/enemies do NOT — they must be
+                             destroyable. Theme: _THEME_* constants (0–1 floats).
+                             Core keeps one-line delegators with original names (_refresh_hierarchy,
+                             _refresh_behaviour_ui, _update_inspector, …) — undo_redo.py's commands
+                             call them on the editor; do NOT rename or bypass.
+  editor_hierarchy.py      — HierarchyPanel (v1.6 split; editor back-ref): left-hand list UI.
+                             Single row-position formula _hier_row_y(visual_index) — NEVER add a
+                             second inline y formula or scroll indicator will drift.
                              _hier_visual_rows() is the layout model (header/row tuples). Transient
                              row buttons/swatches are NOT eternal=True — destroy() is a no-op on
                              eternal entities (ursina/destroy.py:27), they would leak on every rebuild.
                              Search box (_hier_search_field): live filter via on_value_changed.
                              Collapse marker: ASCII [+]/[-] — OpenSans has no triangle glyphs.
-                             **Toolbar**: horizontal strip above inspector. _TOOLBAR_Y=0.475. No ▶ glyph.
-                             Toolbar buttons: play_button text always black; Move/Place black-when-active.
-                             Stats strip (_stats_text): 'entities: N  colliders: N', refreshed ~1/s.
-                             **Asset browser**: _build_asset_browser(), full-width bottom strip
+                             Scroll-bar rgba(0.78,0.78,0.78,0.47).
+  editor_gizmo.py          — GizmoController (v1.6 split; editor back-ref): X/Y/Z handle geometry
+                             (build/refresh), per-frame axis drag + MoveEntityCommand push,
+                             cursor_ray() pick helper, try_begin_drag() = input() Step 1.
+                             Pick sweep short-circuits on e.is_empty() before .name (HC13).
+  editor_browser.py        — AssetBrowser (v1.6 split; editor back-ref): full-width bottom strip
                              (_BROWSER_Y=-0.40, _BROWSER_H=0.20). Tabs: Textures|Models|Sounds.
-                             Built-in types (Cube/Stone/Metal/Wood/Enemy) are synthetic Models-tab
-                             entries via BUILTIN_MODELS. Textures load via Texture(Path(path)) —
-                             raw path strings fail silently. _is_over_browser() suppresses EditorCamera zoom.
-                             **eternal=True**: ALL persistent editor UI uses eternal=True (survives
-                             play-in-editor teardown). Level blocks/enemies do NOT — they must be
-                             destroyable. _restore_editor_level() rebuilds from _play_level_snapshot.
-                             _exit_play_mode: sets game.state=MAIN_MENU before try; except ImportError only.
-                             Theme: _THEME_* constants (0–1 floats). Scroll-bar rgba(0.78,0.78,0.78,0.47).
-                             Standalone runnable: `python Scripts/level_editor.py`
-                             SessionLogger singleton → logs/session_YYYYMMDD_HHMMSS.log on exit (atexit).
+                             Texture/model picker overlays; texture hot-reload (subscribe/poll/
+                             reload on a 2s timer); import pipeline + native file picker;
+                             drag-ghost placement; status-notice toast.
+                             Textures load via Texture(Path(path)) — raw path strings fail
+                             silently. _is_over_browser() suppresses EditorCamera zoom.
+  editor_inspector.py      — InspectorPanel (v1.6 split; editor back-ref): right-hand panel.
+                             6 fields (pos_x/y/z, scl_x/y/z), texture swatch, model field,
+                             door-name field, and the three mutually-exclusive lower-band
+                             sections (behaviour-tree config / trigger actions / pickup config).
+                             HP/rotation/colour/enemy_type still round-trip through level.json —
+                             display-only simplification. Labels use world_scale=Vec3(15,15,1) +
+                             setBin('fixed',41) on the Entity (NOT scale= which inherits tiny
+                             panel scale → microscopic).
+  editor_playmode.py       — PlayModeController (v1.6 split; editor back-ref): F5 round-trip.
+                             _enter_play_mode snapshots via _build_level_data, hides UI, disables
+                             EditorCamera; _spawn_gameplay_from_snapshot mirrors main.start_game()
+                             (Player/Enemy+trees/TriggerZones/AmmoPickups, then game.start()).
+                             _restore_editor_level() rebuilds placeholders from the snapshot.
+                             _exit_play_mode: sets game.state=MAIN_MENU before try; except
+                             ImportError only. `_play_mode` flag stays ON THE EDITOR (core/gizmo/
+                             browser read it); snapshot + saved-camera state live here.
+  compat.py                — patch_shaders_to_glsl120() shared by main.py and the editor entry
+                             (v1.6 step 1 — closes the copy-paste tech-debt row). HC10 ordering
+                             unchanged: call before Ursina(); main.py keeps its second
+                             post-window-setup call.
+  asset_resolve.py         — resolve_texture()/resolve_model() (v1.6 step 5, relocated from
+                             undo_redo.py): bridge the framework-free asset_registry to Ursina
+                             loaders. undo_redo imports them under the old private names.
   session_logger.py        — SessionLogger: stdlib-only; logger.log(level, msg) / logger.flush().
                              Levels: INFO | WARN | ERROR. Format: [HH:MM:SS.mmm] [LEVEL] message.
-                             Instantiated once at module level in level_editor.py as `logger`.
-  undo_redo.py             — Command pattern: UndoRedoStack (depth 50) + 6 command types:
-                             PlaceEntityCommand, DeleteEntityCommand, MoveEntityCommand,
-                             ChangeTextureCommand, ChangeColourCommand, ChangePropertyCommand.
-                             _restore_entity() helper sets origin_y=-0.5 for enemy redo.
+                             get_editor_logger()/get_game_logger() cached accessors — all editor_*
+                             modules share one log file per run (SessionLogger() alone is NOT a
+                             singleton). logs/session_YYYYMMDD_HHMMSS.log on exit (atexit).
+  undo_redo.py             — Command pattern: UndoRedoStack (depth 50) + 10 command types:
+                             PlaceEntity, DeleteEntity, MoveEntity, ChangeTexture, ChangeModel,
+                             ChangeColour, ChangeProperty, ChangeBehaviour, ChangeTriggerActions,
+                             ChangePickupConfig. _restore_entity() helper sets origin_y=-0.5 for
+                             enemy redo. Commands call editor._refresh_* delegators by name —
+                             keep those names stable in editor_core.
   level_io.py              — Canonical level data loader. load_level_data(path_or_list) returns
                              normalised list of entity dicts with all fields filled (position,
                              rotation, scale, colour, texture; enemies also hp/enemy_type/rotation_y).
@@ -255,11 +299,11 @@ Inactive bullets are parked at `BulletPool._PARK = Vec3(0, -10000, 0)`. **Never*
 
 ## Ursina 8.3.0 Compatibility (macOS / OpenGL 2.1)
 
-`_patch_shaders_to_glsl120()` is called **twice**: once before `Ursina()`, and once after all
-window setup. Targets three shaders: `unlit_shader`, `unlit_with_fog_shader`, `text_shader` —
-both direct-import instances AND `ursina.shader.imported_shaders` dict entries.
+`patch_shaders_to_glsl120()` (shared `Scripts/compat.py` since v1.6) is called **twice** in
+main.py: once before `Ursina()`, and once after all window setup; the editor entry point calls
+it once before `Ursina()`. Targets three shaders: `unlit_shader`, `unlit_with_fog_shader`,
+`text_shader` — both direct-import instances AND `ursina.shader.imported_shaders` dict entries.
 **Do not** upgrade shaders back to `#version 130+` without a verified Core Profile context.
-The same patch is duplicated in `level_editor.py` for standalone runs (compat.py TODO).
 
 **Other 8.3.0 changes:**
 - `window.color` default → black; set to `color.rgb(0.196, 0.196, 0.235)` (≈50,50,60 in 0–1) after `App()`
@@ -269,7 +313,8 @@ The same patch is duplicated in `level_editor.py` for standalone runs (compat.py
 **Ursina 8.3.0 API footguns** (see `brain/Gotchas.md` for full context):
 - **`color.rgb()` expects 0–1 floats.** `color.rgb(80,120,200)` clamps to white. Use `color.rgb32()` for 0–255.
 - **`InputField.submit_on` defaults to `[]`.** Set `field.submit_on = ['enter']`. Callback must be no-arg.
-- **Pick ray: `camera.lens.extrude`, not `camera.forward`.** See `LevelEditor._cursor_ray()`.
+- **Pick ray: `camera.lens.extrude`, not `camera.forward`.** See `GizmoController.cursor_ray()`
+  (`Scripts/editor_gizmo.py`).
 
 ---
 
@@ -277,11 +322,10 @@ The same patch is duplicated in `level_editor.py` for standalone runs (compat.py
 
 | Issue | Location | Priority | Notes |
 |---|---|---|---|
-| `_patch_shaders_to_glsl120()` copy-pasted in `level_editor.py` | `level_editor.py:1168-1306` | Low | Extract to shared `Scripts/compat.py`; `compat.py` does not exist yet |
 | `start_game()` duplicates player teardown from `_clear_gameplay_entities` | `main.py:212-220` | Medium | Inline teardown block repeats logic already in `_clear_gameplay_entities`. Should call `game.return_to_menu()` before respawning, not repeat teardown inline |
 | `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:76` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
 | `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:129-130` | Low | `left mouse down` fires `weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
-| `level_editor.py`: `_save_prefs()` has no error handling | `Scripts/level_editor.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
+| `editor_core.py`: `_save_prefs()` has no error handling | `Scripts/editor_core.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
 | Game-feel playtest of `levels/v1.json` not yet done by a human | `levels/v1.json` | Low | The 2026-07-06 closure pass verified all mechanics via the smoke harness (see CHANGELOG [1.5.1]); platform-jump feel, enemy difficulty, marker readability, and OS-drag window resize still want one hands-on pass before itch.io |
 
 > Bullet pool `POOL_SIZE_PLAYER` reviewed in v1.5 and **kept at 30** — measured 25/30 peak
@@ -372,7 +416,7 @@ Log new footguns → `brain/Gotchas.md` in the vault.
 
 ### Adding a New Level Feature
 1. Add entry type to `level.json` schema
-2. Handle the new type in `load_level()` (main.py) and `load_existing_level()` (level_editor.py)
+2. Handle the new type in `load_level()` (main.py) and `load_existing_level()` (editor_core.py)
 3. Add cleanup to `_clear_gameplay_entities()` and the entity-clearing loop in `main_menu()`
 
 ### Using the Level Editor (v1.3+)
@@ -469,20 +513,22 @@ Return-to-menu: `PauseMenu.return_to_main_menu()` → `game.return_to_menu()` �
 
 ## Roadmap
 
-v1.5 shipped (trigger/zone system + weapon inventory API). v1.6 (level editor refactor — split `level_editor.py` into modules) is next. Full history: `brain/North Star.md`.
+v1.6 shipped 2026-07-07 (level editor refactor — `level_editor.py` split into `editor_core` +
+five collaborator modules + `compat`/`asset_resolve`; zero behaviour change, see CHANGELOG
+[1.6.0]). Full history: `brain/North Star.md`.
 
 ### Open items — v1.3 remainder (before itch.io)
 - [ ] PyInstaller macOS `.app` build, documented in README
 - [x] One curated 5-enemy level saved as `levels/v1.json` (pre-v1.6 closure pass, 2026-07-06)
 - [ ] 1 shot SFX + 1 ambient track (CC-0 from freesound/Pixabay)
 - [ ] itch.io page with 2 screenshots + 30-second clip
-- [ ] Extract shader patch to `Scripts/compat.py`
+- [x] Extract shader patch to `Scripts/compat.py` (v1.6 step 1, 2026-07-06)
 
 ### Open items — post-demo engine
 - [x] Pluggable enemy behaviour trees — patrol / attack / flee state composition (v1.4, shipped 2026-06-30)
 - [x] Trigger/zone system — volume entry/exit callbacks (v1.5, shipped 2026-07-01)
 - [x] Weapon inventory API — multi-weapon, ammo pickup, switch animations (v1.5, shipped 2026-07-01)
-- [ ] Level editor refactor — split `level_editor.py` into focused modules (v1.6, next)
+- [x] Level editor refactor — split `level_editor.py` into focused modules (v1.6, shipped 2026-07-07)
 
 ---
 

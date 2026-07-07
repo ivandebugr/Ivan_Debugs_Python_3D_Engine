@@ -5,6 +5,67 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.6.0] - 2026-07-07 — level editor refactor
+
+Splits the 4,169-line `Scripts/level_editor.py` monolith into seven focused modules with zero
+behaviour change — the milestone planned since 2026-06-26 for human navigability and agent
+productivity. Every step verified in-app through `tests/smoke_test_harness.py` driving the real
+Ursina dispatch (163 step-specific checks across steps 2–6 plus the 4 standing scenarios after
+every step); 113/113 unit tests green throughout.
+
+### Changed
+- **`Scripts/level_editor.py`** (4,169 → 103 lines) is now only the standalone entry point:
+  shader patch before `Ursina()` (HC10 order preserved), F5 hot-reloader disable, window setup,
+  ground plane, hint legend — all inside `_launch()`, with a two-line `__main__`
+  (`app = _launch(); app.run()`). The harness contract (module-level `app`, final blocking
+  `app.run()`) is unchanged.
+- **`Scripts/editor_core.py`** (new, 1,346 lines) — the `LevelEditor` class: toolbar + tool
+  modes, selection/box-select, grid snap, trigger/pickup placeholder factories, level-data
+  serialisation + save/load, prefs/bookmarks, resize layout, stats strip, and the
+  `input()`/`update()` dispatchers (v1.2.4 priority chain preserved) routing to five
+  collaborator classes, each reaching shared state through an editor back-reference:
+  - **`Scripts/editor_hierarchy.py`** (282) — `HierarchyPanel`: left-hand list, search filter,
+    collapsible sections, swatches, scroll bar, highlight.
+  - **`Scripts/editor_gizmo.py`** (194) — `GizmoController`: X/Y/Z handles, drag translation +
+    `MoveEntityCommand` push, cursor-ray pick.
+  - **`Scripts/editor_browser.py`** (1,032) — `AssetBrowser`: tabbed bottom band, texture/model
+    picker overlays, texture hot-reload, import pipeline + native file picker, drag-ghost
+    placement, status-notice toast.
+  - **`Scripts/editor_inspector.py`** (1,201) — `InspectorPanel`: field grid, texture swatch,
+    model/door fields, behaviour-tree / trigger-action / pickup-config sections.
+  - **`Scripts/editor_playmode.py`** (241) — `PlayModeController`: F5 snapshot → spawn →
+    teardown → restore round-trip, editor-camera save/restore. `_exit_play_mode` invariants
+    (state set before teardown try, `except ImportError` only) preserved verbatim.
+- **`Scripts/compat.py`** (new, 167) — the GLSL 1.20 shader patch, deduplicated out of both
+  `main.py` and the editor `__main__` (closes the long-standing tech-debt row).
+- **`Scripts/asset_resolve.py`** (new, 77) — `resolve_texture`/`resolve_model` relocated out of
+  `undo_redo.py` (they bridge the framework-free `asset_registry` to Ursina loaders and were
+  never command-specific); `undo_redo` imports them under the old private names, command bodies
+  unchanged.
+- **`Scripts/session_logger.py`** — `get_editor_logger()` accessor (same cached pattern as
+  `get_game_logger`) so all editor modules share one log file per run.
+
+### Fixed
+- **Gizmo pick unguarded `e.name` sweep** (moved into `editor_gizmo.py`) — the pick's
+  `scene.entities` sweep read `.name` on entities `destroy()`ed earlier the same frame
+  (emptied NodePaths still in the list → C++ assertion `except` cannot catch, HC13 family).
+  The sweep now short-circuits on `e.is_empty()` first; repro survives in-app.
+- **Inspector/browser integration miss** caught by the in-app run during step 5 — the picker
+  build read `_INSP_LABEL_WS` off the editor after the constant moved to `InspectorPanel`.
+
+### Verified (step 9 wrap-up audit)
+- Import graph of the editor modules is acyclic — collaborators never import `editor_core`;
+  back-references are runtime-only.
+- Hard constraints spot-checked present post-split: HC10 (patch before `Ursina()` in both entry
+  points), HC12 (Move tool never places), HC13 (`is_empty` guards), HC16
+  (`update_aspect_ratio` wrap), HC17 (no empty-Text writes introduced).
+- Two full F5/toggle play-in-editor round-trips with real state-restore assertions (24 checks:
+  entity counts, `game.state`, player spawn/clear, UI hide/show, camera disable/re-enable +
+  position restore, snapshot lifecycle).
+- Test docstrings that pointed at monolith line numbers updated to the new module layout.
+
+---
+
 ## [1.5.1] - 2026-07-06 — pre-v1.6 closure pass
 
 Closes both v1.5 tails (§5 combined regression; door/pickup content) before the v1.6 editor
