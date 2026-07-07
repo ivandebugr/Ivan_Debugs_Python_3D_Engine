@@ -217,10 +217,19 @@ class GameTestHarness:
         sweeps an empty scene and never touches the player/enemy/EndScreen
         teardown that the v1.2.5 NodePath crash lived in. start_game() is a
         closure inside main_menu() (main.py:290) so it can't be called directly;
-        invoking play_button.on_click() is the faithful equivalent."""
+        invoking play_button.on_click() is the faithful equivalent.
+
+        main.py boots into IntroScreen (main.py:796) before main_menu() is ever
+        built (v1.7) — IntroScreen.input() advances to main_menu() on any
+        key/click (main.py:603-605). Dismiss it the same way a human would
+        (press any key) before looking for the Play button, or main_menu()
+        never runs and the search below finds nothing."""
         if self.app is None:
             raise RuntimeError("launch_main() before start_real_game()")
         from ursina import scene
+        if any(type(e).__name__ == "IntroScreen" for e in scene.entities):
+            self.press("space")
+            self.step(1)
         play_button = next(
             (e for e in scene.entities if getattr(e, "text", None) == "Play"),
             None,
