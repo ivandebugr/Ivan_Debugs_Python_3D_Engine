@@ -162,7 +162,7 @@ class AssetBrowser:
             z=-1,
             eternal=True,
         )
-        title.world_scale = Vec3(ed._INSP_LABEL_WS, ed._INSP_LABEL_WS, 1)
+        title.world_scale = Vec3(ed.inspector._INSP_LABEL_WS, ed.inspector._INSP_LABEL_WS, 1)
 
         cells = []  # [(bg_entity, name)]
         top_y = 0.5 - title_strip / panel_h - (pad * 0.5 + cell * 0.5) / panel_h
@@ -190,7 +190,7 @@ class AssetBrowser:
                 z=-1,
                 eternal=True,
             )
-            cell_label.world_scale = Vec3(ed._INSP_LABEL_WS * 0.6, ed._INSP_LABEL_WS * 0.6, 1)
+            cell_label.world_scale = Vec3(ed.inspector._INSP_LABEL_WS * 0.6, ed.inspector._INSP_LABEL_WS * 0.6, 1)
             cells.append((bg, name))
 
         self._asset_picker_panels[category] = panel
@@ -234,7 +234,7 @@ class AssetBrowser:
 
     def open_texture_picker(self):
         """Open the texture picker overlay near the inspector's texture swatch."""
-        self._open_asset_picker('texture', self.editor._insp_tex_swatch, self._apply_texture_pick)
+        self._open_asset_picker('texture', self.editor.inspector._insp_tex_swatch, self._apply_texture_pick)
 
     def close_texture_picker(self):
         self._close_asset_picker()
@@ -268,7 +268,7 @@ class AssetBrowser:
         ed = self.editor
         if any(e in ed.enemies for e in ed.selected):
             return
-        self._open_asset_picker('model', ed._insp_model_field, self._apply_model_pick)
+        self._open_asset_picker('model', ed.inspector._insp_model_field, self._apply_model_pick)
 
     def _apply_model_pick(self, name):
         """Apply `name`'s model to every selected block as one undo step, then close."""
