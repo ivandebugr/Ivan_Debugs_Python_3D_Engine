@@ -21,11 +21,16 @@ from Scripts.session_logger import get_editor_logger
 logger = get_editor_logger()
 
 
-if __name__ == '__main__':
+def _launch():
+    """Build the standalone editor app and return it; the caller runs it.
+
+    Order matters and is preserved from the monolith: prc multisample config,
+    then the GLSL 1.20 shader patch BEFORE Ursina() — Ursina's own window/UI
+    entities compile shaders during __init__ (Hard Constraint 10) — then
+    window setup, ground plane, LevelEditor + EditorCamera, hint legend.
+    """
     loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')
 
-    # Patch shader source objects BEFORE Ursina() — Ursina's own window/UI entities
-    # compile shaders during __init__, so the patch must happen before App() runs.
     from Scripts.compat import patch_shaders_to_glsl120 as _patch_shaders_to_glsl120
     _patch_shaders_to_glsl120()
     app = Ursina(title="Level Editor")
@@ -62,7 +67,7 @@ if __name__ == '__main__':
     window.borderless = False
     window.size = (1280, 720)
 
-    ground = Entity(
+    Entity(
         model='plane',
         collider='box',
         y=-0.5,
@@ -73,8 +78,7 @@ if __name__ == '__main__':
     )
 
     editor = LevelEditor()
-    editor_cam = EditorCamera()
-    editor._editor_camera = editor_cam
+    editor._editor_camera = EditorCamera()
 
     editor._hint_text = Text(
         text="Drag from Models tab: Place block/enemy | Shift+LClick: Select | RDrag: Box-select\n"
@@ -91,4 +95,9 @@ if __name__ == '__main__':
     editor._attach_hint_background()   # dark backing panel sized to the legend (Change D)
     editor._apply_layout()
 
+    return app
+
+
+if __name__ == '__main__':
+    app = _launch()
     app.run()
