@@ -35,10 +35,10 @@ SAFETY MODEL
     script gives up and escalates — it will not loop forever.
 
 USAGE
-  python3 scripts/auto_fix_loop.py
-  python3 scripts/auto_fix_loop.py --scenario win_then_r
-  python3 scripts/auto_fix_loop.py --max-iterations 8 --max-budget-usd 2.00
-  python3 scripts/auto_fix_loop.py --base-branch develop   # if you don't
+  python3 tools/auto_fix_loop.py
+  python3 tools/auto_fix_loop.py --scenario win_then_r
+  python3 tools/auto_fix_loop.py --max-iterations 8 --max-budget-usd 2.00
+  python3 tools/auto_fix_loop.py --base-branch develop   # if you don't
                                                              # use 'main'
 """
 

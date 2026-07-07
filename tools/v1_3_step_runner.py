@@ -2,10 +2,10 @@
 """
 v1_3_step_runner.py — Orchestrator for v1.3 asset-import-pipeline Steps 4-7.
 
-Extends the existing auto-fix tooling (Scripts/auto_fix_loop.py,
+Extends the existing auto-fix tooling (tools/auto_fix_loop.py,
 tests/smoke_test_harness.py) rather than replacing it. This script handles
 the FEATURE side (generate -> implement -> verify -> human checkpoint ->
-vault update -> commit); Scripts/auto_fix_loop.py remains the BUG side
+vault update -> commit); tools/auto_fix_loop.py remains the BUG side
 (crash signature -> fix -> re-verify). They are not merged: a feature step
 here may itself fail and need a fix, but that fix is driven by this
 script's own retry loop (PART 3), not by auto_fix_loop.py, because feature
@@ -14,7 +14,7 @@ crash signature still reproduce".
 
 WORKFLOW (one step at a time):
 
-  python3 scripts/v1_3_step_runner.py --step 5
+  python3 tools/v1_3_step_runner.py --step 5
       -> generates the implementation prompt for Step 5 from
          docs/v1.3-asset-import-pipeline.md
       -> invokes Claude Code headlessly to implement it
@@ -24,7 +24,7 @@ WORKFLOW (one step at a time):
       -> on pass: prints the PART 4 manual checklist and EXITS. Does not
          proceed further. No flag skips this checkpoint.
 
-  python3 scripts/v1_3_step_runner.py --step 5 --step-confirmed
+  python3 tools/v1_3_step_runner.py --step 5 --step-confirmed
       -> (only after you've manually verified the checklist above)
       -> runs the vault-update prompt scoped to this step's diff
       -> commits (one commit if step 3 needed no real fix beyond the
@@ -305,7 +305,7 @@ def build_implementation_prompt(cfg: dict) -> str:
 {context_block}
 
 This is an autonomous implementation session for v1.3 Step {step_num}
-("{cfg['title']}"), orchestrated by scripts/v1_3_step_runner.py. Do not ask
+("{cfg['title']}"), orchestrated by tools/v1_3_step_runner.py. Do not ask
 clarifying questions — if something in the spec section below is
 ambiguous, make the most consistent choice with the existing codebase
 patterns (e.g. the already-shipped texture picker in Scripts/level_editor.py)
@@ -420,7 +420,7 @@ def build_fix_prompt(cfg: dict, attempt: int, prior_summary: str, prior_results:
 
 This is fix attempt {attempt} of {MAX_FIX_ATTEMPTS} for v1.3 Step
 {cfg['step_num']} ("{cfg['title']}"), orchestrated by
-scripts/v1_3_step_runner.py. A prior implementation attempt reported these
+tools/v1_3_step_runner.py. A prior implementation attempt reported these
 assertable test results:
 
 {results_block}
@@ -506,7 +506,7 @@ def _extract_field(text: str, field: str) -> str:
 
 # ---------------------------------------------------------------------------
 # Log to docs/auto-fix-system-README.md — same format as the existing
-# auto-fix system's logs (Scripts/auto_fix_loop.py writes JSONL to
+# auto-fix system's logs (tools/auto_fix_loop.py writes JSONL to
 # logs/auto_fix_runs/; this is a separate human-readable log this script
 # owns, since the README file itself didn't exist before this script).
 # ---------------------------------------------------------------------------
@@ -516,10 +516,10 @@ def _ensure_readme_log():
         return
     README_LOG.write_text(
         "# Auto-Fix System Log — v1.3 Step Runner\n\n"
-        "Appended to by scripts/v1_3_step_runner.py. Each entry is one "
+        "Appended to by tools/v1_3_step_runner.py. Each entry is one "
         "Claude Code invocation (implementation or fix attempt) for one "
         "v1.3 step. This is a feature-implementation log, separate from "
-        "Scripts/auto_fix_loop.py's bug-fix loop (which logs JSONL under "
+        "tools/auto_fix_loop.py's bug-fix loop (which logs JSONL under "
         "logs/auto_fix_runs/).\n\n---\n\n"
     )
 
@@ -558,7 +558,7 @@ def print_manual_checklist(cfg: dict):
     print("This script will NOT proceed further. When you've confirmed all")
     print("of the above by hand, re-run:")
     print()
-    print(f"  python3 scripts/v1_3_step_runner.py --step {cfg['step_num']} --step-confirmed")
+    print(f"  python3 tools/v1_3_step_runner.py --step {cfg['step_num']} --step-confirmed")
     print()
     print("to run the vault update and commit.")
     print("=" * 72)

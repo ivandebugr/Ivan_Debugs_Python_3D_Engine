@@ -2,9 +2,9 @@
 # auto_fix.sh — manual trigger for the autonomous bug-fix loop.
 #
 # Usage:
-#   ./scripts/auto_fix.sh                          # all default scenarios
-#   ./scripts/auto_fix.sh --scenario win_then_r     # just one
-#   ./scripts/auto_fix.sh --max-iterations 8
+#   ./tools/auto_fix.sh                          # all default scenarios
+#   ./tools/auto_fix.sh --scenario win_then_r     # just one
+#   ./tools/auto_fix.sh --max-iterations 8
 #
 # Requires:
 #   - Claude Code CLI installed and authenticated (`claude --version`)
@@ -14,7 +14,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-python3 scripts/auto_fix_loop.py "$@"
+python3 tools/auto_fix_loop.py "$@"
 
 # -----------------------------------------------------------------------
 # OPTIONAL: scheduled runs
@@ -30,7 +30,7 @@ python3 scripts/auto_fix_loop.py "$@"
 #     launchctl load ~/Library/LaunchAgents/com.ivans3dengine.autofix.plist
 #
 # Plain cron (works fine if your Mac doesn't sleep, or via `caffeinate`):
-#   0 3 * * * cd /path/to/ivans_3d_engine && ./scripts/auto_fix.sh >> logs/cron.log 2>&1
+#   0 3 * * * cd /path/to/ivans_3d_engine && ./tools/auto_fix.sh >> logs/cron.log 2>&1
 #
 # Either way: the loop already refuses to run on main/master and never
 # auto-merges, so a scheduled run is no riskier than a manual one — it
