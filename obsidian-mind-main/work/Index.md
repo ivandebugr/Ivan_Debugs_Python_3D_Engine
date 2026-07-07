@@ -19,7 +19,6 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 ## Active Projects
 
-- [[work/active/v1.6-fix-backlog]] — 16-item priority-ordered fix list from the 2026-07-06 whole-project audit | Active | Items 1+5 (closure pass) and 4+10+15 (v1.6 split) done
 - [[work/active/v2.0-release]] — Modding, packaged runtime, gamepad input, procedural level gen — PUBLIC RELEASE | Planned | Blocked on: v1.5
 
 ## Review Prep
@@ -28,6 +27,7 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 ## Recently Completed
 
+- [[work/archive/2026/v1.6-fix-backlog]] — Shipped 2026-07-07, CHANGELOG [1.6.1]. All 16 items from the 2026-07-06 whole-project audit closed — editor F5 entity leak (plus a deeper destroy()-doesn't-cascade-to-children discovery), start_game() teardown dedup, window.color clamp, dead window.on_resize, viewmodel comment fix, save_level() write guard, eternal debug lines, air-shoot doc, bare-string texture routing, dev-tool relocation.
 - [[work/archive/2026/v1.6-level-editor-refactor]] — Shipped 2026-07-07. `level_editor.py` (4,169 lines) split into `editor_core` + five collaborator modules + `compat`/`asset_resolve`; zero behaviour change; 9 steps, 113/113 tests + 163 in-app checks.
 - [[work/archive/2026/v1.5-gameplay-systems]] — Shipped 2026-07-01. Trigger/zone system + weapon inventory API; [1.5.1] closure pass 2026-07-06 (curated level, checkpoint consumer, §5 regression).
 - [[work/archive/2026/v1.4-enemy-behaviour-trees]] — Shipped 2026-06-30. Per-enemy behaviour trees: compositors+decorators, 5 leaf nodes, 4 named presets, `level.json` `behaviour` field, editor preset+waypoint UI. Wrap-up audit: 9/9 steps, 110/110 tests.

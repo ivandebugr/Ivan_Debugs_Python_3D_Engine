@@ -5,6 +5,57 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.6.1] - 2026-07-07 — post-refactor fix backlog
+
+Closes 9 of the 16 items from the 2026-07-06 whole-project audit (items 2/3/6/8/9/11/12/13/14/16;
+item 7 closed as a doc-structure side effect of [1.6.0]; items 1/4/5/10/15 already shipped).
+113/113 unit tests green throughout; all 4 `tests/smoke_test_harness.py` scenarios
+(`load_and_close`, `win_then_r`, `gameover_then_r`, `editor_f5_roundtrip`) pass after every step.
+
+### Fixed
+- **Editor F5 entity leak** (item 2) — exiting play-in-editor (F5/Esc) now explicitly tears down
+  live `TriggerZone`/`AmmoPickup` entities and parked bullet-pool entities, which
+  `_clear_gameplay_entities()`'s name-only sweep never covered. A deeper follow-on leak surfaced
+  during verification: Ursina's `destroy()` never cascades to `parent=` children (only
+  `loose_children`), so `HealthBar`'s `bg`/`bar` quads and `Player`'s debug collider lines leaked
+  as orphaned NodePaths on every teardown — masked on the normal game path only because
+  `main_menu()` runs a scene-wide nuclear sweep afterward. `HealthBar.on_destroy()` now
+  explicitly destroys its own children; `_clear_gameplay_entities()` explicitly destroys
+  `Player.debug_lines`. An F5 round-trip with a live enemy, fired shots, and a non-default
+  texture now leaves only 2 residual entities (unrelated editor-UI widget refresh, tracked
+  separately).
+- **`start_game()` duplicate teardown** (item 3) — routed through `game.return_to_menu()` instead
+  of an inline copy of the player-cleanup logic.
+- **Editor `window.color` clamp** (item 6) — divided by 255 to match the 0–1 float convention
+  `color.rgb()` expects, same fix already applied to the main game window.
+- **Dead `window.on_resize` assignment** (item 8) — removed; Ursina never calls it.
+- **`save_level()` unguarded write** (item 11) — wrapped in the same try/except-and-log guard
+  `_save_prefs()` already used, so a write failure (disk full, permissions) no longer unwinds
+  Ctrl+S silently.
+- **Eternal debug collider lines** (item 12) — `Player`'s 12 wireframe-box debug lines dropped
+  `eternal=True`, which was blocking `destroy()` outright; the remaining "children don't cascade"
+  gap was closed as part of the F5-leak follow-up above.
+- **Bare-string texture loads** (item 14) — the four remaining sites that assigned
+  `entry['texture']` straight to `Entity(texture=...)` now route through
+  `asset_resolve.resolve_texture`, matching the existing `resolve_model` usage at each site.
+
+### Changed
+- **Dev tooling relocated** (item 16) — `auto_fix.sh`, `auto_fix_loop.py`, and
+  `v1_3_step_runner.py` moved from `Scripts/` to `tools/`; internal path references updated.
+- `main.py`'s `_resolve_model` import switched from the `undo_redo.py` backward-compat shim to
+  the canonical `Scripts.asset_resolve` module (touched the same import line as the item 14 fix).
+
+### Documented
+- Air-shoot (shooting while not `grounded`) confirmed intentional — standard FPS jump-shooting,
+  not a gating bug (item 13).
+- `weapon.py`'s viewmodel header comment corrected to match the shipped depth-test/write-off
+  behaviour; it previously claimed the second camera "clears the depth buffer first," which was
+  the first approach tried and abandoned (it blanked the world on macOS GL 2.1).
+- CLAUDE.md tech-debt drift (item 7) closed as a side effect of [1.6.0]'s doc restructure, which
+  removed the parallel Known Tech Debt table in favor of a single backlog file.
+
+---
+
 ## [1.6.0] - 2026-07-07 — level editor refactor
 
 Splits the 4,169-line `Scripts/level_editor.py` monolith into seven focused modules with zero

@@ -112,13 +112,27 @@ The level editor refactor is done: `Scripts/level_editor.py` (4,169 lines) split
 
 Module boundary chosen: panels-as-collaborators (Track B Candidate A shape) — shared state stays on the core, collaborators reach it via back-ref, `undo_redo.py`'s delegator-name contract respected. See [[work/archive/2026/v1.6-level-editor-refactor]].
 
+## v1.6 Fix Backlog Closed — 2026-07-07
+All 16 items from the 2026-07-06 audit closed. CHANGELOG [1.6.1]. Highlight: fixing the editor F5
+entity leak (item 2) surfaced a deeper, previously-invisible bug — Ursina's `destroy()` never
+cascades to `parent=` children (only `loose_children`), so `HealthBar`/debug-line sub-entities
+leaked on every teardown. The normal game's R-path was accidentally immune because `main_menu()`
+runs a scene-wide nuclear sweep right after teardown, masking the gap; the editor's F5 exit has no
+such sweep, making it directly observable (31→62 leaked entities across two round-trips before the
+fix). Fixed at the source in `HealthBar.on_destroy()` rather than patched per call site. New
+general Gotcha logged for the pattern — see [[brain/Gotchas]]. A small (2-entity) unrelated
+editor-UI widget leak was found during verification and spun off as a separate low-priority task
+rather than expanding this backlog's scope further.
+
+See: [[work/archive/2026/v1.6-fix-backlog]].
+
 ## Current Focus
 
 _What am I working toward right now?_
 
 - **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, 1 shot SFX + 1 ambient track (CC-0), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
 - **Hands-on playtest of `levels/v1.json`** — mechanics are harness-verified; game-feel is not.
-- **[[work/active/v1.6-fix-backlog]] remainder** — 11 items still open (top: editor F5 leak, `start_game()` duplicate teardown).
+- **Small editor-UI widget leak** (inspector/browser swatch, 2 entities per F5 cycle) — spun off from the fix-backlog close-out, not yet scheduled.
 
 ## Goals
 
