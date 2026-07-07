@@ -198,8 +198,11 @@ _enemy_bullet_pool  = BulletPool(EnemyBullet,  size=POOL_SIZE_ENEMY)
 # the wall, so the wall is drawn over it.
 #
 # The fix is the standard Unity/Unreal approach: render the gun with a SECOND
-# camera in its own pass that clears the depth buffer first, so the viewmodel is
-# composited on top of the world regardless of world depth.
+# camera in its own later pass, with depth-test/write off on the gun itself, so
+# the viewmodel composites on top of the world regardless of world depth.
+# (Clearing the depth/colour buffer for that pass was the first approach tried —
+# it blanked the whole world underneath on macOS GL 2.1, so clear-depth stays OFF;
+# see _setup_viewmodel_camera().)
 #
 # Mechanism (Panda3D camera bitmasks + a dedicated display region):
 #   - VIEWMODEL_MASK is a single dedicated draw bit.
@@ -209,7 +212,8 @@ _enemy_bullet_pool  = BulletPool(EnemyBullet,  size=POOL_SIZE_ENEMY)
 #     sees it.
 #   - The viewmodel camera shares the main camera's transform (parented to
 #     base.cam) and draws in a display region sorted after the world (0) but
-#     before the UI (20), with clear-depth on so the gun always wins.
+#     before the UI (20). Depth-test/write off on the gun (Weapon.__init__) plus
+#     clear-depth OFF on the region is what makes the gun always win.
 
 VIEWMODEL_MASK = BitMask32.bit(7)   # dedicated draw bit for viewmodel geometry
 
