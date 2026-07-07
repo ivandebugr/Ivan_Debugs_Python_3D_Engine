@@ -2,6 +2,7 @@ from ursina import *
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import AliveEntity, Layers, collision_manager, swept_move_blocked
 from Scripts.ground_shadow import GroundShadow
+from Scripts.asset_resolve import resolve_model as _resolve_model
 
 # TUNE: balance / experiment variables — label kept so grep finds them fast during playtesting
 ENEMY_HP_DEFAULT         = 100    # TUNE: try 50 for a 2-shot kill at 25 dmg/bullet
@@ -19,6 +20,24 @@ ENEMY_SWEPT_OFFSETS = (Vec3(0, 0.2, 0), Vec3(0, 1.5, 0), Vec3(0, 2.8, 0))
 
 VALID_ENEMY_TYPES = ('default',)  # extend here as new types are added
 
+# Visual-only model (v1.7): a saucer-shaped flying-drone mesh, disc-like with
+# no legs/vertical body — chosen for art direction over the placeholder cube,
+# not because behaviour is airborne (patrol/chase/attack/flee are all
+# ground-based via raycasts). It stays a purely cosmetic child so the box
+# collider (Enemy.__init__, scale (1.5,3,1.5)) that every raycast/sweep in
+# this file depends on is untouched. Kept centered/scaled to roughly fill
+# that collider footprint; source mesh bounds ~1.2w x 0.875h x 0.76d.
+ENEMY_VISUAL_MODEL    = 'enemy-flying'
+ENEMY_VISUAL_SCALE    = 1.3
+# Child position is in the parent's LOCAL (unscaled) space — local Y is
+# multiplied by the collider cube's scale_y=3 to get world offset, and
+# origin_y=-0.5 already makes the cube's own position its feet (verified
+# empirically: local (0,1,0) on a scale-3 parent lands at world y=3, no
+# extra origin term). local_y=0.5 -> world y=1.5, mid-collider height —
+# the drone hovers there rather than sitting on the ground, matching its
+# disc/no-legs shape.
+ENEMY_VISUAL_POSITION = (0, 0.5, 0)
+
 
 class Enemy(AliveEntity):
     def __init__(self, spawn_position, player, hp=ENEMY_HP_DEFAULT, enemy_type='default', rotation_y=0, behaviour_tree=None):
@@ -28,7 +47,7 @@ class Enemy(AliveEntity):
 
         super().__init__(
             model='cube',
-
+            visible_self=False,   # collision proxy only — visible=False would also hide the visual child below
             scale=(1.5, 3, 1.5),
             position=spawn_position,
             rotation_y=rotation_y,
@@ -36,6 +55,13 @@ class Enemy(AliveEntity):
             origin_y=-0.5,        # set here so collision_manager.add registers the correct grid cell
         )
         collision_manager.add(self, Layers.ENEMY)
+
+        self.visual_model = Entity(
+            parent=self,
+            model=_resolve_model(ENEMY_VISUAL_MODEL),
+            position=ENEMY_VISUAL_POSITION,
+            scale=ENEMY_VISUAL_SCALE,
+        )
 
         self.health      = hp
         self.max_health  = hp
