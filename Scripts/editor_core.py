@@ -134,6 +134,17 @@ class LevelEditor(Entity):
         # _save_prefs/_load_prefs (v1.7 C2 extends this with saved presets).
         self.panel_visible = {'hierarchy': True, 'inspector': True, 'browser': True}
 
+        # Resizable panel widths (v1.7 C3) — instance vars seeded from the class
+        # defaults so each session's actual size can diverge via splitter drag.
+        # _effective_hier_w/_effective_insp_w return these when expanded (see below).
+        self._hier_w = self._LAYOUT_HIER_W
+        self._insp_w = self._LAYOUT_INSP_W
+
+        # Splitter drag state (v1.7 C3) — which edge (if any) is currently being
+        # dragged. Mirrors the gizmo's drag_axis-is-None-when-idle convention so
+        # both can be checked with a simple truthiness test.
+        self._splitter_drag = None
+
         # Layout presets (v1.7 C2) — mirrors the camera-bookmark pattern
         # (_bookmarks + _save_prefs) exactly: a dict keyed '1'..'5', loaded/
         # saved alongside the rest of editor_prefs.json.
@@ -272,6 +283,27 @@ class LevelEditor(Entity):
         )
         self._browser_chevron.text_entity.world_scale = Vec3(8, 8, 1)
 
+        # Resizable-panel splitters (v1.7 C3) — thin invisible-ish drag strips at
+        # each collapsible panel's viewport-facing edge. Positioned by _apply_layout
+        # like everything else here; drag handling lives in _try_begin_splitter_drag
+        # (called from input() right after the gizmo step) and _handle_splitter_drag
+        # (called from update()).
+        self._hier_splitter = Entity(
+            parent=camera.ui, model='quad',
+            color=color.rgba(1, 1, 1, 0.0),
+            z=-1, eternal=True,
+        )
+        self._insp_splitter = Entity(
+            parent=camera.ui, model='quad',
+            color=color.rgba(1, 1, 1, 0.0),
+            z=-1, eternal=True,
+        )
+        self._browser_splitter = Entity(
+            parent=camera.ui, model='quad',
+            color=color.rgba(1, 1, 1, 0.0),
+            z=-1, eternal=True,
+        )
+
         self.model_preview = Entity(
             model='cube',
             color=color.white33,
@@ -362,17 +394,26 @@ class LevelEditor(Entity):
     _LAYOUT_PANEL_H = 0.9
     _LAYOUT_CHEVRON_W = 0.03   # strip reserved for a collapsed panel's chevron
 
+    # Resizable panel clamps (v1.7 C3), camera.ui units. Min keeps the 3-column
+    # inspector grid / hierarchy rows legible; max leaves at least a usable
+    # viewport strip at the reference 16:9 aspect.
+    _LAYOUT_HIER_W_MIN = 0.12
+    _LAYOUT_HIER_W_MAX = 0.45
+    _LAYOUT_INSP_W_MIN = 0.18
+    _LAYOUT_INSP_W_MAX = 0.55
+    _SPLITTER_THICKNESS = 0.012   # hit-test width of a drag splitter strip
+
     @property
     def _effective_hier_w(self):
-        return self._LAYOUT_HIER_W if self.panel_visible['hierarchy'] else self._LAYOUT_CHEVRON_W
+        return self._hier_w if self.panel_visible['hierarchy'] else self._LAYOUT_CHEVRON_W
 
     @property
     def _effective_insp_w(self):
-        return self._LAYOUT_INSP_W if self.panel_visible['inspector'] else self._LAYOUT_CHEVRON_W
+        return self._insp_w if self.panel_visible['inspector'] else self._LAYOUT_CHEVRON_W
 
     @property
     def _effective_browser_h(self):
-        return self.browser._BROWSER_H if self.panel_visible['browser'] else self._LAYOUT_CHEVRON_W
+        return self.browser._browser_h if self.panel_visible['browser'] else self._LAYOUT_CHEVRON_W
 
     def _toggle_panel(self, name):
         """Show/hide one collapsible panel (v1.7 C1) and re-derive layout to
@@ -389,6 +430,58 @@ class LevelEditor(Entity):
         elif name == 'browser':
             self.browser.set_visible(visible)
             self._browser_chevron.text = '[B]' if visible else '[b]'
+        self._apply_layout()
+
+    # -------------------------------------------------------------------------
+    # Resizable panel splitters (v1.7 C3)
+    # -------------------------------------------------------------------------
+    # One draggable strip per collapsible panel edge, positioned by _apply_layout
+    # at the panel/viewport boundary. A collapsed panel has no meaningful edge to
+    # drag (_effective_*_w already pins it to the chevron strip), so splitters are
+    # only live while their panel is expanded — same guard _is_over_panel uses.
+
+    def _try_begin_splitter_drag(self):
+        """Step 1b of core input()'s left-mouse-down priority chain — checked right
+        after the gizmo raycast (so gizmo handles always win) and before any panel
+        guard (so a splitter grab doesn't fall through to panel/selection clicks).
+        Returns True (and arms the drag) if a splitter was grabbed."""
+        if self._splitter_drag is not None:
+            return False
+        for name, splitter in (
+            ('hierarchy', self._hier_splitter),
+            ('inspector', self._insp_splitter),
+            ('browser', self._browser_splitter),
+        ):
+            if not self.panel_visible[name]:
+                continue
+            if splitter is not None and splitter.enabled and self._is_over_panel(splitter):
+                self._splitter_drag = name
+                return True
+        return False
+
+    def _handle_splitter_drag(self):
+        """Per-frame drag update — called from update(). Writes the dragged edge's
+        width/height back into the resizable instance var and re-runs _apply_layout
+        so the viewport and every panel's own apply_layout reflow immediately."""
+        if self._splitter_drag is None:
+            return
+        if not mouse.left:
+            self._splitter_drag = None
+            return
+        aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
+        half_w = aspect * 0.5
+        if self._splitter_drag == 'hierarchy':
+            self._hier_w = max(self._LAYOUT_HIER_W_MIN,
+                                min(self._LAYOUT_HIER_W_MAX, mouse.x + half_w))
+        elif self._splitter_drag == 'inspector':
+            self._insp_w = max(self._LAYOUT_INSP_W_MIN,
+                                min(self._LAYOUT_INSP_W_MAX, half_w - mouse.x))
+        elif self._splitter_drag == 'browser':
+            # Browser splitter sits at the panel's top edge (panel is bottom-anchored
+            # at fixed centre _BROWSER_Y), so height grows as the cursor moves up.
+            new_h = (mouse.y - self.browser._BROWSER_Y) * 2
+            self.browser._browser_h = max(self.browser._BROWSER_H_MIN,
+                                           min(self.browser._BROWSER_H_MAX, new_h))
         self._apply_layout()
 
     # Horizontal toolbar (Texture/Snap/Play/Move/Place) — a single Unity/Blender-style
@@ -465,6 +558,32 @@ class LevelEditor(Entity):
         if getattr(self, '_browser_chevron', None) is not None:
             self._browser_chevron.x = -half_w + hier_w + self._LAYOUT_CHEVRON_W * 0.5
             self._browser_chevron.y = self.browser._BROWSER_Y + self._effective_browser_h * 0.5
+
+        # Resizable-panel splitters (v1.7 C3) — thin strips at each expanded
+        # panel's viewport-facing edge. Disabled (and un-hit-testable, per
+        # _try_begin_splitter_drag's panel_visible guard) while collapsed, since
+        # the chevron already owns that strip's clicks at that point.
+        if getattr(self, '_hier_splitter', None) is not None:
+            s = self._hier_splitter
+            s.enabled = self.panel_visible['hierarchy']
+            s.x = -half_w + hier_w
+            s.y = 0
+            s.scale_x = self._SPLITTER_THICKNESS
+            s.scale_y = self._LAYOUT_PANEL_H
+        if getattr(self, '_insp_splitter', None) is not None:
+            s = self._insp_splitter
+            s.enabled = self.panel_visible['inspector']
+            s.x = half_w - insp_w
+            s.y = 0
+            s.scale_x = self._SPLITTER_THICKNESS
+            s.scale_y = self._LAYOUT_PANEL_H
+        if getattr(self, '_browser_splitter', None) is not None:
+            s = self._browser_splitter
+            s.enabled = self.panel_visible['browser']
+            s.x = 0
+            s.y = self.browser._BROWSER_Y + self._effective_browser_h * 0.5
+            s.scale_x = aspect
+            s.scale_y = self._SPLITTER_THICKNESS
 
         # --- Toolbar (BUG B fix) ---
         # Scale button widths proportionally when the viewport is narrower
@@ -914,9 +1033,9 @@ class LevelEditor(Entity):
     def _save_layout_preset(self, slot):
         """Snapshot current panel widths + visibility into preset `slot` ('1'..'5')."""
         self._layout_presets[slot] = {
-            'hier_w': self._LAYOUT_HIER_W,
-            'insp_w': self._LAYOUT_INSP_W,
-            'browser_h': self.browser._BROWSER_H,
+            'hier_w': self._hier_w,
+            'insp_w': self._insp_w,
+            'browser_h': self.browser._browser_h,
             'panel_visible': dict(self.panel_visible),
         }
         self._save_prefs()
@@ -924,9 +1043,8 @@ class LevelEditor(Entity):
     def _recall_layout_preset(self, slot):
         """Restore panel widths + visibility from preset `slot`, or no-op if empty.
 
-        Only visibility is applied via _toggle_panel-style state (widths are
-        stored for forward-compatibility with C3 resizable panels but are
-        currently fixed constants, so they're round-tripped, not yet applied)."""
+        Widths are clamped to the current min/max (v1.7 C3) in case a preset was
+        saved before the clamps changed."""
         preset = self._layout_presets.get(slot)
         if not preset:
             return
@@ -935,6 +1053,16 @@ class LevelEditor(Entity):
             want = saved_visible.get(name, True)
             if want != self.panel_visible[name]:
                 self._toggle_panel(name)
+        if 'hier_w' in preset:
+            self._hier_w = max(self._LAYOUT_HIER_W_MIN,
+                                min(self._LAYOUT_HIER_W_MAX, preset['hier_w']))
+        if 'insp_w' in preset:
+            self._insp_w = max(self._LAYOUT_INSP_W_MIN,
+                                min(self._LAYOUT_INSP_W_MAX, preset['insp_w']))
+        if 'browser_h' in preset:
+            self.browser._browser_h = max(self.browser._BROWSER_H_MIN,
+                                           min(self.browser._BROWSER_H_MAX, preset['browser_h']))
+        self._apply_layout()
 
     # -------------------------------------------------------------------------
     # Play-in-editor
@@ -1099,7 +1227,9 @@ class LevelEditor(Entity):
             else:
                 self.update_model_preview()
             self.gizmo.handle_drag()
+            self.gizmo.handle_rotate_drag()
             self.gizmo.refresh()
+            self._handle_splitter_drag()
             # Refresh the stats strip ~once a second (matches Ursina's own counter cadence).
             self._stats_accum += time.dt
             if self._stats_accum >= 1.0:
@@ -1235,7 +1365,7 @@ class LevelEditor(Entity):
                       or self._hier_typing() or self._behaviour_typing()
                       or self._door_name_typing() or self._trigger_typing()
                       or self._pickup_typing())
-            mid_drag = (self.gizmo.drag_axis is not None
+            mid_drag = (self.gizmo.drag_axis is not None or self.gizmo.rotate_axis is not None
                         or self._box_selecting or self.browser._dragging)
             if self.selected and not typing and not mid_drag:
                 for e in list(self.selected):
@@ -1279,6 +1409,12 @@ class LevelEditor(Entity):
             if self.gizmo.try_begin_drag():
                 return
 
+            # Step 1b: resizable-panel splitter grab (v1.7 C3) — after the gizmo so
+            # handles always win, before panel guards so it doesn't fall through to
+            # a selection/panel click.
+            if self._try_begin_splitter_drag():
+                return
+
             # Step 2: panel guards — _is_over_panel uses mouse.x/y, no hovered needed.
             # Buttons inside panels are grandchildren of camera.ui; _is_over_panel is
             # more reliable than checking hovered.parent for nested widgets.
@@ -1316,7 +1452,7 @@ class LevelEditor(Entity):
                 return
 
             # Step 3: active drag or box-select guard (after gizmo and panel steps)
-            if self.gizmo.drag_axis is not None or self._box_selecting:
+            if self.gizmo.drag_axis is not None or self.gizmo.rotate_axis is not None or self._box_selecting:
                 return
 
             # Step 4/5: selection (shift) or tool-mode action

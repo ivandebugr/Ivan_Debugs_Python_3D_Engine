@@ -53,10 +53,14 @@ class AssetBrowser:
     # Browser layout constants (camera.ui units). Flush to the bottom of the window
     # (reclaims the vertical space the old tray occupied).
     _BROWSER_Y      = -0.40    # centre y of the browser panel
-    _BROWSER_H      =  0.20    # panel height (taller than before, fills old tray space)
+    _BROWSER_H      =  0.20    # default panel height (taller than before, fills old tray space)
+    # Resizable browser height (v1.7 C3) clamps, camera.ui units. Min keeps at
+    # least one card row usable; max leaves room above for hierarchy/inspector.
+    _BROWSER_H_MIN  =  0.08
+    _BROWSER_H_MAX  =  0.45
     _CARD_SIZE      =  0.095   # card width/height
     _CARD_PITCH     =  0.115   # card-to-card spacing (both horizontal and vertical)
-    _TAB_Y          = -0.32    # y of the tab buttons (top of the panel)
+    _TAB_Y_INSET    =  0.02    # tabs sit this far below the panel's top edge
     _BROWSER_CATEGORIES = ('texture', 'model', 'sound')
     # FIXED (Item 8): named the double-click window (was a bare 0.4 literal in
     # _handle_browser_click) so the next step's maintainer can find/tune it.
@@ -67,6 +71,11 @@ class AssetBrowser:
 
     def __init__(self, editor):
         self.editor = editor
+
+        # Resizable browser height (v1.7 C3) — instance var seeded from the class
+        # default so a splitter drag can diverge from it per session, same pattern
+        # as editor._hier_w/_insp_w.
+        self._browser_h = self._BROWSER_H
 
         # Asset picker overlay — one overlay instance per category, keyed by name.
         self._asset_picker_panels = {}   # {category: panel Entity}
@@ -299,7 +308,13 @@ class AssetBrowser:
         if not self.editor.panel_visible['browser']:
             return False
         my = mouse.y
-        return (self._BROWSER_Y - self._BROWSER_H * 0.5) <= my <= (self._BROWSER_Y + self._BROWSER_H * 0.5)
+        return (self._BROWSER_Y - self._browser_h * 0.5) <= my <= (self._BROWSER_Y + self._browser_h * 0.5)
+
+    @property
+    def _tab_y(self):
+        """Y of the tab buttons — tracks the panel's top edge as _browser_h
+        changes (v1.7 C3), preserving the original fixed-height inset."""
+        return self._BROWSER_Y + self._browser_h * 0.5 - self._TAB_Y_INSET
 
     def build(self):
         """Build the read-only asset browser panel, tabs, and per-category card columns."""
@@ -314,7 +329,7 @@ class AssetBrowser:
             parent=camera.ui,
             model='quad',
             color=ed._THEME_PANEL_BG,
-            scale=(2.0, self._BROWSER_H),
+            scale=(2.0, self._browser_h),
             position=(0, self._BROWSER_Y),
             z=-0.5,
             eternal=True,
@@ -326,7 +341,7 @@ class AssetBrowser:
                 parent=camera.ui,
                 text=label,
                 scale=(0.12, 0.035),
-                position=(-0.20 + i * 0.13, self._TAB_Y),
+                position=(-0.20 + i * 0.13, self._tab_y),
                 text_scale=0.85,
                 z=-0.7,
                 eternal=True,
@@ -349,7 +364,7 @@ class AssetBrowser:
             parent=camera.ui,
             text='^',
             use_tags=False,
-            position=(scroll_ind_x, self._BROWSER_Y + self._BROWSER_H * 0.5 - 0.02),
+            position=(scroll_ind_x, self._BROWSER_Y + self._browser_h * 0.5 - 0.02),
             origin=(0, -0.5),
             scale=1.4,
             color=color.white66,
@@ -360,7 +375,7 @@ class AssetBrowser:
             parent=camera.ui,
             text='v',
             use_tags=False,
-            position=(scroll_ind_x, self._BROWSER_Y - self._BROWSER_H * 0.5 + 0.02),
+            position=(scroll_ind_x, self._BROWSER_Y - self._browser_h * 0.5 + 0.02),
             origin=(0, 0.5),
             scale=1.4,
             color=color.white66,
@@ -515,7 +530,7 @@ class AssetBrowser:
 
     def _browser_visible_rows(self):
         """Number of card rows that fit vertically in the browser panel."""
-        return max(1, int((self._BROWSER_H - 0.04) / self._CARD_PITCH))
+        return max(1, int((self._browser_h - 0.04) / self._CARD_PITCH))
 
     def _card_grid_pos(self, index):
         """Camera.ui (x, y) of a card centre at the given linear index."""
@@ -526,7 +541,7 @@ class AssetBrowser:
         half_w = aspect * 0.5
         left = -half_w + self.editor._effective_hier_w + 0.02
         first_x = left + self._CARD_PITCH * 0.5
-        first_y = self._BROWSER_Y + self._BROWSER_H * 0.5 - self._CARD_PITCH * 0.5 - 0.02
+        first_y = self._BROWSER_Y + self._browser_h * 0.5 - self._CARD_PITCH * 0.5 - 0.02
         cx = first_x + col * self._CARD_PITCH
         cy = first_y - (row - scroll_row) * self._CARD_PITCH
         return cx, cy
@@ -534,8 +549,8 @@ class AssetBrowser:
     def _refresh_browser_card_positions(self):
         """Reposition the active tab's cards to reflect the current scroll offset,
         hiding any that fall outside the panel's vertical bounds."""
-        panel_top = self._BROWSER_Y + self._BROWSER_H * 0.5
-        panel_bot = self._BROWSER_Y - self._BROWSER_H * 0.5
+        panel_top = self._BROWSER_Y + self._browser_h * 0.5
+        panel_bot = self._BROWSER_Y - self._browser_h * 0.5
         hh = self._CARD_SIZE * 0.5
         for index, (bg, icon, label, name) in enumerate(self._browser_cards.get(self._browser_tab, [])):
             cx, cy = self._card_grid_pos(index)
@@ -650,7 +665,7 @@ class AssetBrowser:
             self._browser_panel.x = 0
             self._browser_panel.y = self._BROWSER_Y
             self._browser_panel.scale_x = aspect
-            self._browser_panel.scale_y = self._BROWSER_H
+            self._browser_panel.scale_y = self._browser_h
 
         self._layout_browser_tabs(half_w)
 
@@ -658,10 +673,10 @@ class AssetBrowser:
         scroll_ind_x = half_w - self.editor._effective_insp_w - 0.03
         if self._browser_scroll_up is not None:
             self._browser_scroll_up.x = scroll_ind_x
-            self._browser_scroll_up.y = self._BROWSER_Y + self._BROWSER_H * 0.5 - 0.02
+            self._browser_scroll_up.y = self._BROWSER_Y + self._browser_h * 0.5 - 0.02
         if self._browser_scroll_down is not None:
             self._browser_scroll_down.x = scroll_ind_x
-            self._browser_scroll_down.y = self._BROWSER_Y - self._BROWSER_H * 0.5 + 0.02
+            self._browser_scroll_down.y = self._BROWSER_Y - self._browser_h * 0.5 + 0.02
         self._update_browser_scroll_indicators()
 
     def _layout_browser_tabs(self, half_w):
@@ -678,7 +693,7 @@ class AssetBrowser:
             if btn is None:
                 continue
             btn.x = start_x + i * (tab_w + tab_gap)
-            btn.y = self._TAB_Y
+            btn.y = self._tab_y
             btn.scale_x = tab_w
             btn.scale_y = 0.035
 
@@ -801,7 +816,7 @@ class AssetBrowser:
                 text=text,
                 parent=camera.ui,
                 origin=(0, 0),
-                position=(0, self._BROWSER_Y - self._BROWSER_H * 0.5 - 0.02),
+                position=(0, self._BROWSER_Y - self._browser_h * 0.5 - 0.02),
                 scale=0.9,
                 color=color.white,
                 z=-1,
