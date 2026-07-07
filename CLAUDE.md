@@ -322,10 +322,10 @@ it once before `Ursina()`. Targets three shaders: `unlit_shader`, `unlit_with_fo
 
 | Issue | Location | Priority | Notes |
 |---|---|---|---|
-| `start_game()` duplicates player teardown from `_clear_gameplay_entities` | `main.py:212-220` | Medium | Inline teardown block repeats logic already in `_clear_gameplay_entities`. Should call `game.return_to_menu()` before respawning, not repeat teardown inline |
-| `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:76` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
-| `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:129-130` | Low | `left mouse down` fires `weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
-| `editor_core.py`: `_save_prefs()` has no error handling | `Scripts/editor_core.py` | Low | Write failure silently drops prefs; add `try/except` with `logger.log('ERROR', ...)` |
+| `start_game()` duplicates player teardown from `_clear_gameplay_entities` | `main.py:401-409` | Medium | Inline teardown block repeats logic already in `_clear_gameplay_entities`. Should call `game.return_to_menu()` before respawning, not repeat teardown inline |
+| `player_controller.py`: debug collider lines use `eternal=True` | `player_controller.py:82` | Low | `create_collider_visualization()` creates 12 eternal Entity lines (enabled=False). They survive menu transitions. Not harmful while `show_colliders` is always False, but leaks if that flag ever defaults True |
+| `player_controller.py`: shoot not gated on `grounded` — can fire in air | `player_controller.py:159-161` | Low | `left mouse down` fires `inventory.active_weapon.shoot()` unconditionally. Original grounded guard was removed in audit. Intentional or bug? Confirm and document |
+| `editor_core.py`: `save_level()` has no error handling | `Scripts/editor_core.py:1259` | Low | Write failure crashes Ctrl+S mid-save; wrap in `try/except` with `logger.log('ERROR', ...)` like `_save_prefs()` (guarded since v1.2) |
 | Game-feel playtest of `levels/v1.json` not yet done by a human | `levels/v1.json` | Low | The 2026-07-06 closure pass verified all mechanics via the smoke harness (see CHANGELOG [1.5.1]); platform-jump feel, enemy difficulty, marker readability, and OS-drag window resize still want one hands-on pass before itch.io |
 
 > Bullet pool `POOL_SIZE_PLAYER` reviewed in v1.5 and **kept at 30** — measured 25/30 peak
