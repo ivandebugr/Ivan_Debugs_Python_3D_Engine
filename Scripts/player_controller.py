@@ -79,7 +79,6 @@ class Player(FirstPersonController):
                 model=Mesh(vertices=[corners[edge[0]], corners[edge[1]]], mode='line'),
                 color=color.red,
                 parent=self,
-                eternal=True,
                 enabled=False
             )
             self.debug_lines.append(line)
