@@ -399,14 +399,16 @@ def main_menu():
     quit_button = _themed_button(text='Quit', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP / 2)
 
     def start_game():
+        # This branch is currently unreachable: 'r' on WIN/GAME_OVER already calls
+        # game.return_to_menu() + main_menu() before rebuilding play_button/start_game,
+        # so game.player is always None here. Routed through the canonical teardown
+        # path (instead of duplicating its player-cleanup logic inline) so any future
+        # fix there doesn't need a second copy — but note return_to_menu()'s scene
+        # sweep also destroys the level_block/level_enemy placeholders the loops below
+        # convert into live enemies/triggers/pickups. If this branch is ever made
+        # reachable, the level must be reloaded before those loops run.
         if game.player:
-            if hasattr(game.player, 'inventory'):
-                game.player.inventory.destroy_all()
-            if hasattr(game.player, 'health_bar'):
-                destroy(game.player.health_bar.text)
-                destroy(game.player.health_bar)
-            collision_manager.remove(game.player)
-            destroy(game.player)
+            game.return_to_menu()
         game.player = Player(position=(0, 2, 0))
         game.enemies = []
         # _is_live() guard is load-bearing: main_menu()'s own load_level() call destroys
