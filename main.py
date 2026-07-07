@@ -72,11 +72,20 @@ class PlayerHUD:
         self.crosshair = Entity(
             parent=camera.ui,
             model='quad',
-            texture='circle',
+            texture=_resolve_texture('crosshair_white_crosshair002'),
             color=CROSSHAIR_COLOR,
-            scale=(0.01, 0.01),
+            scale=(0.02, 0.02),
             z=-1,
         )
+        # The viewmodel's second display region (weapon.py's dual-camera gun
+        # rendering, sort 15) leaves the depth buffer populated with no clear
+        # between it and the UI region (sort 20, depth-test ON by default in
+        # Ursina's Camera._set_up) — without this the crosshair silently loses
+        # the depth test and never renders. Same fix as the editor gizmo handles
+        # (editor_gizmo.py): depth test/write off + fixed bin so it always wins.
+        self.crosshair.setDepthTest(False)
+        self.crosshair.setDepthWrite(False)
+        self.crosshair.setBin('fixed', 100)
 
         # Reference to the player's existing HealthBar (created in Player.__init__).
         # PlayerHUD does not own the bar's lifetime — _clear_gameplay_entities() still
