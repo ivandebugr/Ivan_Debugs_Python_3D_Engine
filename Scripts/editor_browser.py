@@ -633,6 +633,10 @@ class AssetBrowser:
             self._drag_origin = Vec2(mouse.x, mouse.y)
             self._dragging = True
             self._begin_drag(asset)
+            # Claim the active-drag lock (v1.7 B-lock) so nothing else re-checks
+            # hover while the ghost is being placed. Released in _commit_drag /
+            # _cancel_drag. By priority order this runs only when the lock is free.
+            self.editor._acquire_drag('browser')
         else:
             now = _time.time()
             last_target, last_t = self._browser_last_click
@@ -991,6 +995,7 @@ class AssetBrowser:
         self._drag_asset = None
         self._dragging = False
         self._drag_origin = None
+        self.editor._release_drag()   # v1.7 B-lock
 
     def _commit_drag(self):
         """Place entity at ghost position and push undo command."""
@@ -1047,3 +1052,4 @@ class AssetBrowser:
         self._drag_asset = None
         self._dragging = False
         self._drag_origin = None
+        self.editor._release_drag()   # v1.7 B-lock

@@ -127,6 +127,32 @@ class GizmoController:
             ring.setBin('fixed', 100)
             self._ring_base_color[gname] = col
 
+        # Mode separation (v1.7 B-mode): show/enable only the active mode's
+        # handles from the start. apply_mode() reads self.editor._gizmo_mode.
+        self.apply_mode()
+
+    def apply_mode(self):
+        """Show + enable picking on the active mode's handles; hide + disable the
+        other mode's entirely (v1.7 B-mode). Translate mode owns the shaft lines
+        and tip cubes; rotate mode owns the rings. Disabling an Entity removes it
+        from mouse.hovered_entity and from raycast hits (Ursina skips disabled
+        entities), so the inactive set is inert to the cursor, not just invisible.
+        Called from build() and whenever the mode toggles."""
+        translate_on = (self.editor._gizmo_mode == 'translate')
+        for e in self.root.children:
+            name = e.name or ''
+            if name.startswith('editor_gizmo_ring_'):
+                e.enabled = not translate_on
+            elif name.startswith('editor_gizmo'):
+                # shaft lines (editor_gizmo_x/y/z) and tips (editor_gizmo_tip_*)
+                e.enabled = translate_on
+        # Clear any stale hover highlight left on the set we just hid, so a
+        # white tip/ring doesn't persist after the switch.
+        if translate_on:
+            self._clear_ring_hover()
+        else:
+            self._clear_tip_hover()
+
     def _make_ring_mesh(self, axis):
         """Line-loop circle of radius _RING_RADIUS lying in the plane perpendicular
         to `axis` (Ursina has no torus primitive — build the loop by hand)."""
@@ -176,10 +202,21 @@ class GizmoController:
         if not (self.root and self.root.enabled and self.drag_axis is None
                 and self.rotate_axis is None):
             return False
-        ring_axis = self._pick_ring()
-        if ring_axis is not None:
-            self._begin_rotate(ring_axis)
-            return True
+        # Active-drag lock (v1.7 B-lock): never begin a gizmo drag while any drag
+        # (splitter/browser/another gizmo grab) already owns the cursor.
+        if self.editor._drag_owner is not None:
+            return False
+        # Mode separation (v1.7 B-mode): only the active mode's handles are
+        # pickable. In rotate mode the rings are checked and the tips are inert;
+        # in translate mode the reverse. build() also hides the inactive set so
+        # the cursor never even sees a handle it can't grab.
+        if self.editor._gizmo_mode == 'rotate':
+            ring_axis = self._pick_ring()
+            if ring_axis is not None:
+                self._begin_rotate(ring_axis)
+                self.editor._acquire_drag('gizmo')
+                return True
+            return False
         axis_map = {
             'editor_gizmo_tip_x': 'x',
             'editor_gizmo_tip_y': 'y',
@@ -202,6 +239,7 @@ class GizmoController:
                               if e.is_empty() or not e.name.startswith('editor_gizmo_tip')])
         if hit.hit and hit.entity and hit.entity.name in axis_map:
             self._begin_drag(axis_map[hit.entity.name])
+            self.editor._acquire_drag('gizmo')
             return True
         return False
 
@@ -307,8 +345,13 @@ class GizmoController:
 
     def _update_hover_highlight(self):
         """Brighten the hovered tip before a drag is committed to; restore the
-        previous tip's colour when hover moves elsewhere. No-op while dragging."""
-        if self.drag_axis is not None or self.rotate_axis is not None:
+        previous tip's colour when hover moves elsewhere. No-op while any drag
+        owns the cursor (v1.7 B-lock) or when translate isn't the active mode
+        (v1.7 B-mode) — in rotate mode the tips are hidden and inert."""
+        if self.editor._drag_owner is not None:
+            return
+        if self.editor._gizmo_mode != 'translate':
+            self._clear_tip_hover()
             return
         tip_names = self._tip_base_color.keys()
         hovered = mouse.hovered_entity
@@ -321,11 +364,33 @@ class GizmoController:
             hovered_tip.color = color.white
         self._hovered_tip = hovered_tip
 
+    def _clear_tip_hover(self):
+        """Restore any hover-highlighted tip to its base colour and drop the ref.
+        Called when leaving translate mode so a mid-hover white tip doesn't stick."""
+        if self._hovered_tip is not None:
+            self._hovered_tip.color = self._tip_base_color[self._hovered_tip.name]
+            self._hovered_tip = None
+
+    def _clear_ring_hover(self):
+        """Restore any hover-highlighted ring to its base colour and drop the ref.
+        Called when leaving rotate mode so a mid-hover white ring doesn't stick."""
+        if self._hovered_ring is not None:
+            for e in self.root.children:
+                if e.name == self._hovered_ring:
+                    e.color = self._ring_base_color[self._hovered_ring]
+                    break
+            self._hovered_ring = None
+
     def _update_ring_hover_highlight(self):
         """Brighten the hovered ring before a rotate drag is committed to. Rings have
         no collider (see _pick_ring's docstring), so hover is detected via the same
-        closest-approach-to-circle test used for the pick itself, not mouse.hovered_entity."""
-        if self.rotate_axis is not None or self.drag_axis is not None:
+        closest-approach-to-circle test used for the pick itself, not mouse.hovered_entity.
+        No-op while any drag owns the cursor (v1.7 B-lock) or when rotate isn't the
+        active mode (v1.7 B-mode) — in translate mode the rings are hidden and inert."""
+        if self.editor._drag_owner is not None:
+            return
+        if self.editor._gizmo_mode != 'rotate':
+            self._clear_ring_hover()
             return
         ring_axis = self._pick_ring()
         hovered_name = f'editor_gizmo_ring_{ring_axis}' if ring_axis is not None else None
@@ -365,69 +430,69 @@ class GizmoController:
         moved the entity based on mouse speed rather than mouse position).
         """
         ed = self.editor
-        axis_map = {
-            'editor_gizmo_x': 'x', 'editor_gizmo_tip_x': 'x',
-            'editor_gizmo_y': 'y', 'editor_gizmo_tip_y': 'y',
-            'editor_gizmo_z': 'z', 'editor_gizmo_tip_z': 'z',
-        }
         if not ed._play_mode:
             self._update_hover_highlight()
+        # Only the mechanism that owns the active-drag lock runs its per-frame
+        # drag body. drag_axis is armed exactly once, in try_begin_drag()/input()
+        # — the old "re-arm from mouse.hovered_entity if drag_axis is None" branch
+        # here is deleted (v1.7 B-lock): it re-evaluated hover mid-interaction,
+        # the exact bug the lock removes.
+        if self.drag_axis is None:
+            return
         if held_keys['left mouse']:
-            if self.drag_axis is None:
-                if mouse.hovered_entity and mouse.hovered_entity.name in axis_map:
-                    self._begin_drag(axis_map[mouse.hovered_entity.name])
-            else:
-                axis_world = self._WORLD_AXES[self.drag_axis]
-                # Screen-space axis length gates the near-parallel fallback below
-                # (also reused as the drag sign reference for the velocity model).
-                cam_origin = camera.getRelativePoint(render, Vec3(0, 0, 0))
-                cam_tip    = camera.getRelativePoint(render, axis_world)
-                axis_screen = Vec2(cam_tip.x - cam_origin.x, cam_tip.y - cam_origin.y)
-                axis_screen_len = axis_screen.length()
+            axis_world = self._WORLD_AXES[self.drag_axis]
+            # Screen-space axis length gates the near-parallel fallback below
+            # (also reused as the drag sign reference for the velocity model).
+            cam_origin = camera.getRelativePoint(render, Vec3(0, 0, 0))
+            cam_tip    = camera.getRelativePoint(render, axis_world)
+            axis_screen = Vec2(cam_tip.x - cam_origin.x, cam_tip.y - cam_origin.y)
+            axis_screen_len = axis_screen.length()
 
-                if axis_screen_len > self._AXIS_SCREEN_LEN_MIN:
-                    # Plane-projection: intersect the cursor ray with the drag
-                    # plane (fixed at grab time), project the hit onto the axis
-                    # line, and move by the delta from the grabbed offset.
-                    gizmo_origin = Vec3(self.drag_plane_point)
-                    hit_point = self._ray_plane_hit(
-                        *self.cursor_ray(), self.drag_plane_point, self.drag_plane_normal)
-                    if hit_point is not None:
-                        grabbed = self._closest_point_on_line(hit_point, gizmo_origin, axis_world)
-                        offset = (grabbed - gizmo_origin).dot(axis_world)
-                        delta = offset - self.drag_grab_offset
-                        for e in ed.selected:
-                            start = self.drag_start_pos[e]
-                            raw = getattr(start, self.drag_axis) + delta
-                            setattr(e, self.drag_axis, ed._snap_1d(raw))
-                        self.refresh()
-                else:
-                    # Near-parallel-to-view fallback: old velocity model, since
-                    # plane-projection is numerically unstable at this angle.
-                    axis_screen_dir = (axis_screen / axis_screen_len) if axis_screen_len > 0.0001 else Vec2(1, 0)
-                    mouse_vel = Vec2(mouse.velocity[0], mouse.velocity[1])
-                    magnitude = mouse_vel.dot(axis_screen_dir) * 200.0
+            if axis_screen_len > self._AXIS_SCREEN_LEN_MIN:
+                # Plane-projection: intersect the cursor ray with the drag
+                # plane (fixed at grab time), project the hit onto the axis
+                # line, and move by the delta from the grabbed offset.
+                gizmo_origin = Vec3(self.drag_plane_point)
+                hit_point = self._ray_plane_hit(
+                    *self.cursor_ray(), self.drag_plane_point, self.drag_plane_normal)
+                if hit_point is not None:
+                    grabbed = self._closest_point_on_line(hit_point, gizmo_origin, axis_world)
+                    offset = (grabbed - gizmo_origin).dot(axis_world)
+                    delta = offset - self.drag_grab_offset
                     for e in ed.selected:
-                        raw = getattr(e, self.drag_axis) + magnitude
+                        start = self.drag_start_pos[e]
+                        raw = getattr(start, self.drag_axis) + delta
                         setattr(e, self.drag_axis, ed._snap_1d(raw))
                     self.refresh()
-        else:
-            if self.drag_axis is not None:
+            else:
+                # Near-parallel-to-view fallback: old velocity model, since
+                # plane-projection is numerically unstable at this angle.
+                axis_screen_dir = (axis_screen / axis_screen_len) if axis_screen_len > 0.0001 else Vec2(1, 0)
+                mouse_vel = Vec2(mouse.velocity[0], mouse.velocity[1])
+                magnitude = mouse_vel.dot(axis_screen_dir) * 200.0
                 for e in ed.selected:
-                    old_pos = self.drag_start_pos[e]
-                    new_pos = Vec3(e.position)
-                    if old_pos != new_pos:
-                        etype = ('enemy' if e in ed.enemies else
-                                 'trigger' if e in ed.triggers else
-                                 'pickup' if e in ed.pickups else 'block')
-                        logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
-                        ed._history.push(MoveEntityCommand(e, old_pos, new_pos))
+                    raw = getattr(e, self.drag_axis) + magnitude
+                    setattr(e, self.drag_axis, ed._snap_1d(raw))
+                self.refresh()
+        else:
+            # Mouse released while a drag was armed — finalize: push undo, reset
+            # drag state, and release the active-drag lock (v1.7 B-lock).
+            for e in ed.selected:
+                old_pos = self.drag_start_pos[e]
+                new_pos = Vec3(e.position)
+                if old_pos != new_pos:
+                    etype = ('enemy' if e in ed.enemies else
+                             'trigger' if e in ed.triggers else
+                             'pickup' if e in ed.pickups else 'block')
+                    logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
+                    ed._history.push(MoveEntityCommand(e, old_pos, new_pos))
             self.drag_axis = None
             self.drag_start_mouse = None
             self.drag_start_pos = None
             self.drag_plane_point = None
             self.drag_plane_normal = None
             self.drag_grab_offset = None
+            ed._release_drag()
 
     def handle_rotate_drag(self):
         """Rotate selected entities about the grabbed ring axis; push RotateEntityCommand
@@ -437,35 +502,37 @@ class GizmoController:
         ed = self.editor
         if not ed._play_mode:
             self._update_ring_hover_highlight()
+        # rotate_axis is armed exactly once, in try_begin_drag()/input() — the old
+        # "re-pick the ring if rotate_axis is None" branch here is deleted (v1.7
+        # B-lock), same reasoning as handle_drag: it re-evaluated the pick
+        # mid-interaction. Only the lock-owning mechanism runs its per-frame body.
+        if self.rotate_axis is None:
+            return
         if held_keys['left mouse']:
-            if self.rotate_axis is None:
-                ring_axis = self._pick_ring()
-                if ring_axis is not None:
-                    self._begin_rotate(ring_axis)
-            else:
-                gizmo_origin = Vec3(self.root.position)
-                normal = self._WORLD_AXES[self.rotate_axis]
-                hit_point = self._ray_plane_hit(*self.cursor_ray(), gizmo_origin, normal)
-                if hit_point is not None:
-                    current_angle = self._ring_angle(self.rotate_axis, hit_point)
-                    delta_deg = math.degrees(current_angle - self.rotate_start_angle)
-                    attr = f'rotation_{self.rotate_axis}'
-                    for e in ed.selected:
-                        start = self.rotate_start_rot[e]
-                        setattr(e, attr, getattr(start, self.rotate_axis) + delta_deg)
-                    self.refresh()
-        else:
-            if self.rotate_axis is not None:
+            gizmo_origin = Vec3(self.root.position)
+            normal = self._WORLD_AXES[self.rotate_axis]
+            hit_point = self._ray_plane_hit(*self.cursor_ray(), gizmo_origin, normal)
+            if hit_point is not None:
+                current_angle = self._ring_angle(self.rotate_axis, hit_point)
+                delta_deg = math.degrees(current_angle - self.rotate_start_angle)
+                attr = f'rotation_{self.rotate_axis}'
                 for e in ed.selected:
-                    old_rot = self.rotate_start_rot[e]
-                    new_rot = Vec3(e.rotation)
-                    if old_rot != new_rot:
-                        etype = ('enemy' if e in ed.enemies else
-                                 'trigger' if e in ed.triggers else
-                                 'pickup' if e in ed.pickups else 'block')
-                        logger.log('INFO', f"Entity rotated: type={etype} {[round(r,3) for r in old_rot]} -> {[round(r,3) for r in new_rot]}")
-                        ed._history.push(RotateEntityCommand(e, old_rot, new_rot))
-                ed._update_inspector()
+                    start = self.rotate_start_rot[e]
+                    setattr(e, attr, getattr(start, self.rotate_axis) + delta_deg)
+                self.refresh()
+        else:
+            # Mouse released — finalize rotate: push undo, reset state, release lock.
+            for e in ed.selected:
+                old_rot = self.rotate_start_rot[e]
+                new_rot = Vec3(e.rotation)
+                if old_rot != new_rot:
+                    etype = ('enemy' if e in ed.enemies else
+                             'trigger' if e in ed.triggers else
+                             'pickup' if e in ed.pickups else 'block')
+                    logger.log('INFO', f"Entity rotated: type={etype} {[round(r,3) for r in old_rot]} -> {[round(r,3) for r in new_rot]}")
+                    ed._history.push(RotateEntityCommand(e, old_rot, new_rot))
+            ed._update_inspector()
             self.rotate_axis = None
             self.rotate_start_rot = None
             self.rotate_start_angle = None
+            ed._release_drag()

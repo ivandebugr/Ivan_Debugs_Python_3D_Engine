@@ -145,6 +145,24 @@ class LevelEditor(Entity):
         # both can be checked with a simple truthiness test.
         self._splitter_drag = None
 
+        # Active-drag-owner lock (v1.7 B-lock) — the single authority over which
+        # drag mechanism owns the cursor. None when idle; otherwise one of
+        # 'gizmo' / 'browser' / 'splitter'. Set the instant a drag is acquired in
+        # input() (priority order: gizmo → splitter → browser) and cleared on
+        # mouse-up/cancel. While set, NO other mechanism may begin a drag and no
+        # hover/preview logic re-evaluates what's under the cursor — every frame
+        # uses only the reference captured at drag-start. The per-mechanism flags
+        # (gizmo.drag_axis/rotate_axis, browser._dragging, _splitter_drag) remain
+        # each owner's internal detail; this flag gates them against each other.
+        self._drag_owner = None
+
+        # Gizmo transform mode (v1.7 B-mode) — 'translate' shows/enables the tip
+        # handles and disables the rings; 'rotate' does the inverse. Only one set
+        # is interactive (and visible) at a time, so the cursor can never be
+        # ambiguous between a tip and a ring. Toggled by T/R keys and the toolbar
+        # mode button; the gizmo reads it via self.editor._gizmo_mode.
+        self._gizmo_mode = 'translate'
+
         # Layout presets (v1.7 C2) — mirrors the camera-bookmark pattern
         # (_bookmarks + _save_prefs) exactly: a dict keyed '1'..'5', loaded/
         # saved alongside the rest of editor_prefs.json.
@@ -232,6 +250,26 @@ class LevelEditor(Entity):
             color=color.dark_gray,
             text_color=color.white,
             highlight_text_color=color.white,
+            text_scale=0.9,
+            z=-1,
+            eternal=True,
+        )
+
+        # Gizmo transform-mode toggle (v1.7 B-mode). Click cycles translate ⇄
+        # rotate; label + colour track the active mode via _refresh_gizmo_mode_button
+        # (called right after this in __init__, once self._gizmo_mode exists). T/R
+        # keys in input() do the same. Active colour clamps to white (0-255 rgb
+        # footgun) so the label uses black text — set in _refresh_gizmo_mode_button.
+        self._gizmo_mode_button = Button(
+            parent=camera.ui,
+            text='Gizmo: Translate [T]',
+            scale=(self._TOOLBAR_BTN_W_BASE['_gizmo_mode_button'], self._TOOLBAR_BTN_H),
+            position=(.35, self._TOOLBAR_Y),
+            on_click=lambda: self._set_gizmo_mode(
+                'rotate' if self._gizmo_mode == 'translate' else 'translate'),
+            color=color.rgb(60, 130, 60),
+            text_color=color.black,
+            highlight_text_color=color.black,
             text_scale=0.9,
             z=-1,
             eternal=True,
@@ -433,6 +471,22 @@ class LevelEditor(Entity):
         self._apply_layout()
 
     # -------------------------------------------------------------------------
+    # Active-drag-owner lock (v1.7 B-lock)
+    # -------------------------------------------------------------------------
+    # Single authority: while _drag_owner is set, nothing else may begin a drag
+    # and no hover/preview re-evaluation runs. Acquire in input() at drag-start,
+    # release on mouse-up/cancel. Kept as tiny helpers so every begin/end path
+    # goes through one place (easy to audit, no scattered flag flips).
+
+    def _acquire_drag(self, owner):
+        """Claim the active-drag lock for `owner` ('gizmo'/'browser'/'splitter')."""
+        self._drag_owner = owner
+
+    def _release_drag(self):
+        """Clear the active-drag lock (drag ended or was cancelled)."""
+        self._drag_owner = None
+
+    # -------------------------------------------------------------------------
     # Resizable panel splitters (v1.7 C3)
     # -------------------------------------------------------------------------
     # One draggable strip per collapsible panel edge, positioned by _apply_layout
@@ -445,7 +499,7 @@ class LevelEditor(Entity):
         after the gizmo raycast (so gizmo handles always win) and before any panel
         guard (so a splitter grab doesn't fall through to panel/selection clicks).
         Returns True (and arms the drag) if a splitter was grabbed."""
-        if self._splitter_drag is not None:
+        if self._drag_owner is not None or self._splitter_drag is not None:
             return False
         for name, splitter in (
             ('hierarchy', self._hier_splitter),
@@ -456,6 +510,7 @@ class LevelEditor(Entity):
                 continue
             if splitter is not None and splitter.enabled and self._is_over_panel(splitter):
                 self._splitter_drag = name
+                self._acquire_drag('splitter')
                 return True
         return False
 
@@ -467,6 +522,7 @@ class LevelEditor(Entity):
             return
         if not mouse.left:
             self._splitter_drag = None
+            self._release_drag()
             return
         aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
         half_w = aspect * 0.5
@@ -496,11 +552,12 @@ class LevelEditor(Entity):
     # Baseline button widths at the reference aspect ratio (16:9). _apply_layout
     # scales these proportionally when the viewport is narrower.
     _TOOLBAR_BTN_W_BASE = {
-        'snap_button':    0.12,
-        'play_button':    0.10,
-        '_move_button':   0.10,
-        '_place_button':  0.11,
-        '_import_button': 0.14,
+        'snap_button':        0.12,
+        'play_button':        0.10,
+        '_move_button':       0.10,
+        '_place_button':      0.11,
+        '_import_button':     0.14,
+        '_gizmo_mode_button': 0.20,
     }
     _TOOLBAR_REF_ASPECT = 16 / 9
 
@@ -591,11 +648,12 @@ class LevelEditor(Entity):
         # multiplied by min(1, aspect / ref_aspect), so buttons shrink at
         # narrow widths but never grow beyond their designed size.
         toolbar_order = (
-            ('snap_button',    self.snap_button),
-            ('play_button',    self.play_button),
-            ('_move_button',   self._move_button),
-            ('_place_button',  self._place_button),
-            ('_import_button', self._import_button),
+            ('snap_button',        self.snap_button),
+            ('play_button',        self.play_button),
+            ('_move_button',       self._move_button),
+            ('_place_button',      self._place_button),
+            ('_import_button',     self._import_button),
+            ('_gizmo_mode_button', self._gizmo_mode_button),
         )
         scale_factor = min(1.0, aspect / self._TOOLBAR_REF_ASPECT)
         gap = self._TOOLBAR_GAP * scale_factor
@@ -698,6 +756,39 @@ class LevelEditor(Entity):
             color.black if move_active else color.white)
         self._place_button.text_color = self._place_button.highlight_text_color = (
             color.black if place_active else color.white)
+
+    def _set_gizmo_mode(self, mode):
+        """Switch the transform gizmo between 'translate' and 'rotate' (v1.7 B-mode).
+
+        Only the active mode's handles are visible + pickable — the gizmo's
+        apply_mode() hides and disables the other set so the cursor can never be
+        ambiguous between a translate tip and a rotation ring. Refused mid-drag so
+        a mode flip can't strand an armed drag on now-hidden handles. Updates the
+        toolbar button label/colour to reflect the active mode."""
+        if mode not in ('translate', 'rotate') or mode == self._gizmo_mode:
+            return
+        # Never switch mode while a drag is live — the armed handles would vanish.
+        if self._drag_owner is not None:
+            return
+        self._gizmo_mode = mode
+        if self.gizmo is not None:
+            self.gizmo.apply_mode()
+        self._refresh_gizmo_mode_button()
+
+    def _refresh_gizmo_mode_button(self):
+        """Sync the mode toolbar button's label + highlight to _gizmo_mode.
+        Active-colour rgb() clamps to white (0-255 footgun), so it needs black
+        text; keep highlight_text_color in step so hover doesn't hide the label."""
+        btn = getattr(self, '_gizmo_mode_button', None)
+        if btn is None:
+            return
+        if self._gizmo_mode == 'translate':
+            btn.text = 'Gizmo: Translate [T]'
+            btn.color = color.rgb(60, 130, 60)
+        else:
+            btn.text = 'Gizmo: Rotate [R]'
+            btn.color = color.rgb(130, 90, 60)
+        btn.text_color = btn.highlight_text_color = color.black
 
     def _snap(self, position):
         if self.grid_snap is None:
@@ -909,6 +1000,16 @@ class LevelEditor(Entity):
 
     def _pickup_typing(self):
         return self.inspector._pickup_typing()
+
+    def _any_field_typing(self):
+        """True if any editor text field (inspector numeric/behaviour/door/trigger/
+        pickup, or hierarchy search) is focused. Bare-letter shortcuts (T/R gizmo
+        mode) must not fire while typing. Mirrors the inline typing checks the
+        delete and bookmark-recall paths already use."""
+        return (any(f.active for f in self.inspector._insp_fields.values())
+                or self._hier_typing() or self._behaviour_typing()
+                or self._door_name_typing() or self._trigger_typing()
+                or self._pickup_typing())
 
     # -------------------------------------------------------------------------
     # Asset picker overlay / asset browser (v1.6 split)
@@ -1173,7 +1274,7 @@ class LevelEditor(Entity):
         for widget in [self.hierarchy.panel,
                        self.snap_button,
                        self.play_button, self._move_button, self._place_button,
-                       self._import_button,
+                       self._import_button, self._gizmo_mode_button,
                        self._stats_text,
                        self._spawn_marker]:
             if widget:
@@ -1289,6 +1390,13 @@ class LevelEditor(Entity):
             self._toggle_panel('inspector')
         if key == 'b' and held_keys['control']:
             self._toggle_panel('browser')
+
+        # Gizmo transform-mode keys (v1.7 B-mode): T = translate, R = rotate.
+        # Bare (no ctrl) and gated on the typing guard below so they never fire
+        # while a 't'/'r' is being typed into a field. _set_gizmo_mode is a no-op
+        # mid-drag and when already in the requested mode.
+        if key in ('t', 'r') and not held_keys['control'] and not self._any_field_typing():
+            self._set_gizmo_mode('translate' if key == 't' else 'rotate')
 
         # Undo / Redo
         if key == 'z' and held_keys['control'] and held_keys['shift']:
