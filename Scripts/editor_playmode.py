@@ -21,7 +21,7 @@ and the teardown except is ImportError only — never a blanket Exception.
 
 from ursina import *
 
-from Scripts.asset_resolve import resolve_model as _resolve_model
+from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_texture as _resolve_texture
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.level_io import load_level_data
 from Scripts.session_logger import get_editor_logger
@@ -184,7 +184,7 @@ class PlayModeController:
             else:
                 new_entity = Entity(
                     model=_resolve_model(entry['model']),
-                    texture=entry['texture'],
+                    texture=_resolve_texture(entry['texture']),
                     position=tuple(entry['position']),
                     rotation=tuple(entry['rotation']),
                     scale=tuple(entry['scale']),
@@ -211,7 +211,7 @@ class PlayModeController:
                 Entity(
                     model=_resolve_model(entry['model']),
                     collider='box',
-                    texture=entry['texture'],
+                    texture=_resolve_texture(entry['texture']),
                     position=tuple(entry['position']),
                     color=color.rgb(*entry['colour']),
                     rotation=tuple(entry['rotation']),

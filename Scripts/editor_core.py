@@ -22,7 +22,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
 )
-from Scripts.asset_resolve import resolve_model as _resolve_model
+from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_texture as _resolve_texture
 from Scripts.session_logger import get_editor_logger
 from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.editor_hierarchy import HierarchyPanel
@@ -1323,7 +1323,7 @@ class LevelEditor(Entity):
                 else:
                     new_entity = Entity(
                         model=_resolve_model(entry['model']),
-                        texture=entry['texture'],
+                        texture=_resolve_texture(entry['texture']),
                         position=tuple(entry['position']),
                         rotation=tuple(entry['rotation']),
                         scale=tuple(entry['scale']),

@@ -8,7 +8,7 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.level_io import load_level_data
-from Scripts.undo_redo import _resolve_model
+from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_texture as _resolve_texture
 from Scripts.session_logger import get_game_logger
 from Scripts.ui_theme import (
     BG_PANEL, BG_OVERLAY, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -270,7 +270,7 @@ def load_level():
             block = Entity(
                 model=_resolve_model(entry['model']),
                 collider='box',
-                texture=entry['texture'],
+                texture=_resolve_texture(entry['texture']),
                 position=tuple(entry['position']),
                 color=color.rgb(*entry['colour']),
                 rotation=tuple(entry['rotation']),
