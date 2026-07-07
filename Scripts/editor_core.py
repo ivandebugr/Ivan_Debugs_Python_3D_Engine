@@ -134,6 +134,11 @@ class LevelEditor(Entity):
         # _save_prefs/_load_prefs (v1.7 C2 extends this with saved presets).
         self.panel_visible = {'hierarchy': True, 'inspector': True, 'browser': True}
 
+        # Layout presets (v1.7 C2) — mirrors the camera-bookmark pattern
+        # (_bookmarks + _save_prefs) exactly: a dict keyed '1'..'5', loaded/
+        # saved alongside the rest of editor_prefs.json.
+        self._layout_presets = {str(i): None for i in range(1, 6)}
+
         # Undo/redo
         self._history = UndoRedoStack()
 
@@ -873,11 +878,13 @@ class LevelEditor(Entity):
 
     def _load_prefs(self):
         self._bookmarks = {str(i): None for i in range(1, 6)}
+        self._layout_presets = {str(i): None for i in range(1, 6)}
         if os.path.exists('editor_prefs.json'):
             try:
                 with open('editor_prefs.json') as f:
                     prefs = json.load(f)
                 self._bookmarks = prefs.get('bookmarks', self._bookmarks)
+                self._layout_presets = prefs.get('layout_presets', self._layout_presets)
                 snap_val = prefs.get('grid_snap', 1.0)
                 if snap_val in self.snap_values:
                     self.snap_index = self.snap_values.index(snap_val)
@@ -892,12 +899,42 @@ class LevelEditor(Entity):
         prefs = {
             'bookmarks': self._bookmarks,
             'grid_snap': self.grid_snap,
+            'layout_presets': self._layout_presets,
         }
         try:
             with open('editor_prefs.json', 'w') as f:
                 json.dump(prefs, f, indent=4)
         except Exception as e:
             logger.log('ERROR', f"_save_prefs failed: {type(e).__name__}: {e}")
+
+    # -------------------------------------------------------------------------
+    # Layout presets (v1.7 C2)
+    # -------------------------------------------------------------------------
+
+    def _save_layout_preset(self, slot):
+        """Snapshot current panel widths + visibility into preset `slot` ('1'..'5')."""
+        self._layout_presets[slot] = {
+            'hier_w': self._LAYOUT_HIER_W,
+            'insp_w': self._LAYOUT_INSP_W,
+            'browser_h': self.browser._BROWSER_H,
+            'panel_visible': dict(self.panel_visible),
+        }
+        self._save_prefs()
+
+    def _recall_layout_preset(self, slot):
+        """Restore panel widths + visibility from preset `slot`, or no-op if empty.
+
+        Only visibility is applied via _toggle_panel-style state (widths are
+        stored for forward-compatibility with C3 resizable panels but are
+        currently fixed constants, so they're round-tripped, not yet applied)."""
+        preset = self._layout_presets.get(slot)
+        if not preset:
+            return
+        saved_visible = preset.get('panel_visible', {})
+        for name in ('hierarchy', 'inspector', 'browser'):
+            want = saved_visible.get(name, True)
+            if want != self.panel_visible[name]:
+                self._toggle_panel(name)
 
     # -------------------------------------------------------------------------
     # Play-in-editor
@@ -1137,6 +1174,18 @@ class LevelEditor(Entity):
             self._history.redo()
             logger.log('INFO', f"Redo executed: {type(cmd).__name__ if cmd else 'nothing'}")
 
+        # Layout presets (v1.7 C2) — save. Alt-modified so Ctrl+Alt+N never
+        # collides with the plain Ctrl+N camera-bookmark save below.
+        if held_keys['control'] and held_keys['alt']:
+            for i in range(1, 6):
+                if key == str(i):
+                    self._save_layout_preset(str(i))
+                    Text(f'[Layout {i}] Saved', parent=camera.ui,
+                         position=(-.6, .1 - i * .05),
+                         duration=2, color=color.azure, scale=1.5, z=-1)
+                    break
+            return
+
         # Camera bookmarks — save
         for i in range(1, 6):
             if key == str(i) and held_keys['control']:
@@ -1150,6 +1199,15 @@ class LevelEditor(Entity):
                          position=(-.6, .4 - i * .05),
                          duration=2, color=color.green, scale=1.5, z=-1)
                 break
+
+        # Layout presets (v1.7 C2) — recall. Alt-modified so bare Alt+N never
+        # collides with the plain-N camera-bookmark recall below.
+        if held_keys['alt'] and not held_keys['control']:
+            for i in range(1, 6):
+                if key == str(i):
+                    self._recall_layout_preset(str(i))
+                    break
+            return
 
         # Camera bookmarks — recall (only when not in a control combo)
         if not held_keys['control']:
