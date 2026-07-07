@@ -12,7 +12,7 @@ These are PURE tests: stdlib unittest, no Ursina, no window, no app.
     ChangeBehaviourCommand is exercised DIRECTLY against fake entities + a fake
     editor (the command only calls editor._refresh_behaviour_ui(), which the fake
     counts).
-  * Scripts/level_editor.py CANNOT be imported headless (heavy module-scope
+  * Scripts/editor_core.py CANNOT be imported headless (heavy module-scope
     Ursina/app init). So the four config-building transforms are reproduced here
     as module-level helpers, copied VERBATIM from the LevelEditor methods. If a
     call site drifts from this logic, the matching test must be updated in
@@ -48,7 +48,7 @@ class FakeEditor:
 
 
 # --- Editor transforms, copied VERBATIM from LevelEditor (see module docstring) ---
-# These mirror Scripts/level_editor.py exactly; they take the entity's current
+# These mirror Scripts/editor_core.py exactly; they take the entity's current
 # behaviour_config and a preset/waypoint intent and return the next config dict.
 
 def _waypoints_of(cfg):

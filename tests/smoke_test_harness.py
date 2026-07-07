@@ -114,7 +114,9 @@ class GameTestHarness:
         that call from handing control to ShowBase's blocking main loop.
 
         Both main.py and Scripts/level_editor.py call `app.run()` at the end of
-        their `if __name__ == '__main__'` block (main.py:636, level_editor.py:2190).
+        their `if __name__ == '__main__'` block (level_editor.py builds the app
+        inside _launch() since the v1.6 split, but still assigns the module-level
+        `app` and ends in `app.run()`).
         `Ursina.run()` (ursina/main.py) ends in `super().run()` — ShowBase's
         blocking loop — which would never return, so runpy itself would never
         return either. We can't edit those files (and the harness is meant to
@@ -195,9 +197,10 @@ class GameTestHarness:
         return self._run_module_without_blocking(PROJECT_ROOT / "main.py")
 
     def launch_editor(self):
-        """Same pattern for Scripts/level_editor.py — its module-level instance
-        is `app = Ursina(title="Level Editor")` (level_editor.py:2141), and it
-        too ends in a blocking `app.run()` (level_editor.py:2190)."""
+        """Same pattern for Scripts/level_editor.py — since the v1.6 split its
+        __main__ block assigns the module-level `app = _launch()` (which builds
+        Ursina(title="Level Editor")) and ends in a blocking `app.run()`.
+        The LevelEditor class itself lives in Scripts/editor_core.py."""
         return self._run_module_without_blocking(
             PROJECT_ROOT / "Scripts" / "level_editor.py"
         )

@@ -6,9 +6,9 @@ surfaces (no inspector UI — that's Step 9):
   1. runtime load  — main.py: load_level() stashes the raw config on the
      level_enemy placeholder; start_game() builds the tree via
      BehaviourTreeFactory and passes behaviour_tree= to Enemy().
-  2. editor load   — level_editor.py load_existing_level() stores the raw
+  2. editor load   — editor_core.py load_existing_level() stores the raw
      config on the placeholder as ``.behaviour_config`` (NO tree built).
-  3. editor save   — level_editor.py _build_level_data() writes a "behaviour"
+  3. editor save   — editor_core.py _build_level_data() writes a "behaviour"
      key IFF the enemy carries a non-empty ``.behaviour_config``.
 
 All three read paths consume Scripts/level_io.load_level_data(), whose
@@ -123,7 +123,7 @@ class _StubEnemy:
 def _serialize_enemy(enemy):
     """Verbatim copy of _build_level_data()'s per-enemy serialization (Step 8).
 
-    Kept in lockstep with Scripts/level_editor.py _build_level_data() — see the
+    Kept in lockstep with Scripts/editor_core.py _build_level_data() — see the
     module docstring's "copied verbatim" note.
     """
     enemy_data = {
