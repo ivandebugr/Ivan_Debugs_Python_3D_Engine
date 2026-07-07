@@ -1,3 +1,7 @@
+import re
+import subprocess
+import sys
+
 from ursina import *
 from Scripts.player_controller import Player
 from Scripts.enemy import Enemy
@@ -10,6 +14,9 @@ from Scripts.game import game, Game
 from Scripts.level_io import load_level_data
 from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_texture as _resolve_texture
 from Scripts.session_logger import get_game_logger
+from Scripts.game_settings import (
+    RESOLUTIONS, load_settings, save_settings, apply_audio_settings,
+)
 from Scripts.ui_theme import (
     BG_PANEL, BG_OVERLAY, TEXT_PRIMARY, TEXT_SECONDARY,
     HUD_MARGIN, BUTTON_SCALE, BUTTON_GAP, FONT_BOLD,
@@ -26,6 +33,11 @@ import pyglet
 # sessions trace it.
 logger = get_game_logger()
 
+# Loaded once at import time; SettingsMenu mutates this dict in place and
+# persists it via save_settings() so game.py/main_menu() and any future
+# screen all see the same in-memory values without re-reading the file.
+game_settings = load_settings()
+
 
 def _is_live(entity) -> bool:
     """True if `entity`'s NodePath is still attached (not already destroyed).
@@ -41,6 +53,23 @@ def _is_live(entity) -> bool:
         return not entity.is_empty()
     except Exception:
         return False
+
+
+def _get_version_string():
+    """Read the latest version header from CHANGELOG.md (e.g. 'v1.7.0').
+
+    Falls back to an empty label if the file or header pattern is missing so a
+    packaging change never crashes the main menu over cosmetic text.
+    """
+    try:
+        with open('CHANGELOG.md') as f:
+            for line in f:
+                match = re.match(r'## \[(.+?)\]', line)
+                if match:
+                    return f'v{match.group(1)}'
+    except Exception as e:
+        logger.log('ERROR', f"_get_version_string failed: {type(e).__name__}: {e}")
+    return ''
 
 
 def _themed_button(**kwargs):
@@ -406,8 +435,50 @@ def main_menu():
         camera_pivot.rotation_y += 10 * time.dt
     camera_pivot.update = rotate
 
-    play_button = _themed_button(text='Play', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP / 2)
-    quit_button = _themed_button(text='Quit', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP / 2)
+    title_text = Text(
+        text="Ivan's 3D Engine",
+        parent=camera.ui,
+        origin=(0, 0),
+        y=0.35,
+        scale=3,
+        color=TEXT_PRIMARY,
+        font=FONT_BOLD,
+    )
+    version_text = Text(
+        text=_get_version_string(),
+        parent=camera.ui,
+        position=window.bottom_right + Vec2(-HUD_MARGIN, HUD_MARGIN),
+        origin=(0.5, -0.5),
+        scale=0.8,
+        color=TEXT_SECONDARY,
+    )
+
+    play_button = _themed_button(text='Play', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP * 1.5)
+    editor_button = _themed_button(text='Level Editor', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP * 0.5)
+    settings_button = _themed_button(text='Settings', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP * 0.5)
+    quit_button = _themed_button(text='Quit', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP * 1.5)
+    main_menu_buttons = [play_button, editor_button, settings_button, quit_button]
+
+    def launch_level_editor():
+        subprocess.Popen([sys.executable, 'Scripts/level_editor.py'])
+
+    editor_button.on_click = launch_level_editor
+
+    def open_settings():
+        title_text.enabled = False
+        version_text.enabled = False
+        for b in main_menu_buttons:
+            b.enabled = False
+
+        def on_back():
+            title_text.enabled = True
+            version_text.enabled = True
+            for b in main_menu_buttons:
+                b.enabled = True
+
+        SettingsMenu(on_back=on_back)
+
+    settings_button.on_click = open_settings
 
     def start_game():
         # This branch is currently unreachable: 'r' on WIN/GAME_OVER already calls
@@ -488,7 +559,11 @@ def main_menu():
                 amount=getattr(placeholder, 'amount', 30),
             )
             destroy(placeholder)
+        destroy(title_text)
+        destroy(version_text)
         destroy(play_button)
+        destroy(editor_button)
+        destroy(settings_button)
         destroy(quit_button)
         destroy(camera_pivot)
 
@@ -500,6 +575,103 @@ def main_menu():
 
     play_button.on_click = start_game
     quit_button.on_click = application.quit
+
+
+class IntroScreen(Entity):
+    """One-time splash shown before the first main_menu() build. No logo art
+    exists in assets/ yet, so this is styled title text only — same theme as
+    the main menu, distinguished by the 'click to continue' prompt.
+
+    Ursina auto-dispatches .input(key) on every scene entity each frame (same
+    mechanism PauseMenu/gameplay entities rely on), so any key or mouse click
+    advances past it without touching the __main__ update()/input() functions
+    defined later in this file.
+    """
+
+    def __init__(self):
+        super().__init__(parent=camera.ui)
+        self.background = Entity(parent=self, model='quad', color=BG_OVERLAY, scale=(2, 2), z=1)
+        self.title_text = Text(
+            text="Ivan's 3D Engine", parent=self, origin=(0, 0),
+            scale=4, color=TEXT_PRIMARY, font=FONT_BOLD,
+        )
+        self.hint_text = Text(
+            text='Click or press any key to continue', parent=self, origin=(0, 0),
+            y=-0.15, scale=1.3, color=TEXT_SECONDARY,
+        )
+
+    def input(self, key):
+        destroy(self)
+        main_menu()
+
+
+class SettingsMenu(Entity):
+    """Resolution + volume overlay. Mutates the module-level `game_settings`
+    dict in place and persists on every change via save_settings() — same
+    immediate-write pattern as editor_core.py's _save_prefs() (no separate
+    'Apply' step to forget).
+    """
+
+    def __init__(self, on_back):
+        super().__init__(parent=camera.ui)
+        self.on_back = on_back
+
+        self.background = Entity(parent=self, model='quad', color=BG_OVERLAY, scale=(2, 2), z=1)
+
+        self.title_text = Text(
+            text='Settings', parent=self, origin=(0, 0), y=0.3,
+            scale=2.5, color=TEXT_PRIMARY, font=FONT_BOLD,
+        )
+
+        res_w, res_h = RESOLUTIONS[game_settings['resolution_index']]
+        self.resolution_button = _themed_button(
+            text=f'Resolution: {res_w}x{res_h}',
+            color=BG_PANEL, text_color=TEXT_PRIMARY,
+            scale=BUTTON_SCALE, y=0.15, parent=self,
+        )
+        self.resolution_button.on_click = self.cycle_resolution
+
+        self.sfx_slider = Slider(
+            min=0, max=1, default=game_settings['sfx_volume'],
+            text='SFX Volume', dynamic=False,
+            parent=self, y=0.02, x=-0.09,
+        )
+        self.sfx_slider.on_value_changed = self.on_sfx_changed
+
+        self.music_slider = Slider(
+            min=0, max=1, default=game_settings['music_volume'],
+            text='Music Volume', dynamic=False,
+            parent=self, y=-0.05, x=-0.09,
+        )
+        self.music_slider.on_value_changed = self.on_music_changed
+
+        self.back_button = _themed_button(
+            text='Back', color=BG_PANEL, text_color=TEXT_PRIMARY,
+            scale=BUTTON_SCALE, y=-0.2, parent=self,
+        )
+        self.back_button.on_click = self.close
+
+    def cycle_resolution(self):
+        game_settings['resolution_index'] = (game_settings['resolution_index'] + 1) % len(RESOLUTIONS)
+        w, h = RESOLUTIONS[game_settings['resolution_index']]
+        self.resolution_button.text = f'Resolution: {w}x{h}'
+        if not window.fullscreen:
+            window.size = (w, h)
+        save_settings(game_settings)
+
+    def on_sfx_changed(self):
+        game_settings['sfx_volume'] = self.sfx_slider.value
+        apply_audio_settings(game_settings)
+        save_settings(game_settings)
+
+    def on_music_changed(self):
+        game_settings['music_volume'] = self.music_slider.value
+        save_settings(game_settings)
+
+    def close(self):
+        self.on_back()
+        destroy(self)
+
 
 class PauseMenu(Entity):
     def __init__(self):
@@ -597,13 +769,15 @@ if __name__ == '__main__':
     window.borderless = False
     window.resizable = True
     window.fullscreen = False
-    window.size = (1280, 720)
+    window.size = RESOLUTIONS[game_settings['resolution_index']]
     window.multisamples = 16
 
     window.position = (
         (screen_width - window.size[0]) // 2,
         (screen_height - window.size[1]) // 2
     )
+
+    apply_audio_settings(game_settings)
 
     # BUG 2 FIX: Ursina() and subsequent window resizes can re-initialize shader
     # objects on internal entities. Re-patch after window setup so all shaders
@@ -619,7 +793,7 @@ if __name__ == '__main__':
 
     taskMgr.doMethodLater(0, _deferred_antialias, '_deferred_antialias')
 
-    main_menu()
+    IntroScreen()
 
     def update():
         collision_manager.update()
@@ -639,7 +813,7 @@ if __name__ == '__main__':
                 window.size = (screen_width, screen_height)
                 mouse.locked = True
             else:
-                window.size = (1280, 720)
+                window.size = RESOLUTIONS[game_settings['resolution_index']]
                 window.position = (
                     (screen_width - window.size[0]) // 2,
                     (screen_height - window.size[1]) // 2
