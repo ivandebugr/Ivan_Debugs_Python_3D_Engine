@@ -75,14 +75,44 @@ class InspectorPanel:
         # HP, colour, texture and enemy_type still live on the entity and
         # round-trip through level.json (see _build_level_data); they are simply
         # not editable here. Coordinates are panel-local (quad spans -0.5..0.5).
+        # Transform cluster (v1.7 Step 3): a faint backing quad + a "Transform"
+        # header group the nine Pos/Scale/Rot fields into one visually distinct
+        # block, so the lower type-specific band reads as a separate zone. Purely
+        # additive — the field grid positions are unchanged (low-risk tightening,
+        # not a reflow). Sits behind the fields (z just behind, above the panel).
+        self._insp_transform_bg = Entity(
+            parent=self.panel, model='quad',
+            color=color.rgba(1, 1, 1, 0.06),
+            scale=(.94, .53), position=(0, .015),
+            z=-0.2, eternal=True,
+        )
+        try:
+            self._insp_transform_bg.setBin('fixed', 40)   # behind the fields (bin 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin transform bg {type(e).__name__}: {e}")
+        self._insp_transform_hdr = Text(
+            parent=self.panel, text='Transform',
+            position=(-.44, .30), origin=(-0.5, 0),
+            color=color.light_gray, z=-1, eternal=True,
+        )
+        self._insp_transform_hdr.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        try:
+            self._insp_transform_hdr.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_inspector setBin transform hdr {type(e).__name__}: {e}")
+
         grid = [
             [('pos_x', 'Pos X'), ('pos_y', 'Pos Y'), ('pos_z', 'Pos Z')],
             [('scl_x', 'Scale X'), ('scl_y', 'Scale Y'), ('scl_z', 'Scale Z')],
             [('rot_x', 'Rot X'), ('rot_y', 'Rot Y'), ('rot_z', 'Rot Z')],
         ]
         col_x = (-.33, 0.0, .33)              # column centres
-        row_label_y = (.24, .04, -.16)        # label y per row
-        row_field_y = (.15, -.05, -.25)       # input-field y per row
+        # Tightened row pitch (v1.7 Step 3): .17 between rows (was .20) with a
+        # .075 label→field gap, starting just under the Transform header. Frees
+        # ~.05 of vertical space for the crowded lower band without shrinking the
+        # fields themselves. Grid now ends at -.195 (was -.25).
+        row_label_y = (.22, .05, -.12)        # label y per row
+        row_field_y = (.145, -.025, -.195)    # input-field y per row
         self._insp_fields = {}
         for r, row in enumerate(grid):
             for c, (key, label) in enumerate(row):
@@ -426,10 +456,19 @@ class InspectorPanel:
         if getattr(self, '_insp_tex_swatch', None) is None:
             return
         entities = list(self.editor.selected)
-        # Trigger volume colour/texture is editor chrome (not saved) — don't surface
-        # it as if it were an editable texture. Treat a trigger-containing selection
-        # like empty for the swatch.
-        if not entities or any(e in self.editor.triggers for e in entities):
+        # Texture is block-only. Hide the whole row (label + swatch + name) for
+        # empty / enemy / trigger / pickup / mixed selections (v1.7 Step 3) — it
+        # previously stayed visible showing '---' and co-rendered on top of the
+        # trigger/pickup/behaviour sections that reuse the lower band, which was
+        # the bulk of the "cramped, messy" inspector. Mirrors the model field's
+        # own hide logic.
+        has_nonblock = any(
+            (e in self.editor.enemies or e in self.editor.triggers
+             or e in self.editor.pickups) for e in entities)
+        tex_visible = bool(entities) and not has_nonblock
+        for w in (self._insp_tex_label, self._insp_tex_swatch, self._insp_tex_name):
+            w.enabled = tex_visible
+        if not tex_visible:
             self._insp_tex_swatch.texture = None
             self._insp_tex_swatch.color = color.dark_gray
             self._insp_tex_name.text = '---'
@@ -479,15 +518,21 @@ class InspectorPanel:
         if getattr(self, '_insp_model_field', None) is None:
             return
         entities = list(self.editor.selected)
-        # Blocks only — hide for enemy/trigger/mixed (triggers reuse this lower band
-        # for their action editor; only one section is ever enabled).
-        has_nonblock = any((e in self.editor.enemies or e in self.editor.triggers) for e in entities)
+        # Blocks only — hide for enemy/trigger/pickup/mixed (each reuses the lower
+        # band for its own section; only one is ever enabled). v1.7 Step 3 added
+        # pickups to the exclusion (they were missing, so the Model field showed
+        # over the pickup config).
+        has_nonblock = any(
+            (e in self.editor.enemies or e in self.editor.triggers
+             or e in self.editor.pickups) for e in entities)
         if not entities or has_nonblock:
             self._insp_model_label.enabled = False
             self._insp_model_field.enabled = False
+            self._insp_model_name.enabled = False
             return
         self._insp_model_label.enabled = True
         self._insp_model_field.enabled = True
+        self._insp_model_name.enabled = True
         names = {self._entity_model_name(e) for e in entities}
         if len(names) != 1:
             self._insp_model_name.text = '---'
@@ -872,12 +917,27 @@ class InspectorPanel:
     # snapshotting both whole lists (undo granularity mirrors ChangeBehaviourCommand).
     # -------------------------------------------------------------------------
     ACTION_TYPES = ['kill_plane', 'checkpoint', 'open_door', 'win_condition']
+    # Human-readable button labels for each action type (v1.7 Step 3) — the raw
+    # snake_case keys ('kill_plane') read as cryptic on the tiny row buttons.
+    # Stored value stays the snake_case key; only the displayed text changes.
+    ACTION_LABELS = {
+        'kill_plane':    'Kill Plane',
+        'checkpoint':    'Checkpoint',
+        'open_door':     'Open Door',
+        'win_condition': 'Win Level',
+    }
+    # One-line legend of what the actions do, shown above the lists so the meaning
+    # isn't a guess (v1.7 Step 3, addresses Ivan's "can't understand the options").
+    _TRIG_LEGEND = 'Kill=die  Checkpoint=save  Open Door=name  Win=level end'
 
-    _TRIG_ENTER_LABEL_Y = -0.30   # "on_enter" header y
-    _TRIG_ENTER_TOP_Y   = -0.345  # first on_enter row y
-    _TRIG_EXIT_LABEL_Y  = -0.46   # "on_exit" header y (leaves room for ~2 enter rows)
-    _TRIG_EXIT_TOP_Y    = -0.505  # first on_exit row y
-    _TRIG_ROW_H         = 0.05    # vertical pitch between action rows
+    # Tightened trigger band (v1.7 Step 3): pulled up into the space the tightened
+    # transform grid freed, and compressed so a legend + both lists (with ~2 rows
+    # each) fit inside the panel bottom (-0.45) instead of overflowing off-panel.
+    _TRIG_ENTER_LABEL_Y = -0.265  # "on_enter" header y (legend sits just above)
+    _TRIG_ENTER_TOP_Y   = -0.305  # first on_enter row y
+    _TRIG_EXIT_LABEL_Y  = -0.385  # "on_exit" header y (room for ~2 enter rows above)
+    _TRIG_EXIT_TOP_Y    = -0.425  # first on_exit row y
+    _TRIG_ROW_H         = 0.042   # vertical pitch between action rows
 
     def _build_trigger_ui(self):
         """Persistent trigger-section widgets (two list headers + two add buttons).
@@ -910,8 +970,16 @@ class InspectorPanel:
         self._trig_exit_add.text_entity.world_scale = Vec3(10, 10, 1)
         self._trig_exit_add.on_click = lambda: self._on_add_trigger_action('on_exit')
 
+        # Action legend (v1.7 Step 3): a small always-on explainer above the lists.
+        self._trig_legend = Text(
+            parent=self.panel, text=self._TRIG_LEGEND,
+            position=(-.44, self._TRIG_ENTER_LABEL_Y + 0.035), origin=(-0.5, 0),
+            color=color.rgba(0.7, 0.7, 0.7, 1.0), z=-1, eternal=True, enabled=False,
+        )
+        self._trig_legend.world_scale = Vec3(6, 6, 1)
+
         for w in (self._trig_enter_label, self._trig_enter_add,
-                  self._trig_exit_label, self._trig_exit_add):
+                  self._trig_exit_label, self._trig_exit_add, self._trig_legend):
             try:
                 w.setBin('fixed', 41)
             except Exception as e:
@@ -929,7 +997,7 @@ class InspectorPanel:
 
     def _set_trigger_section_visible(self, visible):
         for w in (self._trig_enter_label, self._trig_enter_add,
-                  self._trig_exit_label, self._trig_exit_add):
+                  self._trig_exit_label, self._trig_exit_add, self._trig_legend):
             w.enabled = visible
 
     def _clear_trigger_rows(self):
@@ -963,26 +1031,39 @@ class InspectorPanel:
         for idx, action in enumerate(actions):
             row_y = top_y - idx * self._TRIG_ROW_H
             name = action.get('action', '?')
-            # Type button — click cycles to the next action type.
+            is_open_door = (name == 'open_door')
+            # Type button — click cycles to the next action type. Show the
+            # readable label (v1.7 Step 3); the stored value stays snake_case.
+            # Narrower when open_door so its door-name field fits on the same row
+            # without the field's text overflowing off the panel's right edge.
+            type_x, type_w = (-.20, .22) if is_open_door else (-.14, .34)
             type_btn = Button(
-                parent=self.panel, text=name,
-                position=(-.14, row_y), scale=(.34, .042),
+                parent=self.panel, text=self.ACTION_LABELS.get(name, name),
+                position=(type_x, row_y), scale=(type_w, .042),
                 color=self.editor._THEME_TILE_BG, z=-1,
             )
             type_btn.text_entity.world_scale = Vec3(8, 8, 1)
             type_btn.on_click = lambda w=which, i=idx: self._on_cycle_trigger_action(w, i)
             # Target field — only for open_door (the one action that takes a param).
             target_field = None
-            if name == 'open_door':
+            if is_open_door:
                 target_field = InputField(
                     parent=self.panel,
-                    position=(.18, row_y), scale=(.18, .042),
+                    position=(.06, row_y), scale=(.20, .042),
                     default_value=str(action.get('target', '')), z=-1,
                 )
                 target_field.submit_on = ['enter']
                 target_field.on_submit = (
                     lambda w=which, i=idx, f=target_field: self._on_trigger_target_edit(w, i, f.text)
                 )
+                # InputField's text_field renders at a fixed world_scale ~25 that
+                # ignores the small panel scale (same as every inspector InputField),
+                # so a longer door name overflows the panel. Clamp it down so the
+                # door name stays compact and on-panel (matches the ~8 world_scale
+                # the row's Button labels use).
+                tfld = getattr(target_field, 'text_field', None)
+                if tfld is not None:
+                    tfld.world_scale = Vec3(9, 9, 1)
             del_btn = Button(
                 parent=self.panel, text='x',
                 position=(.33, row_y), scale=(.05, .042),
