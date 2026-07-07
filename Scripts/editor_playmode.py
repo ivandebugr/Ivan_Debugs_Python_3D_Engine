@@ -29,6 +29,18 @@ from Scripts.session_logger import get_editor_logger
 logger = get_editor_logger()
 
 
+def _is_live(entity) -> bool:
+    """True if `entity`'s NodePath is still attached (not already destroyed).
+
+    Same guard as main._is_live() — reading e.name/isinstance-relevant state on an
+    emptied-but-unflushed NodePath fires the C++ getName() assertion (HC10).
+    """
+    try:
+        return not entity.is_empty()
+    except Exception:
+        return False
+
+
 class PlayModeController:
     def __init__(self, editor):
         self.editor = editor
@@ -80,6 +92,21 @@ class PlayModeController:
             if game.player:
                 destroy(game.player)
                 game.player = None
+        # _clear_gameplay_entities()'s name-sweep only covers level_block/level_enemy/
+        # ground/main_sky/camera_pivot — it never runs main_menu()'s scene, which is
+        # the only other place TriggerZone/AmmoPickup (live AliveEntitys) and parked
+        # bullet-pool entities (dead-but-undestroyed AliveEntitys) get swept up. F5
+        # exit is a third teardown path that needs the same cleanup done explicitly.
+        from Scripts.trigger_system import TriggerZone
+        from Scripts.weapon import AmmoPickup, PlayerBullet, EnemyBullet
+        for e in scene.entities[:]:
+            if not _is_live(e):
+                continue
+            if isinstance(e, TriggerZone) or isinstance(e, AmmoPickup):
+                if e.alive:
+                    e.die()
+            elif isinstance(e, (PlayerBullet, EnemyBullet)):
+                destroy(e)
         ed._play_mode = False
         self._restore_editor_level()
         ed._set_editor_ui_visible(True)
