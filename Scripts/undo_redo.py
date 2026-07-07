@@ -161,6 +161,21 @@ class MoveEntityCommand(Command):
     def undo(self):    self.entity.position = self.old_pos
 
 
+class RotateEntityCommand(Command):
+    """Rotate entity to new_rot; undo restores old_rot, redo reapplies new_rot."""
+
+    def __init__(self, entity, old_rot, new_rot):
+        self.entity  = entity
+        self.old_rot = old_rot
+        self.new_rot = new_rot
+
+    def __repr__(self):
+        return f"RotateEntityCommand(old={list(self.old_rot)}, new={list(self.new_rot)})"
+
+    def execute(self): self.entity.rotation = self.new_rot
+    def undo(self):    self.entity.rotation = self.old_rot
+
+
 class ChangeTextureCommand(Command):
     """Apply new_texture to all entities; undo restores per-entity old textures."""
 

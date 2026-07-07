@@ -2,18 +2,22 @@
 editor_gizmo.py — Transform-gizmo collaborator for the level editor (v1.6 split).
 
 Owns the X/Y/Z translate gizmo: handle geometry, per-frame drag translation,
-and the mouse-cursor pick that begins a drag. Selection, undo history and grid
-snap remain core-owned shared state, reached through the editor back-reference
-(`self.editor.selected` / `_history` / `_snap_1d`).
+and the mouse-cursor pick that begins a drag. Also owns the X/Y/Z rotation-ring
+gizmo (v1.7 B2-ring): ring geometry, angle-drag rotation, and its own pick.
+Selection, undo history and grid snap remain core-owned shared state, reached
+through the editor back-reference (`self.editor.selected` / `_history` /
+`_snap_1d`).
 
 Core's input() keeps the dispatch order (v1.2.4 priority chain) and calls
 try_begin_drag() as its Step 1; core's update() drives handle_drag()/refresh().
 """
 
+import math
+
 from ursina import *
 
 from Scripts.session_logger import get_editor_logger
-from Scripts.undo_redo import MoveEntityCommand
+from Scripts.undo_redo import MoveEntityCommand, RotateEntityCommand
 
 logger = get_editor_logger()
 
@@ -25,10 +29,19 @@ class GizmoController:
     # back to the old velocity model under this threshold.
     _AXIS_SCREEN_LEN_MIN = 0.05
 
+    # Ring gizmo radius (world units) — deliberately larger than the translate
+    # shaft length so rings don't visually collide with the tip cubes.
+    _RING_RADIUS = 1.6
+    _RING_SEGMENTS = 48
+    # Extra pick tolerance for rings: a thin line-loop is much easier to miss
+    # than a cube tip, so the ring pick sweep checks distance-to-ring instead
+    # of relying on a hit against the (visually invisible) mesh line itself.
+    _RING_PICK_TOLERANCE = 0.12
+
     def __init__(self, editor):
         self.editor = editor
         self.root = None
-        # Drag state
+        # Drag state (translate)
         self.drag_axis = None
         self.drag_start_mouse = None
         self.drag_start_pos = None
@@ -37,6 +50,12 @@ class GizmoController:
         self.drag_plane_normal = None  # world-space plane normal
         self.drag_grab_offset = None   # axis-space offset between grabbed point and gizmo origin, per entity
         self._hovered_tip = None       # currently hover-highlighted tip Entity, or None
+        # Drag state (rotate) — separate from translate drag state so the two
+        # modes can never both be armed at once (try_begin_drag picks one).
+        self.rotate_axis = None
+        self.rotate_start_rot = None    # {entity: Vec3(rotation)} snapshot at grab
+        self.rotate_start_angle = None  # signed angle (radians) of the initial grab point on the ring plane
+        self._hovered_ring = None       # currently hover-highlighted ring Entity, or None
         self.build()
 
     def build(self):
@@ -88,6 +107,41 @@ class GizmoController:
             tip.setBin('fixed', 100)
             self._tip_base_color[gname] = col
 
+        self._ring_base_color = {}
+        for axis, col, gname in [
+            ('x', color.red,   'editor_gizmo_ring_x'),
+            ('y', color.green, 'editor_gizmo_ring_y'),
+            ('z', color.blue,  'editor_gizmo_ring_z'),
+        ]:
+            ring = Entity(
+                parent=self.root,
+                model=self._make_ring_mesh(axis),
+                color=col,
+                name=gname,
+                eternal=True,
+            )
+            # Same render-on-top treatment as the translate tips (Hard Constraint 8):
+            # call setBin/setDepthTest/setDepthWrite on the Entity, never on .node().
+            ring.setDepthTest(False)
+            ring.setDepthWrite(False)
+            ring.setBin('fixed', 100)
+            self._ring_base_color[gname] = col
+
+    def _make_ring_mesh(self, axis):
+        """Line-loop circle of radius _RING_RADIUS lying in the plane perpendicular
+        to `axis` (Ursina has no torus primitive — build the loop by hand)."""
+        verts = []
+        for i in range(self._RING_SEGMENTS + 1):
+            theta = 2 * math.pi * i / self._RING_SEGMENTS
+            c, s = math.cos(theta) * self._RING_RADIUS, math.sin(theta) * self._RING_RADIUS
+            if axis == 'x':
+                verts.append(Vec3(0, c, s))
+            elif axis == 'y':
+                verts.append(Vec3(c, 0, s))
+            else:
+                verts.append(Vec3(c, s, 0))
+        return Mesh(vertices=verts, mode='line', thickness=3)
+
     def cursor_ray(self):
         """Return a world-space (origin, direction) ray through the mouse cursor.
 
@@ -111,9 +165,21 @@ class GizmoController:
         handles visible through blocks, but the pick ray still hits geometry behind
         them; this explicit raycast lets the handle win. Returns True (and arms the
         drag) when a tip was grabbed, False to let input() fall through to panels.
+
+        Ring pick is checked first (Step 1a): rings have no collider (a line-loop
+        mesh is a poor raycast target — thin and easy to miss), so ring grabs are
+        detected via closest-approach-to-circle against the cursor ray instead of
+        Panda3D's mesh collision. Checking rings before tips matches how they're
+        drawn at a larger radius outside the tip cubes, so there's no overlap
+        ambiguity in practice.
         """
-        if not (self.root and self.root.enabled and self.drag_axis is None):
+        if not (self.root and self.root.enabled and self.drag_axis is None
+                and self.rotate_axis is None):
             return False
+        ring_axis = self._pick_ring()
+        if ring_axis is not None:
+            self._begin_rotate(ring_axis)
+            return True
         axis_map = {
             'editor_gizmo_tip_x': 'x',
             'editor_gizmo_tip_y': 'y',
@@ -139,6 +205,29 @@ class GizmoController:
             return True
         return False
 
+    def _pick_ring(self):
+        """Return the axis ('x'/'y'/'z') of the ring nearest the cursor ray, within
+        pick tolerance, or None. Distance is measured from the ray's closest approach
+        to the ring's plane against the ring's own circle (not the infinite plane),
+        so clicking near the gizmo centre (inside the ring) does not register a hit."""
+        best_axis, best_dist = None, self._RING_PICK_TOLERANCE
+        origin, direction = self.cursor_ray()
+        gizmo_origin = Vec3(self.root.position)
+        for axis in ('x', 'y', 'z'):
+            normal = self._WORLD_AXES[axis]
+            hit_point = self._ray_plane_hit(origin, direction, gizmo_origin, normal)
+            if hit_point is None:
+                continue
+            radial = hit_point - gizmo_origin
+            radial_len = radial.length()
+            if radial_len < 1e-6:
+                continue
+            closest_on_ring = gizmo_origin + radial * (self._RING_RADIUS / radial_len)
+            dist = (hit_point - closest_on_ring).length()
+            if dist < best_dist:
+                best_axis, best_dist = axis, dist
+        return best_axis
+
     def _begin_drag(self, axis):
         """Arm drag state for `axis`: snapshot entity positions and set up the
         plane-projection frame (plane point/normal + per-entity grab offsets)."""
@@ -157,6 +246,32 @@ class GizmoController:
             self.drag_grab_offset = 0.0
 
     _WORLD_AXES = {'x': Vec3(1, 0, 0), 'y': Vec3(0, 1, 0), 'z': Vec3(0, 0, 1)}
+    # rotation_x/y/z sign convention, verified empirically against Ursina/Panda3D
+    # (positive rotation_x turns +Y toward +Z; positive rotation_y turns +Z toward
+    # +X; positive rotation_z turns +X toward -Y — NOT +Y, unlike the other two
+    # axes) so ring drag direction matches typing a positive number into Rot X/Y/Z.
+    _RING_BASIS = {
+        'x': (Vec3(0, 1, 0), Vec3(0, 0, 1)),
+        'y': (Vec3(0, 0, 1), Vec3(1, 0, 0)),
+        'z': (Vec3(1, 0, 0), Vec3(0, -1, 0)),
+    }
+
+    def _ring_angle(self, axis, world_point):
+        """Signed angle (radians) of `world_point` projected onto the ring plane
+        for `axis`, measured in the (u, v) basis from _RING_BASIS."""
+        u, v = self._RING_BASIS[axis]
+        radial = world_point - Vec3(self.root.position)
+        return math.atan2(radial.dot(v), radial.dot(u))
+
+    def _begin_rotate(self, axis):
+        """Arm rotate state for `axis`: snapshot entity rotations and the initial
+        grab angle on the ring plane (through the gizmo centre, normal = axis)."""
+        self.rotate_axis = axis
+        self.rotate_start_rot = {e: Vec3(e.rotation) for e in self.editor.selected}
+        gizmo_origin = Vec3(self.root.position)
+        normal = self._WORLD_AXES[axis]
+        hit_point = self._ray_plane_hit(*self.cursor_ray(), gizmo_origin, normal)
+        self.rotate_start_angle = self._ring_angle(axis, hit_point) if hit_point is not None else 0.0
 
     def _drag_plane_normal(self, axis_world):
         """Plane containing `axis_world`, oriented to face the camera as much as
@@ -193,7 +308,7 @@ class GizmoController:
     def _update_hover_highlight(self):
         """Brighten the hovered tip before a drag is committed to; restore the
         previous tip's colour when hover moves elsewhere. No-op while dragging."""
-        if self.drag_axis is not None:
+        if self.drag_axis is not None or self.rotate_axis is not None:
             return
         tip_names = self._tip_base_color.keys()
         hovered = mouse.hovered_entity
@@ -205,6 +320,28 @@ class GizmoController:
         if hovered_tip is not None:
             hovered_tip.color = color.white
         self._hovered_tip = hovered_tip
+
+    def _update_ring_hover_highlight(self):
+        """Brighten the hovered ring before a rotate drag is committed to. Rings have
+        no collider (see _pick_ring's docstring), so hover is detected via the same
+        closest-approach-to-circle test used for the pick itself, not mouse.hovered_entity."""
+        if self.rotate_axis is not None or self.drag_axis is not None:
+            return
+        ring_axis = self._pick_ring()
+        hovered_name = f'editor_gizmo_ring_{ring_axis}' if ring_axis is not None else None
+        if hovered_name == self._hovered_ring:
+            return
+        if self._hovered_ring is not None:
+            for e in self.root.children:
+                if e.name == self._hovered_ring:
+                    e.color = self._ring_base_color[self._hovered_ring]
+                    break
+        if hovered_name is not None:
+            for e in self.root.children:
+                if e.name == hovered_name:
+                    e.color = color.white
+                    break
+        self._hovered_ring = hovered_name
 
     def refresh(self):
         """Position gizmo at centroid of selection; hide when nothing selected or in play mode."""
@@ -291,3 +428,44 @@ class GizmoController:
             self.drag_plane_point = None
             self.drag_plane_normal = None
             self.drag_grab_offset = None
+
+    def handle_rotate_drag(self):
+        """Rotate selected entities about the grabbed ring axis; push RotateEntityCommand
+        on release. Angle-based sibling of handle_drag(): instead of projecting the
+        cursor onto an axis line, project onto the ring plane and measure the signed
+        angle swept since grab, then apply that delta to each entity's start rotation."""
+        ed = self.editor
+        if not ed._play_mode:
+            self._update_ring_hover_highlight()
+        if held_keys['left mouse']:
+            if self.rotate_axis is None:
+                ring_axis = self._pick_ring()
+                if ring_axis is not None:
+                    self._begin_rotate(ring_axis)
+            else:
+                gizmo_origin = Vec3(self.root.position)
+                normal = self._WORLD_AXES[self.rotate_axis]
+                hit_point = self._ray_plane_hit(*self.cursor_ray(), gizmo_origin, normal)
+                if hit_point is not None:
+                    current_angle = self._ring_angle(self.rotate_axis, hit_point)
+                    delta_deg = math.degrees(current_angle - self.rotate_start_angle)
+                    attr = f'rotation_{self.rotate_axis}'
+                    for e in ed.selected:
+                        start = self.rotate_start_rot[e]
+                        setattr(e, attr, getattr(start, self.rotate_axis) + delta_deg)
+                    self.refresh()
+        else:
+            if self.rotate_axis is not None:
+                for e in ed.selected:
+                    old_rot = self.rotate_start_rot[e]
+                    new_rot = Vec3(e.rotation)
+                    if old_rot != new_rot:
+                        etype = ('enemy' if e in ed.enemies else
+                                 'trigger' if e in ed.triggers else
+                                 'pickup' if e in ed.pickups else 'block')
+                        logger.log('INFO', f"Entity rotated: type={etype} {[round(r,3) for r in old_rot]} -> {[round(r,3) for r in new_rot]}")
+                        ed._history.push(RotateEntityCommand(e, old_rot, new_rot))
+                ed._update_inspector()
+            self.rotate_axis = None
+            self.rotate_start_rot = None
+            self.rotate_start_angle = None
