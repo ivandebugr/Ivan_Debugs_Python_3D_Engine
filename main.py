@@ -610,15 +610,6 @@ if __name__ == '__main__':
 
     main_menu()
 
-    def on_window_resize():
-        if not window.fullscreen:
-            window.position = (
-                (screen_width - window.size[0]) // 2,
-                (screen_height - window.size[1]) // 2
-            )
-
-    window.on_resize = on_window_resize
-
     def update():
         collision_manager.update()
         # WIN condition: PLAYING with no live enemies left on the layer.
