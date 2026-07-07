@@ -70,18 +70,19 @@ class InspectorPanel:
             self._insp_title.setBin('fixed', 41)
         except Exception as e:
             logger.log('ERROR', f"_build_inspector setBin title {type(e).__name__}: {e}")
-        # Display-only 3-column x 2-row grid of the six transform fields:
-        #   Row 1: Pos X / Pos Y / Pos Z      Row 2: Scale X / Scale Y / Scale Z
-        # HP, rotation, colour, texture and enemy_type still live on the entity and
-        # round-trip through level.json (see _build_level_data); they are simply no
-        # longer editable here. Coordinates are panel-local (quad spans -0.5..0.5).
+        # Display-only 3-column x 3-row grid of the nine transform fields:
+        #   Row 1: Pos X/Y/Z   Row 2: Scale X/Y/Z   Row 3: Rot X/Y/Z
+        # HP, colour, texture and enemy_type still live on the entity and
+        # round-trip through level.json (see _build_level_data); they are simply
+        # not editable here. Coordinates are panel-local (quad spans -0.5..0.5).
         grid = [
             [('pos_x', 'Pos X'), ('pos_y', 'Pos Y'), ('pos_z', 'Pos Z')],
             [('scl_x', 'Scale X'), ('scl_y', 'Scale Y'), ('scl_z', 'Scale Z')],
+            [('rot_x', 'Rot X'), ('rot_y', 'Rot Y'), ('rot_z', 'Rot Z')],
         ]
-        col_x = (-.33, 0.0, .33)      # column centres
-        row_label_y = (.22, -.08)     # label y per row
-        row_field_y = (.13, -.17)     # input-field y per row
+        col_x = (-.33, 0.0, .33)              # column centres
+        row_label_y = (.24, .04, -.16)        # label y per row
+        row_field_y = (.15, -.05, -.25)       # input-field y per row
         self._insp_fields = {}
         for r, row in enumerate(grid):
             for c, (key, label) in enumerate(row):
@@ -337,6 +338,9 @@ class InspectorPanel:
         self._insp_fields['scl_x'].text = shared_or_multi(lambda e: e.scale_x)
         self._insp_fields['scl_y'].text = shared_or_multi(lambda e: e.scale_y)
         self._insp_fields['scl_z'].text = shared_or_multi(lambda e: e.scale_z)
+        self._insp_fields['rot_x'].text = shared_or_multi(lambda e: e.rotation_x)
+        self._insp_fields['rot_y'].text = shared_or_multi(lambda e: e.rotation_y)
+        self._insp_fields['rot_z'].text = shared_or_multi(lambda e: e.rotation_z)
         self._update_inspector_texture_swatch()
         self._update_inspector_model_field()
         self._update_inspector_door_field()
@@ -1159,6 +1163,7 @@ class InspectorPanel:
         attr_map = {
             'pos_x': 'x', 'pos_y': 'y', 'pos_z': 'z',
             'scl_x': 'scale_x', 'scl_y': 'scale_y', 'scl_z': 'scale_z',
+            'rot_x': 'rotation_x', 'rot_y': 'rotation_y', 'rot_z': 'rotation_z',
         }
         attr = attr_map.get(key)
         if not attr:
