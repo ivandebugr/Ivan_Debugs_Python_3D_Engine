@@ -45,7 +45,7 @@ def _launch():
     except Exception as e:
         logger.log('WARN', f'hot_reloader disable failed: {type(e).__name__}: {e}')
 
-    window.color = color.rgb(50, 50, 60)
+    window.color = color.rgb(50/255, 50/255, 60/255)
     render.setAntialias(AntialiasAttrib.MAuto)
     render2d.setAntialias(AntialiasAttrib.MAuto)
     window.title = 'Level Editor'
