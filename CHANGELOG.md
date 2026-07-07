@@ -5,6 +5,59 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.0] - 2026-07-07 — gizmo precision + panel basics
+
+Implements B1 + B2(field) + C1 + C2 from the v1.7 editor UX scoping report, in Ivan's stated
+priority order (gizmo/selection feel first, then panel/layout). 113/113 unit tests green
+throughout; all 4 `tests/smoke_test_harness.py` scenarios pass after every step; each step
+additionally verified via headless in-process simulation (real `LevelEditor` instance, no
+mouse/window needed) since this environment has no way to drive the Panda3D GUI directly.
+
+### Added
+- **Rotation numeric field (B2)** — Inspector grid extended from Pos/Scale (2 rows) to
+  Pos/Scale/Rot (3 rows); `rot_x/y/z` reuse `_apply_inspector_value`/`ChangePropertyCommand`
+  unchanged. Rotation previously round-tripped through `level.json` with no editor UI to set
+  it — confirmed via full git history search (including the pre-v1.6-split monolith) that no
+  rotation field or slider ever existed; this was a real gap, not a regression.
+- **Collapsible panels (C1)** — Hierarchy/inspector/browser each toggle via `Ctrl+H`/`Ctrl+I`/
+  `Ctrl+B` or a `[H]`/`[I]`/`[B]` chevron button. `_apply_layout` reclaims the freed horizontal
+  space (collapsed panels shrink to a thin chevron-width strip); `_is_over_panel`/
+  `_is_over_browser` return `False` for a disabled panel so collapsed chrome never intercepts
+  viewport clicks. Browser vertical space is hidden but not reclaimed on collapse (full
+  height-reclaim cascades through the card-grid/scroll-indicator row math extensively — closer
+  to C3 scope; deferred).
+- **Layout presets (C2)** — `Ctrl+Alt+1-5` saves current panel visibility to a slot, `Alt+1-5`
+  recalls it; mirrors the existing camera-bookmark (`_bookmarks`/`_save_prefs`) pattern exactly,
+  persisted in `editor_prefs.json` under a new `layout_presets` key. Alt-modified specifically
+  because `Ctrl+1-5` and bare `1-5` were already fully claimed by camera bookmarks.
+
+### Fixed
+- **Gizmo drag was speed-dependent, not cursor-pinned (B1)** — `handle_drag()` computed
+  `mouse_vel.dot(axis_screen) * 200.0` each frame, so a fast flick moved an entity further than
+  a slow drag across the same screen distance — the primary source of the editor's "feels
+  imprecise" complaint. Replaced with plane-projection: on grab, cast the cursor ray onto a
+  camera-facing plane containing the drag axis, then each frame project the new cursor hit onto
+  the axis line and move by the delta from the grabbed offset. Verified headless that a single
+  fast jump and a slow multi-step drag to the same cursor position now land at identical world
+  positions. Falls back to the old velocity model when the drag axis is nearly parallel to the
+  view direction (`_AXIS_SCREEN_LEN_MIN` threshold) — plane-projection is numerically unstable
+  there, a standard gizmo edge case.
+- **No hover feedback on gizmo handles (B1)** — tips now brighten to white on
+  `mouse.hovered_entity` before a drag is committed to, using the pre-existing hook (line
+  meshes already report as `hovered_entity` — see Gotchas).
+
+### Deferred (parked, not silently dropped)
+- **B2-ring** — a rotation *ring* gizmo (vs. the numeric field shipped here). ~1–1.5 days,
+  medium risk (new geometry, new drag mode, thin-target picking).
+- **C3** — resizable panels (drag a divider). ~1–1.5 days per edge; needed before browser
+  vertical-space reclaim on collapse can be done properly.
+- **C4/C5** — movable-dock panels and true Unity-style drag-to-dock. C4 is 2–3 days; C5 is a
+  multi-week framework-scale project and, per the scoping report, likely not worth it for a
+  solo game editor. See `obsidian-mind-main/work/active/v1.7-editor-ux-scoping.md` for the full
+  cost/risk breakdown.
+
+---
+
 ## [1.6.1] - 2026-07-07 — post-refactor fix backlog
 
 Closes 9 of the 16 items from the 2026-07-06 whole-project audit (items 2/3/6/8/9/11/12/13/14/16;

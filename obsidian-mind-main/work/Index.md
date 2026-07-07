@@ -27,6 +27,7 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 ## Recently Completed
 
+- [[work/archive/2026/v1.7-editor-ux-bundle]] — Shipped 2026-07-07, CHANGELOG [1.7.0]. Gizmo precision + panel basics: plane-projection cursor-pinned drag + hover highlight (B1), rotation Rot X/Y/Z inspector field (B2), collapsible hierarchy/inspector/browser panels (C1), saved layout presets (C2). Rotation-ring gizmo (B2-ring), resizable panels (C3), and dock-style layout (C4/C5) deferred — see [[work/archive/2026/v1.7-editor-ux-scoping]].
 - [[work/archive/2026/v1.6-fix-backlog]] — Shipped 2026-07-07, CHANGELOG [1.6.1]. All 16 items from the 2026-07-06 whole-project audit closed — editor F5 entity leak (plus a deeper destroy()-doesn't-cascade-to-children discovery), start_game() teardown dedup, window.color clamp, dead window.on_resize, viewmodel comment fix, save_level() write guard, eternal debug lines, air-shoot doc, bare-string texture routing, dev-tool relocation.
 - [[work/archive/2026/v1.6-level-editor-refactor]] — Shipped 2026-07-07. `level_editor.py` (4,169 lines) split into `editor_core` + five collaborator modules + `compat`/`asset_resolve`; zero behaviour change; 9 steps, 113/113 tests + 163 in-app checks.
 - [[work/archive/2026/v1.5-gameplay-systems]] — Shipped 2026-07-01. Trigger/zone system + weapon inventory API; [1.5.1] closure pass 2026-07-06 (curated level, checkpoint consumer, §5 regression).

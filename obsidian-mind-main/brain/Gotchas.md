@@ -170,6 +170,14 @@ Things that have bitten before and will bite again.
 **Nuance confirmed 2026-07-01 (v1.5 wrap-up audit):** `Text.__init__` itself is safe with `text=''` at construction — the constructor guards with `if text != '': self.text = text`, so an empty string passed as the constructor kwarg never reaches `text_setter`/`align()` and `text_nodes` just stays `[]`. The documented crash is specifically about *mutating* an already-built `Text`'s `.text` to `''` after construction (non-empty `text_nodes` → a different path reaches `align()`). The `Text(text='', enabled=False, ...)` "start hidden, fill in later" placeholder pattern (used for `PlayerHUD.ammo_text`) is therefore crash-free — verified empirically in a live Ursina instance during the audit. Still follow the original fix (never *set* `.text = ''` after construction); this only narrows what's actually unsafe.
 **Source:** CLAUDE.md Hard Constraint 17; CHANGELOG [1.2.6]; v1.5 wrap-up audit
 
+## `Button(text='<')` crashes even with `use_tags=False` — 2026-07-07
+**Context:** Building panel-collapse chevron buttons for the v1.7 editor layout work — wanted single-char `<`/`>`/`^`/`v` glyphs, and passed `use_tags=False` expecting it to sidestep the known `Text(text='<')` tag-parsing crash (see the `Text(text='')` gotcha above).
+**Symptom:** Same `IndexError: list index out of range` in `Text.align()` at `ursina/text.py:408`, even with `use_tags=False` passed to `Button(...)`.
+**Root cause:** `Button.__init__` (`ursina/prefabs/button.py`) does not forward `use_tags` to the internal `Text` it constructs for `self.text_entity` — the kwarg is silently swallowed by `Button`, so tag parsing stays on regardless. Confirmed via a minimal repro: `Text(text='<', use_tags=False)` standalone is crash-free, but `Button(text='<', use_tags=False)` crashes identically to `Button(text='<')`.
+**Fix:** Never pass a bare single-char `<`/`>`/`^`/`v` (or any Ursina tag-delimiter character) as a `Button`'s `text`, `use_tags` or not. Use bracketed ASCII labels instead (`'[H]'`, `'[+]'`, `'[-]'`) — matches the hierarchy panel's pre-existing collapse-marker convention (OpenSans also has no triangle glyphs, a second independent reason to avoid single special-character labels).
+**Used in:** `Scripts/editor_core.py` (`_hier_chevron`/`_insp_chevron`/`_browser_chevron`, v1.7 C1)
+**Source:** [[work/active/v1.7-editor-ux-scoping]] C1; extends CLAUDE.md Hard Constraint 14
+
 ## `window.on_resize` is dead code in Ursina 8.3.0 — 2026-06-24
 **Context:** Level editor window resize broke the 3D viewport + toolbar overlap; root-cause investigation during the v1.2.6 fix session.
 **Symptom:** Resize-driven layout logic never runs on an actual window resize.

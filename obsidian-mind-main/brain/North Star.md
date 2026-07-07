@@ -126,6 +126,26 @@ rather than expanding this backlog's scope further.
 
 See: [[work/archive/2026/v1.6-fix-backlog]].
 
+## v1.7 Shipped — 2026-07-07
+
+Editor UX bundle: gizmo precision + panel basics. CHANGELOG [1.7.0]. Fixed the actual "gizmo drag
+feels imprecise" complaint — the old velocity-based drag moved entities based on mouse *speed*, not
+cursor *position*, so a fast flick and a slow drag to the same screen point landed differently.
+Replaced with plane-projection (cast the cursor ray onto a camera-facing plane containing the drag
+axis, project each frame's hit onto the axis line); verified headless that identical start/end
+cursor positions now produce identical world displacement regardless of speed. Also added a hover
+highlight, a Rot X/Y/Z inspector field (rotation previously had zero editor UI — confirmed via full
+git history that this was a gap since v1.2, not a regression), collapsible hierarchy/inspector/
+browser panels (`Ctrl+H/I/B` + chevron buttons, `_apply_layout` reclaims freed width), and saved
+layout presets (`Ctrl+Alt+1-5` / `Alt+1-5`, mirrors the camera-bookmark pattern exactly).
+
+**Deferred, explicitly not silently dropped:** rotation *ring* gizmo (B2-ring), resizable panels
+(C3 — also blocks full browser-height reclaim on collapse), and dock-style panel layout (C4/C5 —
+C5 is a multi-week framework project, likely not worth it for a solo editor). Full cost/risk
+breakdown in [[work/archive/2026/v1.7-editor-ux-scoping]].
+
+See: [[work/archive/2026/v1.7-editor-ux-bundle]].
+
 ## Current Focus
 
 _What am I working toward right now?_
@@ -133,6 +153,7 @@ _What am I working toward right now?_
 - **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, 1 shot SFX + 1 ambient track (CC-0), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
 - **Hands-on playtest of `levels/v1.json`** — mechanics are harness-verified; game-feel is not.
 - **Small editor-UI widget leak** (inspector/browser swatch, 2 entities per F5 cycle) — spun off from the fix-backlog close-out, not yet scheduled.
+- **v1.7 deferred tier, if there's appetite** — rotation ring gizmo, resizable panels, dock-style layout. Not scheduled; see [[work/archive/2026/v1.7-editor-ux-scoping]].
 
 ## Goals
 
