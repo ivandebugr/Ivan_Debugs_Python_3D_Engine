@@ -107,11 +107,22 @@ class AssetRegistry:
                 print(f'AssetRegistry: could not create {directory}: {e}')
 
     def _scan_category(self, category: str) -> dict[str, str]:
+        """Recursively scan a category folder into a {name: path} manifest.
+
+        Keying scheme (collision-safe): a file directly under the category root
+        keeps its bare stem as the key ('floor_stone') — this preserves every
+        existing flat-name lookup unchanged. A file in a subfolder is keyed by
+        its POSIX relative path without extension ('ui/Green/Default/button'),
+        which is unique by construction, so recursively-discovered duplicates
+        (the Kenney UI pack repeats 'button.png' across 6 theme folders) never
+        overwrite each other in the dict. The only residual collision is two
+        files that differ only by extension in the same folder; that is logged.
+        """
         directory = CATEGORY_DIRS[category]
         extensions = CATEGORY_EXTENSIONS[category]
         manifest: dict[str, str] = {}
         try:
-            entries = list(directory.iterdir())
+            entries = sorted(directory.rglob('*'))
         except Exception as e:
             print(f'AssetRegistry: could not scan {directory}: {e}')
             return manifest
@@ -119,7 +130,16 @@ class AssetRegistry:
             try:
                 if not entry.is_file() or entry.suffix.lower() not in extensions:
                     continue
-                manifest[entry.stem] = str(entry)
+                rel = entry.relative_to(directory)
+                if rel.parent == Path('.'):
+                    key = entry.stem                       # top-level: bare stem
+                else:
+                    key = rel.with_suffix('').as_posix()   # subfolder: qualified path
+                if key in manifest:
+                    print(f'AssetRegistry: {category} key collision on {key!r} '
+                          f'({manifest[key]} vs {entry}); keeping first')
+                    continue
+                manifest[key] = str(entry)
             except Exception as e:
                 print(f'AssetRegistry: skipped {entry}: {e}')
         return manifest
