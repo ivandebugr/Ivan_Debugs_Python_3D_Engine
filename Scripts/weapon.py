@@ -4,6 +4,7 @@ from panda3d.core import BitMask32, Camera as PandaCamera, NodePath, Quat
 from Scripts.collision_system import (
     AliveEntity, Layers, can_hit, collision_manager
 )
+from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_sound as _resolve_sound
 import time as _time
 import random
 
@@ -269,6 +270,10 @@ class Weapon(Entity):
 
     Subclasses (Pistol, Shotgun, Rifle — v1.5 Steps 8-10) set damage/cooldown/
     speed/ammo class attributes and implement shoot(). `ammo=-1` means infinite.
+
+    view_model/view_scale/view_position/view_rotation are per-subclass viewmodel
+    tuning (v1.7 gun model wiring) — each real gun asset has its own origin/size,
+    so these are class attributes rather than constructor defaults shared by all.
     """
     damage       = 25
     cooldown     = 0.15
@@ -276,15 +281,21 @@ class Weapon(Entity):
     max_ammo     = -1   # -1 = infinite
     reload_time  = 1.0
 
-    def __init__(self, player, model='3d models/gun.obj', texture=None,
-                 scale=0.06, position=(0.5, -0.5, 0.8), **kwargs):
+    view_model    = '3d models/gun.obj'
+    view_scale    = 0.06
+    view_position = (0.5, -0.5, 0.8)
+    view_rotation = (0, 0, 0)
+    shoot_sound   = 'blaster'
+
+    def __init__(self, player, model=None, texture=None,
+                 scale=None, position=None, rotation=None, **kwargs):
         super().__init__(
             parent=camera,
-            model=model,
+            model=model or _resolve_model(self.view_model),
             texture=texture,
-            scale=scale,
-            position=position,
-            rotation=(0, 0, 0),
+            scale=scale or self.view_scale,
+            position=position or self.view_position,
+            rotation=rotation or self.view_rotation,
             **kwargs
         )
         # Dual-camera viewmodel: route the gun onto the dedicated viewmodel draw
@@ -300,7 +311,7 @@ class Weapon(Entity):
         self.setDepthWrite(False)
         self.shader = unlit_shader  # vertex colors from MTL; no scene lighting on viewmodel
         self.player       = player
-        self.original_pos = Vec3(position)
+        self.original_pos = Vec3(self.position)
         self.last_shot    = 0
         self.ammo         = self.max_ammo
         self.reloading    = False
@@ -333,10 +344,11 @@ class Weapon(Entity):
         )
 
     def _consume_shot(self):
-        """Decrement ammo (if finite), play the recoil animation, stamp last_shot."""
+        """Decrement ammo (if finite), play the recoil animation + SFX, stamp last_shot."""
         if self.ammo > 0:
             self.ammo -= 1
         self._play_shoot_animation()
+        self._play_shoot_sound()
         self.last_shot = _time.time()
 
     def reload(self):
@@ -354,6 +366,10 @@ class Weapon(Entity):
         self.animate_position(self.original_pos + Vec3(0, 0, -0.2), duration=0.05)
         self.animate_position(self.original_pos, delay=0.05, duration=0.15, curve=curve.out_quad)
 
+    def _play_shoot_sound(self):
+        """One-shot fire-and-forget SFX; auto_destroy=True cleans itself up after playing."""
+        Audio(_resolve_sound(self.shoot_sound), auto_destroy=True)
+
 
 # ---------------------------------------------------------------------------
 # Pistol — v1.5 Step 8. Refactor of the original single Weapon class.
@@ -364,6 +380,11 @@ class Pistol(Weapon):
     cooldown     = 0.15
     bullet_speed = 50
     max_ammo     = -1   # infinite, matches pre-inventory behaviour
+
+    view_model    = 'Pistol_1'
+    view_scale    = 0.3
+    view_position = (0.4, -0.35, 0.6)
+    view_rotation = (0, 90, 0)
 
 
 # ---------------------------------------------------------------------------
@@ -379,6 +400,11 @@ class Shotgun(Weapon):
     bullet_speed = 30
     max_ammo     = 8
     reload_time  = 1.5
+
+    view_model    = 'Shotgun_1'
+    view_scale    = 0.14
+    view_position = (0.45, -0.4, 0.65)
+    view_rotation = (0, 90, 0)
 
     def shoot(self):
         if not self._ready_to_fire():
@@ -418,6 +444,12 @@ class Rifle(Weapon):
     max_ammo     = 24
     reload_time  = 1.2
     # Uses the base Weapon.shoot() — single bullet along camera.forward, no spread.
+
+    view_model    = 'AssaultRifle_1'
+    view_scale    = 0.18
+    view_position = (0.4, -0.4, 0.6)
+    view_rotation = (0, 90, 0)
+    shoot_sound   = 'blaster_repeater'
 
 
 # level.json "weapon_type" string → Weapon subclass. Used by AmmoPickup to resolve

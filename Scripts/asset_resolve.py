@@ -28,6 +28,21 @@ def resolve_texture(name):
     return name
 
 
+def resolve_sound(name):
+    """Resolve a registry sound name to a Path safe to pass to Audio().
+
+    Mirrors resolve_texture: Audio's clip_setter globs bare strings under
+    application.asset_folder/internal_audio_folder, which works for built-in
+    sound names but not registry-scanned files — passing the resolved Path
+    directly (same as Texture(Path(path))) bypasses that glob entirely."""
+    if not name:
+        return name
+    path = asset_registry.get_sound_path(name)
+    if path:
+        return Path(path)
+    return name
+
+
 def resolve_model(name_or_path):
     """Resolve a model reference to something safe to assign to Entity.model.
 
