@@ -16,13 +16,13 @@ from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
 )
 from Scripts.asset_resolve import resolve_model as _resolve_model
-from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.session_logger import get_editor_logger
 from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.editor_hierarchy import HierarchyPanel
 from Scripts.editor_gizmo import GizmoController
 from Scripts.editor_browser import AssetBrowser
 from Scripts.editor_inspector import InspectorPanel
+from Scripts.editor_playmode import PlayModeController
 
 logger = get_editor_logger()
 
@@ -86,10 +86,7 @@ class LevelEditor(Entity):
         self.current_texture = 'white_cube'
         self.current_mode = 'block'
         self._play_mode = False
-        self._play_level_snapshot = None
         self._editor_camera = None
-        self._saved_cam_pos = None
-        self._saved_cam_rot = None
 
         # Tool mode: 'move' selects/deselects entities; 'place' left-click places new blocks
         self._tool = 'move'
@@ -110,6 +107,12 @@ class LevelEditor(Entity):
         self.inspector = None
         self.hierarchy = None
         self.browser = None
+
+        # Play-in-editor collaborator (v1.6 split) — no UI of its own, so unlike
+        # the panel collaborators it is constructed right here; play_button's
+        # on_click binds playmode.toggle_play below. Snapshot and saved-camera
+        # state live on the controller; the _play_mode flag stays on the editor.
+        self.playmode = PlayModeController(self)
 
         # Grid snap
         self.snap_values = list(EDITOR_GRID_SNAPS)
@@ -143,7 +146,7 @@ class LevelEditor(Entity):
             text='Play',
             scale=(self._TOOLBAR_BTN_W_BASE['play_button'], self._TOOLBAR_BTN_H),
             position=(.35, self._TOOLBAR_Y),
-            on_click=self.toggle_play,
+            on_click=self.playmode.toggle_play,
             color=color.rgb(120, 60, 100),
             # color.rgb takes 0-1 floats in Ursina 8.3.0; these 0-255 values clamp to
             # white, so the label needs black text (default white would be invisible).
@@ -918,206 +921,15 @@ class LevelEditor(Entity):
         # owns its own show/hide, including per-tab card visibility.
         self.browser.set_visible(visible)
 
-    def toggle_play(self):
-        if self._play_mode:
-            self._exit_play_mode()
-        else:
-            self._enter_play_mode()
-
-    def _enter_play_mode(self):
-        self._play_level_snapshot = self._build_level_data()
-        logger.log('INFO', f'Play-in-editor started ({len(self._play_level_snapshot)} entities in snapshot)')
-        if self._editor_camera:
-            self._saved_cam_pos = Vec3(self._editor_camera.position)
-            self._saved_cam_rot = Vec3(self._editor_camera.rotation_x,
-                                       self._editor_camera.rotation_y,
-                                       self._editor_camera.rotation_z)
-        self._set_editor_ui_visible(False)
-        self.gizmo.root.enabled = False
-        # Disable EditorCamera so it stops driving camera position/rotation.
-        # FirstPersonController's __init__ sets camera.parent = self, taking over.
-        if self._editor_camera:
-            self._editor_camera.enabled = False
-        self._play_mode = True
-        self._spawn_gameplay_from_snapshot(self._play_level_snapshot)
-        mouse.locked = True
-        mouse.visible = False
-
-    def _exit_play_mode(self):
-        """Tear down gameplay entities, reset game state, and restore editor UI."""
-        logger.log('INFO', 'Play-in-editor stopped')
-        from Scripts.game import game, Game
-        game.state = Game.MAIN_MENU  # set before teardown so guards see MAIN_MENU even if teardown raises
-        # _clear_gameplay_entities is defined in main — import lazily
-        try:
-            from main import _clear_gameplay_entities
-            _clear_gameplay_entities()
-        except ImportError:
-            for e in list(game.enemies):
-                if getattr(e, 'alive', False):
-                    e.die()
-            game.enemies.clear()
-            if game.player:
-                destroy(game.player)
-                game.player = None
-        self._play_mode = False
-        self._restore_editor_level()
-        self._set_editor_ui_visible(True)
-        self.gizmo.refresh()
-        mouse.locked = False
-        mouse.visible = True
-        # Re-enable EditorCamera; on_enable reparents camera back to the editor rig.
-        if self._editor_camera:
-            self._editor_camera.enabled = True
-        if self._saved_cam_pos is not None and self._editor_camera:
-            self._editor_camera.position = self._saved_cam_pos
-            self._editor_camera.rotation_x = self._saved_cam_rot.x
-            self._editor_camera.rotation_y = self._saved_cam_rot.y
-            self._editor_camera.rotation_z = self._saved_cam_rot.z
-            self._saved_cam_pos = None
-            self._saved_cam_rot = None
-
-    def _restore_editor_level(self):
-        """Rebuild editor blocks/enemies from the play snapshot after exiting play mode.
-
-        Any entity in self.blocks/self.enemies that was destroyed by scene teardown
-        is replaced with a fresh editor entity built from the snapshot data.
-        """
-        if not self._play_level_snapshot:
-            return
-        # Destroy surviving refs (may still be alive if nothing cleared them)
-        for e in self.blocks + self.enemies + self.triggers + self.pickups:
-            if getattr(e, 'destroy_source', None) is None:
-                destroy(e)
-        self.blocks.clear()
-        self.enemies.clear()
-        self.triggers.clear()
-        self.pickups.clear()
-        self.selected.clear()
-
-        for entry in load_level_data(self._play_level_snapshot):
-            if entry['type'] == 'trigger':
-                # v1.5 Step 6: rebuild the editor trigger volume from the snapshot
-                # so it survives the F5 play-in-editor round-trip (same role as the
-                # enemy/block rebuilds below).
-                self._make_trigger_entity(
-                    entry['position'], entry['scale'],
-                    entry['on_enter'], entry['on_exit'],
-                )
-                continue
-            if entry['type'] == 'pickup':
-                # v1.5 Step 13: rebuild the editor pickup sphere from the snapshot
-                # so it survives the F5 play-in-editor round-trip (same role as
-                # the trigger rebuild above).
-                self._make_pickup_entity(entry['position'], {
-                    'pickup_type': entry['pickup_type'],
-                    'weapon_type': entry['weapon_type'],
-                    'amount':      entry['amount'],
-                })
-                continue
-            if entry['type'] == 'enemy':
-                new_entity = Entity(
-                    model='cube',
-                    color=color.red,
-                    scale=(1.5, 3, 1.5),
-                    position=tuple(entry['position']),
-                    rotation_y=entry['rotation_y'],
-                    collider='box',
-                    origin_y=-0.5,
-                )
-                new_entity.enemy_hp   = entry['hp']
-                new_entity.enemy_type = entry['enemy_type']
-                # v1.4 Step 8: restore behaviour-config on the rebuilt placeholder
-                # so it survives the play-in-editor (F5) round-trip — same
-                # attribute load_existing_level/_build_level_data use.
-                new_entity.behaviour_config = entry['behaviour']
-                new_entity._original_color = color.red
-                self.enemies.append(new_entity)
-            else:
-                new_entity = Entity(
-                    model=_resolve_model(entry['model']),
-                    texture=entry['texture'],
-                    position=tuple(entry['position']),
-                    rotation=tuple(entry['rotation']),
-                    scale=tuple(entry['scale']),
-                    color=color.rgb(*entry['colour']),
-                    collider='box',
-                )
-                new_entity._original_color = new_entity.color
-                self.blocks.append(new_entity)
-
-        logger.log('INFO', f'Editor level restored: {len(self.blocks)} blocks, {len(self.enemies)} enemies, {len(self.triggers)} triggers, {len(self.pickups)} pickups')
-        self._refresh_hierarchy()
-
-    def _spawn_gameplay_from_snapshot(self, level_data):
-        from Scripts.player_controller import Player
-        from Scripts.enemy import Enemy
-        from Scripts.game import game
-        from Scripts.trigger_system import TriggerZone, build_actions
-        from Scripts.weapon import AmmoPickup
-
-        entries = load_level_data(level_data)
-
-        for entry in entries:
-            if entry['type'] == 'block':
-                Entity(
-                    model=_resolve_model(entry['model']),
-                    collider='box',
-                    texture=entry['texture'],
-                    position=tuple(entry['position']),
-                    color=color.rgb(*entry['colour']),
-                    rotation=tuple(entry['rotation']),
-                    scale=tuple(entry['scale']),
-                    name='level_block'
-                )
-
-        game.player = Player(position=(0, 2, 0))
-        game.enemies = []
-        for entry in entries:
-            if entry['type'] == 'enemy':
-                # v1.4 Step 9: build the behaviour tree from the saved config so a
-                # patrol enemy edited in the inspector actually patrols its edited
-                # waypoints when played via F5 — the SAME hand-off main.py's
-                # start_game() does (config is the raw {"tree":..,"waypoints":..}
-                # dict; the Factory converts waypoints to Vec3 internally).
-                behaviour_tree = None
-                config = entry['behaviour']
-                if config:
-                    behaviour_tree = BehaviourTreeFactory.build(
-                        config.get('tree', 'default'), config
-                    )
-                e = Enemy(
-                    spawn_position=tuple(entry['position']),
-                    player=game.player,
-                    hp=entry['hp'],
-                    enemy_type=entry['enemy_type'],
-                    rotation_y=entry['rotation_y'],
-                    behaviour_tree=behaviour_tree,
-                )
-                game.enemies.append(e)
-        # v1.5 Step 6: factory-consume trigger entries into live TriggerZones — the
-        # runtime-equivalent F5 play path, mirroring main.start_game(). build_actions
-        # turns the raw action lists into zero-arg callbacks HERE (never at editor-
-        # load time). TriggerZone is an AliveEntity, torn down by return-to-menu.
-        for entry in entries:
-            if entry['type'] == 'trigger':
-                TriggerZone(
-                    position=tuple(entry['position']),
-                    scale=tuple(entry['scale']),
-                    on_enter=build_actions(entry['on_enter']),
-                    on_exit=build_actions(entry['on_exit']),
-                )
-        # v1.5 Step 13: factory-consume pickup entries into live AmmoPickups — the
-        # F5-play-equivalent of main.start_game()'s pickup loop.
-        for entry in entries:
-            if entry['type'] == 'pickup':
-                AmmoPickup(
-                    position=tuple(entry['position']),
-                    pickup_type=entry['pickup_type'],
-                    weapon_type=entry['weapon_type'],
-                    amount=entry['amount'],
-                )
-        game.start()
+    # -------------------------------------------------------------------------
+    # Play-in-editor (v1.6 split)
+    # -------------------------------------------------------------------------
+    # toggle_play / _enter_play_mode / _exit_play_mode / _restore_editor_level /
+    # _spawn_gameplay_from_snapshot live in Scripts/editor_playmode.py
+    # (PlayModeController, back-ref via self.playmode). The _play_mode flag
+    # stays HERE on the editor -- core update()/input(), the gizmo and the
+    # asset browser all read it; snapshot + saved-camera state moved with the
+    # controller.
 
     # -------------------------------------------------------------------------
     # Preview and update
