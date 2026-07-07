@@ -22,7 +22,7 @@ See [[work/Index]] for active work status. See [[brain/North Star]] for current 
 | v1.3 | Shipped 2026-06-26 | — | Asset import pipeline (browser panel, drag-drop, texture/model pickers); asset hot-reload in level editor. See [[work/archive/2026/v1.3-asset-import-pipeline]] |
 | v1.4 | Shipped 2026-06-30 | — | Pluggable enemy behaviour trees — patrol / attack / flee state composition (5 compositors+decorators, 5 leaf nodes, 4 named presets, `level.json` `behaviour` field, editor preset+waypoint UI). See [[work/archive/2026/v1.4-enemy-behaviour-trees]] |
 | v1.5 | Planned | — | Trigger/zone system (doors, checkpoints, kill planes); Weapon inventory API (multi-weapon, ammo pickups, switch animations). See [[work/active/v1.5-gameplay-systems]] |
-| v1.6 | Planned | — | Level editor refactor — split `level_editor.py` (4000+ lines) into smaller modules for human navigability and agent productivity. Blocked on v1.3–v1.5 shipping and a manual design review. See [[work/active/v1.6-level-editor-refactor]] |
+| v1.6 | Shipped 2026-07-07 | — | Level editor refactor — `level_editor.py` (4,169 lines) split into `editor_core` + five collaborator modules (hierarchy/gizmo/browser/inspector/playmode) + `compat`/`asset_resolve`; zero behaviour change, 9 harness-verified steps. See [[work/archive/2026/v1.6-level-editor-refactor]] |
 | v2.0 | Planned — **public release milestone** | — | Python script modding system; packaged runtime via PyInstaller/Nuitka; full gamepad/controller input layer; procedural level generator. See [[work/active/v2.0-release]] |
 | v2.x+ | Future | — | Networked multiplayer substrate (authoritative server, client-side prediction) — own milestone after v2.0 ships |
 

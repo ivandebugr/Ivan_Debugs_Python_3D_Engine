@@ -15,6 +15,9 @@ A running log of impact, wins, and growth. Each quarter is its own note — open
 |---------|-----------|--------|
 |         |           |        |
 
+## 2026-07-07 — Shipped v1.6: the level editor refactor
+Split the 4,169-line `level_editor.py` god-file into seven focused modules (`editor_core` + hierarchy/gizmo/browser/inspector/playmode collaborators + shared `compat`/`asset_resolve`) with **zero behaviour change** — 9 steps, each harness-verified against the real Ursina dispatch (113/113 unit tests + 4 standing smoke scenarios after every step, 163 step-specific in-app checks). Fixed three backlog items in passing (shader-patch dedup, an HC13 C++-assertion crash class in the gizmo pick, resolver relocation). Survived a mid-step credit cutoff: resumed by re-deriving state from the repo, then adopted extraction-before-wiring commits so the next interruption costs at most a wiring pass. See [[work/archive/2026/v1.6-level-editor-refactor]] and CHANGELOG [1.6.0].
+
 ## 2026-07-06 — Shipped the pre-v1.6 closure pass ([1.5.1])
 Closed both v1.5 tails in one session: authored the first curated level (`levels/v1.json` — doors, pickups, checkpoint/kill-plane gauntlet, all five behaviour presets live), built the checkpoint-respawn consumer, removed the weapon pre-grant, and ran the deferred §5 combined regression end-to-end through the smoke harness (which I also fixed — argv[0]/asset_folder had silently broken every scenario since v1.5). First decorator (`Cooldown`) exercised in the live frame loop with a measured 3-vs-8 fire-cadence proof. 113/113 unit tests; 7 clean commits. See [[brain/Key Decisions]] and CHANGELOG [1.5.1].
 

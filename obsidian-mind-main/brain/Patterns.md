@@ -78,7 +78,7 @@ Recurring patterns discovered across work.
 ## Call setBin/setDepthTest/setDepthWrite on the Entity, never on .node() — 2026-06-24
 **Problem:** Ursina's `Entity` subclasses Panda3D's `NodePath` directly, but it's easy to assume render-bin/depth-test calls belong on the underlying Panda node instead.
 **Solution:** Call `setBin`, `setDepthTest`, and `setDepthWrite` on the `Entity` instance itself — `entity.node()` returns a `PandaNode`, which has no `setBin`. Pattern: `tip.setBin('fixed', 100); tip.setDepthTest(False); tip.setDepthWrite(False)`. Bin 100 renders 3D gizmo handles above all other 3D geometry.
-**Used in:** `level_editor.py` (gizmo axis tips)
+**Used in:** `Scripts/editor_gizmo.py` (gizmo axis tips; lived in `level_editor.py` before the v1.6 split)
 **Source:** CLAUDE.md Hard Constraint 11
 
 ## One shared UI-theme module for palette + spacing, imported everywhere it applies — 2026-06-30
@@ -98,3 +98,15 @@ Recurring patterns discovered across work.
 **Solution:** Content-only fix, no engine change: place a small collidable pedestal block (`scale (0.8, 0.5, 0.8)`, distinct texture per pickup family) directly under each pickup, with the pickup floating at pedestal-top + 0.3 so the player's collider overlaps it when stepping up. Texture families double as colour-coding (orange test-texture = shotgun, blue tiles = rifle in `levels/v1.json`). Bonus behaviour for free: an ammo pickup for an un-owned weapon isn't consumed (`_collect` returns False), so the pedestal display "restocks" honestly until the matching weapon is owned.
 **Used in:** `levels/v1.json` (4 pickups, 4 pedestals)
 **Source:** CHANGELOG [1.5.1]; see [[brain/Key Decisions]] pre-v1.6 closure pass
+
+## Collaborator class with owner back-ref for splitting a god-file UI class — 2026-07-07
+**Problem:** Splitting a 4k+ line Ursina `Entity` subclass (`LevelEditor`) whose concerns share mutable state (selection set, entity lists, undo history, grid snap, mode flags) and whose `input()`/`update()` dispatch order is itself a documented invariant (v1.2.4 priority chain). Naive "one file per feature" breaks either the shared-state coupling or external callers that reach methods by name (`undo_redo.py` commands call `editor._refresh_*`).
+**Solution:** Extract each self-contained UI/behaviour band as a plain class (NOT an Entity) taking the owner in its constructor (`self.editor`), moving method bodies verbatim — `self.X` becomes `ed.X` only for state that stays owner-side. Three rules decide what stays on the owner: (1) state read by more than one module stays (e.g. `_play_mode` — core, gizmo, and browser all read it); (2) state touched only by the moved methods moves with them (e.g. the play snapshot, saved camera); (3) methods external modules call by name keep one-line delegators with the original names on the owner. The owner's `input()`/`update()` keep the dispatch order and route to collaborators at the same priority steps. Verify each step in-app with real key/mouse dispatch, not just imports — the one integration miss (a class constant read off the wrong object post-move) only surfaced in a live run.
+**Used in:** `Scripts/editor_core.py` + `editor_hierarchy/gizmo/browser/inspector/playmode.py` (v1.6 split)
+**Source:** [[work/archive/2026/v1.6-level-editor-refactor]]
+
+## Commit mechanical extraction before call-site wiring in multi-step refactors — 2026-07-07
+**Problem:** A credit/session cutoff mid-extraction leaves an ambiguous working tree: the new module may exist while the core still holds (or half-holds) the moved code, and the next session can't tell narration from ground truth.
+**Solution:** Within each extraction step, land two commits: (a) mechanical — new file + core excision + constructor wiring, compiling but with call sites still pointing at the old names; (b) wiring + verification — call-site rewrites plus the in-app checks. An interruption then loses at most the wiring pass, and the resume point is a clean commit boundary instead of a diff archaeology session. Adopted mid-v1.6 after exactly that cutoff; used for steps 6–7.
+**Used in:** v1.6 steps 6–7 (`1b441df`/`b4d7322`, `cf0dde4`/`363f5fc`)
+**Source:** [[work/archive/2026/v1.6-level-editor-refactor]] (Process Note)

@@ -100,12 +100,25 @@ Both v1.5 tails are closed and the editor split is unblocked. Shipped as CHANGEL
 
 Remaining human-only item (logged in CLAUDE.md tech debt, low): one hands-on game-feel pass of `levels/v1.json` (jump feel, difficulty, marker readability, OS-drag resize) before itch.io.
 
+## v1.6 Shipped — 2026-07-07
+The level editor refactor is done: `Scripts/level_editor.py` (4,169 lines) split into seven focused modules with **zero behaviour change**, verified step-by-step through the real-dispatch smoke harness (113/113 unit tests + the 4 standing scenarios after every step, plus 163 step-specific in-app checks). CHANGELOG [1.6.0].
+
+**Shipped in v1.6:**
+- `Scripts/editor_core.py` (1,346) — the `LevelEditor` class: toolbar, selection, snap, save/load, prefs, layout, and the input()/update() dispatchers (v1.2.4 priority chain intact)
+- Five collaborator modules, each a class with an editor back-reference: `editor_hierarchy.py` (282), `editor_gizmo.py` (194), `editor_browser.py` (1,032), `editor_inspector.py` (1,201), `editor_playmode.py` (241)
+- `Scripts/compat.py` (167) — shared shader patch (closed the long-standing tech-debt row); `Scripts/asset_resolve.py` (77) — resolvers relocated out of `undo_redo.py`
+- `Scripts/level_editor.py` is now the 103-line standalone entry point (`_launch()` + two-line `__main__`; smoke-harness contract preserved)
+- Fixed while moving: fix-backlog items 4 / 10 (gizmo pick HC13 `is_empty()` guard) / 15
+
+Module boundary chosen: panels-as-collaborators (Track B Candidate A shape) — shared state stays on the core, collaborators reach it via back-ref, `undo_redo.py`'s delegator-name contract respected. See [[work/archive/2026/v1.6-level-editor-refactor]].
+
 ## Current Focus
 
 _What am I working toward right now?_
 
-- **v1.6 module-boundary decision** — pending Ivan's manual review of the three candidates (A/B/C) from the 2026-07-06 audit. The pre-v1.6 closure pass is done, so this is the only gate left before the editor split starts. See [[work/active/v1.6-level-editor-refactor]].
+- **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, 1 shot SFX + 1 ambient track (CC-0), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
 - **Hands-on playtest of `levels/v1.json`** — mechanics are harness-verified; game-feel is not.
+- **[[work/active/v1.6-fix-backlog]] remainder** — 11 items still open (top: editor F5 leak, `start_game()` duplicate teardown).
 
 ## Goals
 
@@ -142,7 +155,7 @@ Sequence to public release:
 - v1.3 — Asset import pipeline + hot-reload [[work/archive/2026/v1.3-asset-import-pipeline]]
 - v1.4 — Enemy behaviour trees (patrol/attack/flee) [[work/archive/2026/v1.4-enemy-behaviour-trees]]
 - v1.5 — Trigger/zone system + Weapon inventory API [[work/archive/2026/v1.5-gameplay-systems]]
-- v1.6 — Level editor refactor: split `level_editor.py` into smaller modules [[work/active/v1.6-level-editor-refactor]]
+- v1.6 — Level editor refactor: split `level_editor.py` into smaller modules [[work/archive/2026/v1.6-level-editor-refactor]]
 - v2.0 — Modding + packaged runtime + gamepad + procedural gen — PUBLIC RELEASE [[work/active/v2.0-release]]
 - v2.x — Networked multiplayer (own milestone, post-release)
 
@@ -163,4 +176,5 @@ Record when focus changes, with date and reason.
 | 2026-07-01 | v1.5 trigger/zone + weapon inventory shipped — focus moves to v1.6 level editor refactor | Wrap-up audit re-derived from committed code: 13/13 steps PASS, one hard-rule violation (PICKUP in COLLISION_MATRIX) fixed as its own step (`6b97cd4`). Two tails logged and carried forward (neither blocks v1.6): §5 combined manual regression not run; `open_door`/pickups code-complete but unexercised by `level.json`. System B + HUD landed as one squashed commit (interwoven working-tree snapshot from parallel worktrees, never branched). Stray `Co-Authored-By: Claude` trailer stripped from a v1.2.2 ancestor across `version_1.2–1.5` + force-pushed. v1.5 doc archived. See [[work/archive/2026/v1.5-gameplay-systems]] |
 | 2026-07-06 | v1.6 widened to whole-project audit; pre-v1.6 closure pass identified as prerequisite | Ivan's explicit request; audit surfaced a higher-leverage move before the editor split |
 | 2026-07-06 | Pre-v1.6 closure pass shipped ([1.5.1]) — both v1.5 tails closed, editor split unblocked | Curated level + checkpoint consumer + cautious preset + §5 regression all landed and harness-verified in one session; only the v1.6 module-boundary choice (Ivan's review) remains before the split |
+| 2026-07-07 | v1.6 level editor refactor shipped — focus moves to v1.3 remainder (itch.io ship prep) + fix-backlog | 9 steps across two sessions (credit cutoff mid-step-4; resumed from re-derived repo state); zero behaviour change, every step harness-verified; backlog items 4/10/15 fixed in passing. Process change adopted mid-run: mechanical extraction committed before wiring so interruptions lose at most the wiring pass. See [[work/archive/2026/v1.6-level-editor-refactor]] |
 |      | Created North Star | Initial setup |
