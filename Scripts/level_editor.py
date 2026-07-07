@@ -976,7 +976,7 @@ class LevelEditor(Entity):
         """Route keyboard/mouse events to placement, selection, undo/redo, bookmarks, and drag."""
         if self._play_mode:
             if key in ('f5', 'escape'):
-                self._exit_play_mode()
+                self.playmode._exit_play_mode()
             return
 
         # Asset picker overlay (texture or model) — while open, it owns input.
@@ -998,7 +998,7 @@ class LevelEditor(Entity):
             return
 
         if key == 'f5':
-            self._enter_play_mode()
+            self.playmode._enter_play_mode()
             return
 
         # Snap cycle is now on the button; keep 'g' as keyboard shortcut too
