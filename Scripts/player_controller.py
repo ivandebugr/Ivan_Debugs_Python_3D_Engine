@@ -156,6 +156,8 @@ class Player(FirstPersonController):
         if game.state != Game.PLAYING:
             return
         if key == 'left mouse down':
+            # Intentionally not gated on self.grounded — jump-shooting is standard
+            # FPS movement (Quake/Doom/CS-style), not a bug to fix.
             if self.inventory.active_weapon:
                 self.inventory.active_weapon.shoot()
         if key in ('1', '2', '3'):
