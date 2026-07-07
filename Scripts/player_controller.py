@@ -5,6 +5,7 @@ from Scripts.weapon_inventory import WeaponInventory
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import Layers, collision_manager, swept_move_blocked
 from Scripts.game import game, Game
+from Scripts.ground_shadow import GroundShadow
 
 # 5 swept-ray heights: feet → knee → waist → shoulder → forehead (entity.y-0.4 to entity.y+1.9)
 # True only for debugging swept collision — creates 200 eternal entities, never enable in production
@@ -46,6 +47,8 @@ class Player(FirstPersonController):
         self.debug_rays = []
 
         mouse.locked = True
+
+        self.shadow = GroundShadow(self, scale=(1.0, 1.0))
 
         self.max_health = 100
         self.health = 100
@@ -136,6 +139,8 @@ class Player(FirstPersonController):
 
         self.handle_horizontal_movement()
 
+        self.shadow.update()
+
         self.health_bar.value = self.health
         # Single death authority: kill planes / bullets only modify health;
         # this check alone decides game over. A post-checkpoint kill-plane
@@ -212,6 +217,15 @@ class Player(FirstPersonController):
         elif z.length() and not self._swept_blocked(self.position, z.normalized(), abs(move.z)):
             self.position += z
 
+    def on_enable(self):
+        # FirstPersonController's built-in pink diamond cursor sits at screen
+        # center on top of PlayerHUD's crosshair (main.py) — super().on_enable()
+        # re-enables it every time (__post_init__ calls this after __init__, so
+        # disabling in __init__ doesn't stick), so disable it again after.
+        super().on_enable()
+        self.cursor.enabled = False
+
     def on_destroy(self):
         """Unregister from collision_manager when Ursina destroys this entity."""
         collision_manager.remove(self)
+        self.shadow.destroy()

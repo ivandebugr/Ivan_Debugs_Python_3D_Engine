@@ -1,6 +1,7 @@
 from ursina import *
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import AliveEntity, Layers, collision_manager, swept_move_blocked
+from Scripts.ground_shadow import GroundShadow
 
 # TUNE: balance / experiment variables — label kept so grep finds them fast during playtesting
 ENEMY_HP_DEFAULT         = 100    # TUNE: try 50 for a 2-shot kill at 25 dmg/bullet
@@ -64,6 +65,8 @@ class Enemy(AliveEntity):
         self._occluded        = False   # cached result — updated on throttle interval
         self._occlusion_timer = 0.0     # counts down; raycast fires when <= 0
 
+        self.shadow = GroundShadow(self, scale=(1.5, 1.5))
+
         self.health_bar = HealthBar(
             parent=self,
             max_value=self.max_health,
@@ -101,6 +104,8 @@ class Enemy(AliveEntity):
         self.health_bar.world_position = self.world_position + Vec3(0, 3.75, 0)
         self.health_bar.value          = self.health
         self.health_bar.enabled        = player_dist < 200 and not self._occluded
+
+        self.shadow.update()
 
         if self.health <= 0:
             self.die()
@@ -189,6 +194,8 @@ class Enemy(AliveEntity):
         invoke(setattr, self, 'can_shoot', True, delay=self.shoot_cooldown)
 
     def on_die(self):
-        """Destroy health bar before super().on_die() destroys self."""
+        """Destroy health bar and shadow before super().on_die() destroys self."""
         if hasattr(self, 'health_bar') and self.health_bar:
             destroy(self.health_bar)
+        if hasattr(self, 'shadow') and self.shadow:
+            self.shadow.destroy()
