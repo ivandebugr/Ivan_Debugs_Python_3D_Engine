@@ -286,9 +286,16 @@ class Weapon(Entity):
     view_position = (0.5, -0.5, 0.8)
     view_rotation = (0, 0, 0)
     shoot_sound   = 'blaster'
+    # Gun pack MTLs are flat, near-black tactical colors (Kd ~0.02-0.09) meant
+    # for a lit renderer; the viewmodel is unlit (no scene lighting to lift
+    # them), so they render as near-black. Boost compensates without a
+    # lighting model — verified against the actual Kd values in
+    # assets/models/*.mtl to stay legible without blowing out to white.
+    view_color_boost = 6
 
     def __init__(self, player, model=None, texture=None,
                  scale=None, position=None, rotation=None, **kwargs):
+        kwargs.setdefault('color', Color(*([self.view_color_boost] * 3), 1))
         super().__init__(
             parent=camera,
             model=model or _resolve_model(self.view_model),
