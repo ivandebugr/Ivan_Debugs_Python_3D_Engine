@@ -142,7 +142,7 @@ layout presets (`Ctrl+Alt+1-5` / `Alt+1-5`, mirrors the camera-bookmark pattern 
 **Deferred, explicitly not silently dropped:** rotation *ring* gizmo (B2-ring), resizable panels
 (C3 — also blocks full browser-height reclaim on collapse), and dock-style panel layout (C4/C5 —
 C5 is a multi-week framework project, likely not worth it for a solo editor). Full cost/risk
-breakdown in [[work/archive/2026/v1.7-editor-ux-scoping]].
+breakdown in [[v1.7-editor-ux-scoping]].
 
 See: [[work/archive/2026/v1.7-editor-ux-bundle]].
 
@@ -150,10 +150,10 @@ See: [[work/archive/2026/v1.7-editor-ux-bundle]].
 
 _What am I working toward right now?_
 
-- **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, 1 shot SFX + 1 ambient track (CC-0), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
+- **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, ~~1 shot SFX~~ (closed 2026-07-07, blaster.ogg/blaster_repeater.ogg wired on weapon fire) + 1 ambient track (CC-0, still open — no source pulled yet), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
 - **Hands-on playtest of `levels/v1.json`** — mechanics are harness-verified; game-feel is not.
 - **Small editor-UI widget leak** (inspector/browser swatch, 2 entities per F5 cycle) — spun off from the fix-backlog close-out, not yet scheduled.
-- **v1.7 deferred tier, if there's appetite** — rotation ring gizmo, resizable panels, dock-style layout. Not scheduled; see [[work/archive/2026/v1.7-editor-ux-scoping]].
+- **v1.7 deferred tier, if there's appetite** — rotation ring gizmo, resizable panels, dock-style layout. Not scheduled; see [[v1.7-editor-ux-scoping]].
 
 ## Goals
 

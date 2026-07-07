@@ -46,6 +46,24 @@ mouse/window needed) since this environment has no way to drive the Panda3D GUI 
   `mouse.hovered_entity` before a drag is committed to, using the pre-existing hook (line
   meshes already report as `hovered_entity` — see Gotchas).
 
+### Added — asset integration (2026-07-07 asset audit)
+- **Gun viewmodels** — Pistol/Shotgun/Rifle now render a real OBJ+MTL model (Ultimate Gun Pack)
+  instead of the placeholder cube, with per-subclass `view_model`/`view_scale`/`view_position`/
+  `view_rotation` tuning on `Weapon`. Fixed a latent bug the refactor exposed: `original_pos` was
+  building from the constructor's now-optional `position` param instead of the resolved
+  `self.position`.
+- **Crosshair** — `PlayerHUD.crosshair` points at a real PNG (Kenney crosshair pack) instead of
+  the plain-circle placeholder. Also fixed a pre-existing issue where `FirstPersonController`'s
+  built-in pink diamond cursor sat on top of the crosshair (Ursina calls `on_enable()` after
+  `Player.__init__` finishes, re-enabling anything disabled mid-`__init__`).
+- **Shot SFX** — `blaster.ogg`/`blaster_repeater.ogg` play on weapon fire. **Only half of the
+  open v1.3 remainder item is closed** — no ambient/music track is wired; that still needs a
+  separate CC0 source.
+- **Blob shadows** — Player and enemies now cast a simple ground-tracking shadow quad
+  (`Scripts/ground_shadow.py`).
+- Font (Lilita One) and the full Kenney UI icon/sound packs imported for future menu work, not
+  yet wired into any screen.
+
 ### Deferred (parked, not silently dropped)
 - **B2-ring** — a rotation *ring* gizmo (vs. the numeric field shipped here). ~1–1.5 days,
   medium risk (new geometry, new drag mode, thin-target picking).
