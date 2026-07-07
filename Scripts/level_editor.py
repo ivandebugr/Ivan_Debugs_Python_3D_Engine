@@ -19,12 +19,13 @@ from Scripts.undo_redo import (
     ChangePickupConfigCommand, _resolve_model
 )
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
-from Scripts.session_logger import SessionLogger
+from Scripts.session_logger import get_editor_logger
 from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.asset_registry import asset_registry, CATEGORY_DIRS, CATEGORY_EXTENSIONS
 from Scripts.weapon import WEAPON_TYPES
+from Scripts.editor_hierarchy import HierarchyPanel
 
-logger = SessionLogger()
+logger = get_editor_logger()
 
 loadPrcFileData('', 'model-cache-dir')
 
@@ -121,16 +122,9 @@ class LevelEditor(Entity):
         self._asset_picker_cells = {}    # {category: [(bg_entity, name), ...]}
         self.asset_picker_open = None    # category name while open, else None
         self._asset_picker_on_select = None
-        self._hier_panel = None
-        self._hier_buttons = []
-        self._hier_scroll_bar = None
-        self.hierarchy_scroll = 0
-        # Hierarchy search/filter + collapsible sections (Change B).
-        self._hier_search_field = None     # InputField pinned above the list
-        self._hier_filter = ''             # lower-cased substring; '' = show all
-        self._hier_collapsed = {'block': False, 'enemy': False, 'trigger': False, 'pickup': False}  # per-section fold state
-        self._hier_header_buttons = {}     # {'block': Button, 'enemy': Button}
-        self._hier_swatches = []           # per-row colour swatch quads (parallel to _hier_buttons)
+        # Hierarchy panel collaborator (v1.6 split) — built in __init__ below,
+        # alongside the other _build_* calls.
+        self.hierarchy = None
 
         # Grid snap
         self.snap_values = list(EDITOR_GRID_SNAPS)
@@ -279,7 +273,7 @@ class LevelEditor(Entity):
         )
 
         self._build_inspector()
-        self._build_hierarchy()
+        self.hierarchy = HierarchyPanel(self)
         self._build_gizmo()
         self._build_asset_browser()
 
@@ -409,12 +403,9 @@ class LevelEditor(Entity):
         hier_w = self._LAYOUT_HIER_W
         insp_w = self._LAYOUT_INSP_W
 
-        # Hierarchy — flush left
-        if self._hier_panel is not None:
-            self._hier_panel.x = -half_w + hier_w * 0.5
-            self._hier_panel.y = 0
-            self._hier_panel.scale_x = hier_w
-            self._hier_panel.scale_y = self._LAYOUT_PANEL_H
+        # Hierarchy — flush left (panel owns its own layout)
+        if self.hierarchy is not None:
+            self.hierarchy.apply_layout(aspect, half_w)
 
         # Inspector — flush right
         if self._inspector is not None:
@@ -2090,225 +2081,19 @@ class LevelEditor(Entity):
     # Hierarchy panel
     # -------------------------------------------------------------------------
 
-    # Hierarchy layout constants (panel-local space). One row pitch is shared by every
-    # visual slot — section headers AND entity rows — so the scroll thumb, swatches and
-    # rows are all placed by the SAME _hier_row_y() formula and cannot drift (Bug A).
-    _HIER_TOP    = 0.36   # y of the first visual slot (row index 0)
-    _HIER_ROW_H  = 0.05   # uniform pitch between consecutive visual slots
-    _HIER_MAX_VISIBLE = 13  # how many slots fit between the search field and the panel bottom
-    _HIER_SWATCH_X   = -.085  # panel-local x of a row's colour swatch (left edge of the row)
-    _HIER_SWATCH_SIZE = .022
-
-    def _hier_row_y(self, visual_index):
-        """THE shared row-index -> panel-local-y formula. Slot 0 is at _HIER_TOP and each
-        subsequent visual slot (header or entity row) steps down one _HIER_ROW_H. Rows,
-        colour swatches, section headers AND the scroll-thumb track all derive their y from
-        this single function so they can never diverge (Bug A consolidation)."""
-        return self._HIER_TOP - visual_index * self._HIER_ROW_H
-
-    def _hier_visual_rows(self):
-        """Ordered list of visual rows for the current filter + collapse state. Each entry is
-        ('header', section) or ('row', entity). Headers always appear; a section's entity rows
-        are present only when it is expanded AND match the (case-insensitive substring) filter.
-        Section counts shown in the header reflect the FILTERED visible entities, not the raw
-        totals — so the list reads honestly while searching."""
-        flt = self._hier_filter
-        rows = []
-        for section, members in (('block', self.blocks), ('enemy', self.enemies), ('trigger', self.triggers), ('pickup', self.pickups)):
-            if flt:
-                matched = [e for e in members if flt in self._hier_label(e).lower()]
-            else:
-                matched = list(members)
-            rows.append(('header', section))
-            if not self._hier_collapsed[section]:
-                rows.extend(('row', e) for e in matched)
-        return rows
-
-    def _hier_label(self, e):
-        if e in self.enemies:
-            tag = 'E'
-        elif e in self.triggers:
-            tag = 'T'
-        elif e in self.pickups:
-            tag = 'P'
-        else:
-            tag = 'B'
-        return f"{tag} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
-
-    def _build_hierarchy(self):
-        self._hier_panel = Entity(
-            parent=camera.ui,
-            model='quad',
-            color=color.rgba(0, 0, 0, 0.75),
-            scale=(.20, .9),
-            position=(-.779, 0),
-            z=-0.5,
-            eternal=True,
-        )
-        Text(
-            parent=self._hier_panel,
-            text='Hierarchy',
-            position=(0, .45),
-            scale=(.055, .055),
-            color=color.white,
-            eternal=True,
-        )
-        # Search/filter box pinned above the list (Change B.1). Live filter-as-you-type via
-        # on_value_changed. Each keystroke re-runs _refresh_hierarchy, but that only ever
-        # instantiates the <=_HIER_MAX_VISIBLE rows in the viewport (not the full list), so it
-        # stays well under a frame even at 140+ entities (~9ms measured). Counted in the
-        # typing-guard so Delete/bookmark keys don't fire while editing here (see input()).
-        self._hier_search_field = InputField(
-            parent=self._hier_panel,
-            position=(0, .40),
-            scale=(.17, .03),
-            default_value='',
-            z=-1,
-            eternal=True,
-        )
-        try:
-            self._hier_search_field.setBin('fixed', 41)
-        except Exception as e:
-            logger.log('ERROR', f"_build_hierarchy setBin search {type(e).__name__}: {e}")
-        self._hier_search_field.on_value_changed = self._on_hier_search_changed
-        # Thin vertical scroll indicator — right edge of panel
-        self._hier_scroll_bar = Entity(
-            parent=self._hier_panel,
-            model='quad',
-            color=color.rgba(0.78, 0.78, 0.78, 0.47),   # 0–1 floats — 0–255 clamps to white
-            scale=(.018, .05),
-            position=(.46, self._HIER_TOP),
-            z=-1,
-            eternal=True,
-        )
-        self._hier_buttons = []
-        self._hier_swatches = []
-        self._hier_header_buttons = {}
-
-    def _on_hier_search_changed(self):
-        if self._hier_search_field is None:
-            return
-        self._hier_filter = self._hier_search_field.text.strip().lower()
-        self.hierarchy_scroll = 0
-        self._refresh_hierarchy()
-        self._update_hierarchy_highlight()
-
-    def _toggle_hier_section(self, section):
-        self._hier_collapsed[section] = not self._hier_collapsed[section]
-        self.hierarchy_scroll = 0
-        self._refresh_hierarchy()
-        self._update_hierarchy_highlight()
+    # v1.6 split: the hierarchy panel lives in Scripts/editor_hierarchy.py
+    # (HierarchyPanel, back-ref via self.hierarchy). The three delegators below
+    # keep the original method names alive — undo_redo.py's commands and the
+    # aggregated typing-guard in input() call them by name (de-facto public API).
 
     def _refresh_hierarchy(self):
-        for b in self._hier_buttons:
-            destroy(b)
-        self._hier_buttons.clear()
-        for s in self._hier_swatches:
-            destroy(s)
-        self._hier_swatches.clear()
-        for b in self._hier_header_buttons.values():
-            destroy(b)
-        self._hier_header_buttons.clear()
-
-        visual_rows = self._hier_visual_rows()
-        total = len(visual_rows)
-        max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
-        self.hierarchy_scroll = max(0, min(self.hierarchy_scroll, max_scroll))
-
-        # Filtered per-section counts for the header captions.
-        flt = self._hier_filter
-        def _count(members):
-            return sum(1 for e in members if not flt or flt in self._hier_label(e).lower())
-        section_count = {'block': _count(self.blocks), 'enemy': _count(self.enemies), 'trigger': _count(self.triggers), 'pickup': _count(self.pickups)}
-        section_name  = {'block': 'Blocks', 'enemy': 'Enemies', 'trigger': 'Triggers', 'pickup': 'Pickups'}
-
-        visible = visual_rows[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
-        for slot, (kind, payload) in enumerate(visible):
-            y = self._hier_row_y(slot)
-            if kind == 'header':
-                section = payload
-                # OpenSans (Ursina's default font) has NO triangle glyphs (▾▸▼▶ all render as
-                # missing-glyph boxes — verified against the .ttf cmap, same class as the ▶/↖
-                # gaps noted in CLAUDE.md). Use ASCII [+]/[-] (both glyphs present) for the
-                # collapse state instead.
-                tri = '[+]' if self._hier_collapsed[section] else '[-]'
-                hdr = Button(
-                    parent=self._hier_panel,
-                    text=f"{tri} {section_name[section]} ({section_count[section]})",
-                    scale=(.18, .038),
-                    position=(-.01, y),
-                    color=self._THEME_TILE_HOVER,
-                    text_origin=(-.5, 0),   # left-align the caption inside the wide button
-                    text_scale=.75,
-                    z=-1,
-                )
-                hdr.on_click = lambda s=section: self._toggle_hier_section(s)
-                self._hier_header_buttons[section] = hdr
-            else:
-                e = payload
-                btn = Button(
-                    parent=self._hier_panel,
-                    text=self._hier_label(e),
-                    scale=(.18, .038),
-                    position=(-.01, y),
-                    color=color.orange if e in self.selected else color.dark_gray,
-                    text_scale=.75,
-                    z=-1,
-                )
-                btn.on_click = lambda entity=e: self._select(entity)
-                self._hier_buttons.append(btn)
-                # Colour swatch matching the entity's real colour (Change B.2). Parented to the
-                # panel (not the button) and placed by the SAME _hier_row_y(slot) so it stays
-                # aligned. z below the button text so it reads as a separate chip. NOT eternal:
-                # like the row Buttons these are transient and destroyed/rebuilt every refresh —
-                # destroy() is a NO-OP on eternal entities (ursina/destroy.py:27), so an eternal
-                # swatch would leak and ghost on every rebuild. Hidden in F5 play mode via the
-                # panel's enabled cascade, not eternal. (Persistent chrome below stays eternal.)
-                swatch_color = getattr(e, '_original_color', e.color)
-                swatch = Entity(
-                    parent=self._hier_panel,
-                    model='quad',
-                    color=swatch_color,
-                    scale=(self._HIER_SWATCH_SIZE, self._HIER_SWATCH_SIZE),
-                    position=(self._HIER_SWATCH_X, y),
-                    z=-1.1,
-                )
-                self._hier_swatches.append(swatch)
-
-        self._update_hier_scroll_bar(total)
-
-    def _update_hier_scroll_bar(self, total):
-        if not self._hier_scroll_bar:
-            return
-        if total <= self._HIER_MAX_VISIBLE:
-            self._hier_scroll_bar.enabled = False
-            return
-        self._hier_scroll_bar.enabled = True
-        # Track spans the same slots the rows occupy — bounds derived from _hier_row_y so the
-        # thumb can never drift from the rows (Bug A). Top of slot 0 down to bottom of the last.
-        track_top    = self._hier_row_y(0) + self._HIER_ROW_H * 0.5
-        track_bottom = self._hier_row_y(self._HIER_MAX_VISIBLE - 1) - self._HIER_ROW_H * 0.5
-        track_h      = track_top - track_bottom  # positive
-
-        thumb_ratio  = self._HIER_MAX_VISIBLE / total
-        thumb_h      = max(0.03, track_h * thumb_ratio)
-        max_scroll   = total - self._HIER_MAX_VISIBLE
-        scroll_frac  = self.hierarchy_scroll / max_scroll if max_scroll > 0 else 0
-        # Centre of thumb travels from track_top - thumb_h/2  down to  track_bottom + thumb_h/2
-        travel       = track_h - thumb_h
-        thumb_centre = track_top - thumb_h / 2 - scroll_frac * travel
-
-        self._hier_scroll_bar.scale_y = thumb_h
-        self._hier_scroll_bar.y       = thumb_centre
+        self.hierarchy.refresh()
 
     def _update_hierarchy_highlight(self):
-        """Recolour the currently-built entity rows in place from the same visual-row slice the
-        buttons were built from — never rebuilds, so it stays cheap on scroll/select."""
-        visual_rows = self._hier_visual_rows()
-        visible = visual_rows[self.hierarchy_scroll: self.hierarchy_scroll + self._HIER_MAX_VISIBLE]
-        row_entities = [payload for kind, payload in visible if kind == 'row']
-        for btn, e in zip(self._hier_buttons, row_entities):
-            btn.color = color.orange if e in self.selected else color.dark_gray
+        self.hierarchy.update_highlight()
+
+    def _hier_typing(self):
+        return self.hierarchy.typing()
 
     def _is_over_panel(self, panel):
         """Return True if the mouse cursor is currently over the given UI panel quad."""
@@ -2344,11 +2129,6 @@ class LevelEditor(Entity):
         hw = sx * 0.5
         hh = sy * 0.5
         return (px - hw) <= mx <= (px + hw) and (py - hh) <= my <= (py + hh)
-
-    def _hier_typing(self):
-        """True while the hierarchy search box is focused — so Delete/bookmark/backspace keys
-        edit the search text instead of deleting entities or recalling camera bookmarks."""
-        return bool(self._hier_search_field and self._hier_search_field.active)
 
     def _is_over_browser(self):
         my = mouse.y
@@ -3284,7 +3064,7 @@ class LevelEditor(Entity):
         return data
 
     def _set_editor_ui_visible(self, visible):
-        for widget in [self._inspector, self._hier_panel, self._insp_title,
+        for widget in [self._inspector, self.hierarchy.panel, self._insp_title,
                        self.snap_button,
                        self.play_button, self._move_button, self._place_button,
                        self._import_button,
@@ -3715,7 +3495,7 @@ class LevelEditor(Entity):
             # Step 2: panel guards — _is_over_panel uses mouse.x/y, no hovered needed.
             # Buttons inside panels are grandchildren of camera.ui; _is_over_panel is
             # more reliable than checking hovered.parent for nested widgets.
-            if self._hier_panel and self._is_over_panel(self._hier_panel):
+            if self.hierarchy.panel and self._is_over_panel(self.hierarchy.panel):
                 return
             # Texture swatch click opens the picker — must be checked before the
             # blanket inspector-panel guard below swallows the click silently.
@@ -3798,7 +3578,7 @@ class LevelEditor(Entity):
         # Hierarchy scroll — mouse wheel while cursor over the hierarchy panel or inspector
         if key in ('scroll up', 'scroll down'):
             over_ui = (
-                (self._hier_panel and self._is_over_panel(self._hier_panel))
+                (self.hierarchy.panel and self._is_over_panel(self.hierarchy.panel))
                 or (self._inspector and self._is_over_panel(self._inspector))
                 or self._is_over_browser()
             )
@@ -3818,13 +3598,8 @@ class LevelEditor(Entity):
                 self._update_browser_scroll_indicators()
                 return
 
-            if self._hier_panel and self._is_over_panel(self._hier_panel):
-                total = len(self._hier_visual_rows())
-                max_scroll = max(0, total - self._HIER_MAX_VISIBLE)
-                delta = -1 if key == 'scroll up' else 1
-                self.hierarchy_scroll = max(0, min(self.hierarchy_scroll + delta, max_scroll))
-                self._refresh_hierarchy()
-                self._update_hierarchy_highlight()
+            if self.hierarchy.panel and self._is_over_panel(self.hierarchy.panel):
+                self.hierarchy.handle_scroll(key)
                 return
 
             if self._inspector and self._is_over_panel(self._inspector):

@@ -51,3 +51,18 @@ def get_game_logger() -> 'SessionLogger':
     if _game_logger is None:
         _game_logger = SessionLogger(open_message='Game session opened')
     return _game_logger
+
+
+# Editor-session logger, same cached pattern. The v1.6 editor split puts editor
+# code in several Scripts/editor_* modules; a module-level SessionLogger() in
+# each would write one log file per module. All editor modules route through
+# this single cached instance instead.
+_editor_logger: 'SessionLogger | None' = None
+
+
+def get_editor_logger() -> 'SessionLogger':
+    """Return the process-wide editor-session logger (one log file per run)."""
+    global _editor_logger
+    if _editor_logger is None:
+        _editor_logger = SessionLogger()
+    return _editor_logger
