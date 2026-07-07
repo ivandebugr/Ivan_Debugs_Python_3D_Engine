@@ -14,7 +14,7 @@ PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 from Scripts.undo_redo import (
     UndoRedoStack, PlaceEntityCommand, DeleteEntityCommand,
-    MoveEntityCommand, ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
+    ChangeTextureCommand, ChangeModelCommand, ChangeColourCommand,
     ChangePropertyCommand, ChangeBehaviourCommand, ChangeTriggerActionsCommand,
     ChangePickupConfigCommand, _resolve_model
 )
@@ -24,6 +24,7 @@ from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.asset_registry import asset_registry, CATEGORY_DIRS, CATEGORY_EXTENSIONS
 from Scripts.weapon import WEAPON_TYPES
 from Scripts.editor_hierarchy import HierarchyPanel
+from Scripts.editor_gizmo import GizmoController
 
 logger = get_editor_logger()
 
@@ -101,11 +102,8 @@ class LevelEditor(Entity):
         self._box_start = None
         self._box_rect = None  # screen-space selection rect visual
 
-        # Gizmo drag state
-        self._gizmo_root = None
-        self._gizmo_drag_axis = None
-        self._gizmo_drag_start_mouse = None
-        self._gizmo_drag_start_pos = None
+        # Transform-gizmo collaborator (v1.6 split) — built in __init__ below.
+        self.gizmo = None
 
         # Inspector / hierarchy panel refs
         self._inspector = None
@@ -274,7 +272,7 @@ class LevelEditor(Entity):
 
         self._build_inspector()
         self.hierarchy = HierarchyPanel(self)
-        self._build_gizmo()
+        self.gizmo = GizmoController(self)
         self._build_asset_browser()
 
         self._spawn_marker = Entity(
@@ -1872,8 +1870,8 @@ class LevelEditor(Entity):
         field = self._insp_fields.get(key)
         if field is not None:
             field.text = str(round(value, 3))
-        if self._gizmo_root is not None:
-            self._update_gizmo()
+        if self.gizmo is not None:
+            self.gizmo.refresh()
 
     # -------------------------------------------------------------------------
     # Asset picker overlay (v1.3 Step 4 texture, Step 5 model)
@@ -2805,132 +2803,9 @@ class LevelEditor(Entity):
     # Transform gizmos
     # -------------------------------------------------------------------------
 
-    def _build_gizmo(self):
-        self._gizmo_root = Entity(name='editor_gizmo_root', enabled=False, eternal=True)
-        shaft_len = 1.2
-        Entity(
-            parent=self._gizmo_root,
-            model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(shaft_len, 0, 0)], mode='line', thickness=3),
-            color=color.red,
-            name='editor_gizmo_x',
-            eternal=True,
-        )
-        Entity(
-            parent=self._gizmo_root,
-            model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(0, shaft_len, 0)], mode='line', thickness=3),
-            color=color.green,
-            name='editor_gizmo_y',
-            eternal=True,
-        )
-        Entity(
-            parent=self._gizmo_root,
-            model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(0, 0, shaft_len)], mode='line', thickness=3),
-            color=color.blue,
-            name='editor_gizmo_z',
-            eternal=True,
-        )
-        for offset, col, gname in [
-            (Vec3(shaft_len, 0, 0), color.red,   'editor_gizmo_tip_x'),
-            (Vec3(0, shaft_len, 0), color.green, 'editor_gizmo_tip_y'),
-            (Vec3(0, 0, shaft_len), color.blue,  'editor_gizmo_tip_z'),
-        ]:
-            # FIXED: scale 0.12 → 0.24 (2× larger for easier clicking)
-            tip = Entity(
-                parent=self._gizmo_root,
-                model='cube',
-                color=col,
-                scale=.24,
-                position=offset,
-                name=gname,
-                collider='box',
-                eternal=True,
-            )
-            # FIXED: bin 100 (was 40) + depth test/write off so handles always render
-            # on top of scene geometry and are clickable even when overlapped by blocks.
-            # Entity IS a NodePath (Ursina subclasses NodePath) — call setBin directly.
-            tip.setDepthTest(False)
-            tip.setDepthWrite(False)
-            tip.setBin('fixed', 100)
-
-    def _cursor_ray(self):
-        """Return a world-space (origin, direction) ray through the mouse cursor.
-
-        Mirrors Ursina's own picker (mouse.update): lens.extrude with the cursor in
-        normalised film coords (mouse.x*2/aspect, mouse.y*2). Needed for gizmo picking —
-        camera.forward only rays through the screen centre, but the editor cursor is free,
-        so a screen-centre ray never tested where the user actually clicked.
-        """
-        from panda3d.core import Point2, Point3
-        near_p, far_p = Point3(), Point3()
-        camera.lens.extrude(
-            Point2(mouse.x * 2 / window.aspect_ratio, mouse.y * 2), near_p, far_p
-        )
-        origin = Vec3(*render.get_relative_point(camera, near_p))
-        far_w  = Vec3(*render.get_relative_point(camera, far_p))
-        return origin, (far_w - origin).normalized()
-
-    def _update_gizmo(self):
-        """Position gizmo at centroid of selection; hide when nothing selected or in play mode."""
-        if not self.selected or self._play_mode:
-            self._gizmo_root.enabled = False
-            return
-        self._gizmo_root.enabled = True
-        positions = [e.position for e in self.selected]
-        centroid = Vec3(0, 0, 0)
-        for p in positions:
-            centroid += p
-        centroid /= len(positions)
-        self._gizmo_root.position = centroid
-
-    def _handle_gizmo_drag(self):
-        """Translate selected entities along the grabbed world axis; push MoveEntityCommand on release."""
-        axis_map = {
-            'editor_gizmo_x': 'x', 'editor_gizmo_tip_x': 'x',
-            'editor_gizmo_y': 'y', 'editor_gizmo_tip_y': 'y',
-            'editor_gizmo_z': 'z', 'editor_gizmo_tip_z': 'z',
-        }
-        _world_axes = {'x': Vec3(1, 0, 0), 'y': Vec3(0, 1, 0), 'z': Vec3(0, 0, 1)}
-        if held_keys['left mouse']:
-            if self._gizmo_drag_axis is None:
-                if mouse.hovered_entity and mouse.hovered_entity.name in axis_map:
-                    self._gizmo_drag_axis = axis_map[mouse.hovered_entity.name]
-                    self._gizmo_drag_start_mouse = Vec2(mouse.x, mouse.y)
-                    self._gizmo_drag_start_pos = {e: Vec3(e.position) for e in self.selected}
-            else:
-                # Project the world axis into screen space to determine drag sign.
-                # camera.getRelativePoint gives the axis endpoint in camera-local space;
-                # the 2D difference is the screen-space projection of that axis.
-                axis_world = _world_axes[self._gizmo_drag_axis]
-                cam_origin = camera.getRelativePoint(render, Vec3(0, 0, 0))
-                cam_tip    = camera.getRelativePoint(render, axis_world)
-                axis_screen = Vec2(cam_tip.x - cam_origin.x, cam_tip.y - cam_origin.y)
-                axis_len = axis_screen.length()
-                if axis_len > 0.0001:
-                    axis_screen /= axis_len
-                else:
-                    axis_screen = Vec2(1, 0)
-
-                mouse_vel = Vec2(mouse.velocity[0], mouse.velocity[1])
-                magnitude = mouse_vel.dot(axis_screen) * 200.0  # scale velocity → world units
-
-                for e in self.selected:
-                    raw = getattr(e, self._gizmo_drag_axis) + magnitude
-                    setattr(e, self._gizmo_drag_axis, self._snap_1d(raw))
-                self._update_gizmo()
-        else:
-            if self._gizmo_drag_axis is not None:
-                for e in self.selected:
-                    old_pos = self._gizmo_drag_start_pos[e]
-                    new_pos = Vec3(e.position)
-                    if old_pos != new_pos:
-                        etype = ('enemy' if e in self.enemies else
-                                 'trigger' if e in self.triggers else
-                                 'pickup' if e in self.pickups else 'block')
-                        logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
-                        self._history.push(MoveEntityCommand(e, old_pos, new_pos))
-            self._gizmo_drag_axis = None
-            self._gizmo_drag_start_mouse = None
-            self._gizmo_drag_start_pos = None
+    # v1.6 split: the transform gizmo lives in Scripts/editor_gizmo.py
+    # (GizmoController, back-ref via self.gizmo). Core's update() drives
+    # gizmo.handle_drag()/refresh(); input() Step 1 calls gizmo.try_begin_drag().
 
     # -------------------------------------------------------------------------
     # Camera bookmarks / prefs
@@ -3112,7 +2987,7 @@ class LevelEditor(Entity):
                                        self._editor_camera.rotation_y,
                                        self._editor_camera.rotation_z)
         self._set_editor_ui_visible(False)
-        self._gizmo_root.enabled = False
+        self.gizmo.root.enabled = False
         # Disable EditorCamera so it stops driving camera position/rotation.
         # FirstPersonController's __init__ sets camera.parent = self, taking over.
         if self._editor_camera:
@@ -3142,7 +3017,7 @@ class LevelEditor(Entity):
         self._play_mode = False
         self._restore_editor_level()
         self._set_editor_ui_visible(True)
-        self._update_gizmo()
+        self.gizmo.refresh()
         mouse.locked = False
         mouse.visible = True
         # Re-enable EditorCamera; on_enable reparents camera back to the editor rig.
@@ -3322,8 +3197,8 @@ class LevelEditor(Entity):
                 self.model_preview.visible = False
             else:
                 self.update_model_preview()
-            self._handle_gizmo_drag()
-            self._update_gizmo()
+            self.gizmo.handle_drag()
+            self.gizmo.refresh()
             # Refresh the stats strip ~once a second (matches Ursina's own counter cadence).
             self._stats_accum += time.dt
             if self._stats_accum >= 1.0:
@@ -3429,7 +3304,7 @@ class LevelEditor(Entity):
                       or self._hier_typing() or self._behaviour_typing()
                       or self._door_name_typing() or self._trigger_typing()
                       or self._pickup_typing())
-            mid_drag = (self._gizmo_drag_axis is not None
+            mid_drag = (self.gizmo.drag_axis is not None
                         or self._box_selecting or self._dragging)
             if self.selected and not typing and not mid_drag:
                 for e in list(self.selected):
@@ -3444,7 +3319,7 @@ class LevelEditor(Entity):
                 self.selected.clear()
                 self._update_inspector()
                 self._refresh_hierarchy()
-                self._update_gizmo()
+                self.gizmo.refresh()
                 return
 
         # Cancel drag with Esc
@@ -3469,28 +3344,9 @@ class LevelEditor(Entity):
             # Step 1: gizmo handle hit — raycast against tip cubes BEFORE any panel check.
             # setDepthTest(False)/setBin(100) make handles visible through blocks, but the
             # pick ray still hits geometry behind them; explicit raycast takes priority.
-            if self._gizmo_root and self._gizmo_root.enabled and self._gizmo_drag_axis is None:
-                _axis_map = {
-                    'editor_gizmo_tip_x': 'x',
-                    'editor_gizmo_tip_y': 'y',
-                    'editor_gizmo_tip_z': 'z',
-                }
-                # FIXED (v1.2.4, FIX 1B): pick through the MOUSE CURSOR, not camera.forward.
-                # camera.forward rays through the screen centre, but the editor cursor is
-                # free, so the old ray never tested where the user actually clicked — the
-                # gizmo could not be grabbed. Ignoring every non-tip entity lets the handle
-                # win even when a block overlaps it on screen (verified against a block-in-front).
-                _origin, _direction = self._cursor_ray()
-                _hit = raycast(_origin,
-                               _direction,
-                               distance=200,
-                               ignore=[e for e in scene.entities
-                                       if not e.name.startswith('editor_gizmo_tip')])
-                if _hit.hit and _hit.entity and _hit.entity.name in _axis_map:
-                    self._gizmo_drag_axis = _axis_map[_hit.entity.name]
-                    self._gizmo_drag_start_mouse = Vec2(mouse.x, mouse.y)
-                    self._gizmo_drag_start_pos = {e: Vec3(e.position) for e in self.selected}
-                    return
+            # (Pick logic + the v1.2.4 cursor-ray fix live in GizmoController.try_begin_drag.)
+            if self.gizmo.try_begin_drag():
+                return
 
             # Step 2: panel guards — _is_over_panel uses mouse.x/y, no hovered needed.
             # Buttons inside panels are grandchildren of camera.ui; _is_over_panel is
@@ -3529,7 +3385,7 @@ class LevelEditor(Entity):
                 return
 
             # Step 3: active drag or box-select guard (after gizmo and panel steps)
-            if self._gizmo_drag_axis is not None or self._box_selecting:
+            if self.gizmo.drag_axis is not None or self._box_selecting:
                 return
 
             # Step 4/5: selection (shift) or tool-mode action
