@@ -102,8 +102,15 @@ class HealthBar(Entity):
             self.text.text = f"{int(self.value)}/{int(self.max_value)}"
 
     def on_destroy(self):
-        """Remove from registry and explicitly destroy camera.ui text (won't cascade)."""
+        """Remove from registry and explicitly destroy children — Ursina's destroy()
+        never cascades to parent= children (only loose_children), so bg/bar (parent=
+        self for both is_3d and screen-space bars) and text (parent=self for is_3d,
+        parent=camera.ui for screen-space) would otherwise leak as orphaned NodePaths."""
         if self in HealthBar._registry:
             HealthBar._registry.remove(self)
-        if not self.is_3d and hasattr(self, 'text') and self.text:
+        if hasattr(self, 'bg') and self.bg:
+            destroy(self.bg)
+        if hasattr(self, 'bar') and self.bar:
+            destroy(self.bar)
+        if hasattr(self, 'text') and self.text:
             destroy(self.text)

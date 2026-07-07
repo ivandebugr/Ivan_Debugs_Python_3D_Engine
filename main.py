@@ -326,9 +326,11 @@ def _clear_gameplay_entities():
         if hasattr(game.player, 'inventory') and game.player.inventory:
             game.player.inventory.destroy_all()
         if hasattr(game.player, 'health_bar') and game.player.health_bar:
-            if hasattr(game.player.health_bar, 'text') and game.player.health_bar.text:
-                destroy(game.player.health_bar.text)
+            # HealthBar.on_destroy() tears down its own bg/bar/text children.
             destroy(game.player.health_bar)
+        if hasattr(game.player, 'debug_lines'):
+            for line in game.player.debug_lines:
+                destroy(line)
         collision_manager.remove(game.player)
         destroy(game.player)
         game.player = None
