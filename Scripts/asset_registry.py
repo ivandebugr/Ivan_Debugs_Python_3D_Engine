@@ -30,6 +30,11 @@ CATEGORY_EXTENSIONS = {
 
 MANIFEST_PATH = ASSET_ROOT / 'manifest.json'
 
+# Bumped whenever the scan's keying scheme changes so a manifest written by an
+# older build is rejected and rebuilt rather than silently reused. v2 = the
+# recursive scan with qualified 'subdir/name' keys for subfolder files.
+MANIFEST_SCHEMA_VERSION = 2
+
 
 class AssetRegistry:
     """Scans asset folders and tracks files for hot-reload."""
@@ -156,6 +161,7 @@ class AssetRegistry:
 
     def _write_manifest(self):
         data = {
+            'schema': MANIFEST_SCHEMA_VERSION,
             'textures': self.textures,
             'models': self.models,
             'sounds': self.sounds,
@@ -175,6 +181,13 @@ class AssetRegistry:
             with open(MANIFEST_PATH, 'r', encoding='utf-8') as f:
                 data = json.load(f)
         except Exception:
+            return False
+
+        # A manifest without the current schema marker predates the recursive
+        # scan; discard it and force one full rebuild so we never run on cached
+        # data that doesn't reflect the current keying scheme.
+        if isinstance(data, dict) and data.get('schema') != MANIFEST_SCHEMA_VERSION:
+            print('AssetRegistry: manifest schema outdated, rebuilding')
             return False
 
         try:
