@@ -932,6 +932,81 @@ class LevelEditor(Entity):
         self.pickups.append(e)
         return e
 
+    # -------------------------------------------------------------------------
+    # Convert entity type (v1.7 Step 2) — block ↔ trigger ↔ pickup, in place
+    # -------------------------------------------------------------------------
+    # The editor's only way to CREATE a trigger/pickup used to be dragging its
+    # card from the asset browser; there was no way to turn an already-placed
+    # block into one. _convert_selected adds that affordance: it rebuilds the
+    # selected entity as the target type at the same position (and scale, where
+    # the target has a free scale), via one undoable ConvertEntityCommand.
+
+    # Which target types a given entity can convert INTO (never itself). Enemies
+    # are excluded as a conversion target and source — enemy config (hp/behaviour)
+    # has no trigger/pickup analogue, so enemy↔trigger conversion would silently
+    # drop data with no clear user intent. Convert is block/trigger/pickup only.
+    _CONVERT_TARGETS = {
+        'block':   ('trigger', 'pickup'),
+        'trigger': ('block', 'pickup'),
+        'pickup':  ('block', 'trigger'),
+    }
+
+    def _entity_type_name(self, e):
+        """Editor type tag for a tracked entity ('block'/'enemy'/'trigger'/'pickup')."""
+        if e in self.enemies:
+            return 'enemy'
+        if e in self.triggers:
+            return 'trigger'
+        if e in self.pickups:
+            return 'pickup'
+        return 'block'
+
+    def _convert_target_snapshot(self, e, target_type):
+        """Build a _restore_entity snapshot that turns `e` into `target_type`,
+        carrying over position (and scale for block/trigger — pickup has a fixed
+        scale). Fresh default config for the new type (empty trigger action lists,
+        default pickup config, plain white block)."""
+        pos = tuple(e.position)
+        scale = (e.scale_x, e.scale_y, e.scale_z)
+        if target_type == 'trigger':
+            return {'is_trigger': True, 'position': pos, 'scale': scale,
+                    'on_enter': [], 'on_exit': []}
+        if target_type == 'pickup':
+            return {'is_pickup': True, 'position': pos,
+                    'pickup_config': dict(self._PICKUP_DEFAULT_CONFIG)}
+        # -> block: plain white cube at the same transform.
+        return {'position': pos, 'texture': 'white_cube', 'color': color.white,
+                'rotation': (0, 0, 0), 'scale': scale, 'is_enemy': False}
+
+    def _convert_selected(self, target_type):
+        """Convert the single selected entity to `target_type`, in place, undoably.
+
+        Single-selection only (converting a mixed/multi selection has no clear
+        semantics). No-op if the selection isn't exactly one convertible entity
+        or the target equals its current type. Re-selects the rebuilt entity so
+        the inspector + gizmo refresh onto it."""
+        from Scripts.undo_redo import ConvertEntityCommand
+        if len(self.selected) != 1:
+            return
+        e = next(iter(self.selected))
+        cur = self._entity_type_name(e)
+        if cur == 'enemy' or target_type not in self._CONVERT_TARGETS.get(cur, ()):
+            return
+        from_snap = self._entity_snapshot(e)
+        to_snap = self._convert_target_snapshot(e, target_type)
+        logger.log('INFO', f"Convert entity: {cur} -> {target_type} at {[round(p,3) for p in e.position]}")
+        cmd = ConvertEntityCommand(self, e, from_snap, to_snap)
+        cmd.execute()
+        self._history.push(cmd)
+        # The old entity is already destroyed by cmd.execute(); it's still in
+        # self.selected, so clear the set DIRECTLY (not via _deselect_all, which
+        # would read .color on the dead NodePath and trip the destroy assertion).
+        self.selected.clear()
+        # Re-select the rebuilt entity (cmd.entity is the live one post-execute)
+        # so the inspector + gizmo refresh onto the converted type.
+        self._select(cmd.entity, additive=False)
+        self.gizmo.refresh()
+
     def _finish_box_select(self):
         if self._box_start is None:
             return

@@ -480,9 +480,21 @@ class AssetBrowser:
             Text(parent=icon, text='\U0001F50A', origin=(0, 0), scale=4, z=-1,
                  color=color.white, eternal=True)
 
+        # Clarify the special-entity built-in cards (v1.7 Step 2): Trigger/Pickup
+        # read as plain coloured cubes otherwise, so annotate the label with what
+        # dragging the card does. Blocks/enemies keep their bare name. (An object
+        # can also be converted in place from the inspector's Convert row.)
+        label_text = name
+        if builtin_asset is not None:
+            atype = builtin_asset.get('type')
+            if atype == 'trigger':
+                label_text = f'{name}\n(drag: trigger zone)'
+            elif atype == 'pickup':
+                label_text = f'{name}\n(drag: ammo/weapon)'
+
         label = Text(
             parent=camera.ui,
-            text=name,
+            text=label_text,
             position=(cx + self._CARD_SIZE * 0.62, cy),
             origin=(-0.5, 0),
             scale=0.5,

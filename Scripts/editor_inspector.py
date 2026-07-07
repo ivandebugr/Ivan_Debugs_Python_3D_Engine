@@ -263,6 +263,7 @@ class InspectorPanel:
         self._build_behaviour_ui()
         self._build_trigger_ui()
         self._build_pickup_ui()
+        self._build_convert_ui()
 
     def _update_inspector_door_field(self):
         """Refresh the door-name field from the current selection. Blocks only —
@@ -312,6 +313,66 @@ class InspectorPanel:
             cmd.execute()
             self.editor._history.push(cmd)
 
+    # -------------------------------------------------------------------------
+    # Convert-type row (v1.7 Step 2)
+    # -------------------------------------------------------------------------
+    # A "Convert to:" label + up to two buttons offering the valid target types
+    # for the current single selection (block/trigger/pickup, never itself, never
+    # enemy). This is the editor's affordance for turning an already-placed block
+    # into a trigger/pickup in place — the browser card only ever CREATED one.
+    # Shown only for a single convertible (non-enemy) selection. Actual conversion
+    # + undo lives in core._convert_selected / ConvertEntityCommand.
+    _CONVERT_ROW_Y = .34   # just under the Inspector title; Step 3 may reposition
+
+    def _build_convert_ui(self):
+        """Persistent convert-row widgets: a label + two reusable target buttons
+        (relabelled/enabled per selection in _refresh_convert_ui)."""
+        self._convert_label = Text(
+            parent=self.panel, text='Convert to',
+            position=(-.33, self._CONVERT_ROW_Y),
+            color=color.light_gray, origin=(0, 0), z=-1, eternal=True, enabled=False,
+        )
+        self._convert_label.world_scale = Vec3(self._INSP_LABEL_WS, self._INSP_LABEL_WS, 1)
+        self._convert_btns = []
+        for i in range(2):   # at most two targets per source type
+            # Non-empty placeholder text: Button with text='' builds no text_entity
+            # (so .text_entity is None); _refresh_convert_ui relabels it per selection.
+            btn = Button(
+                parent=self.panel, text='-',
+                position=(.02 + i * .24, self._CONVERT_ROW_Y), scale=(.22, .05),
+                color=self.editor._THEME_TILE_BG, z=-1, eternal=True, enabled=False,
+            )
+            btn.text_entity.world_scale = Vec3(8, 8, 1)
+            self._convert_btns.append(btn)
+        for w in (self._convert_label, *self._convert_btns):
+            try:
+                w.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_convert_ui setBin {type(e).__name__}: {e}")
+
+    def _refresh_convert_ui(self):
+        """Show the convert row for a single convertible (non-enemy) selection;
+        relabel/wire the target buttons; hide otherwise."""
+        if getattr(self, '_convert_label', None) is None:
+            return
+        sel = list(self.editor.selected)
+        targets = ()
+        if len(sel) == 1:
+            cur = self.editor._entity_type_name(sel[0])
+            targets = self.editor._CONVERT_TARGETS.get(cur, ())   # () for enemy
+        show = bool(targets)
+        self._convert_label.enabled = show
+        for i, btn in enumerate(self._convert_btns):
+            if i < len(targets):
+                t = targets[i]
+                btn.text = t.capitalize()
+                btn.enabled = True
+                btn.on_click = lambda tt=t: self.editor._convert_selected(tt)
+            else:
+                # Disabled buttons never fire; leave on_click as-is (Ursina rejects
+                # on_click=None). enabled=False is what actually gates the click.
+                btn.enabled = False
+
     def _update_inspector(self):
         if not self.editor.selected:
             for f in self._insp_fields.values():
@@ -322,6 +383,7 @@ class InspectorPanel:
             self._refresh_behaviour_ui()
             self._refresh_trigger_ui()
             self._refresh_pickup_ui()
+            self._refresh_convert_ui()
             return
         entities = list(self.editor.selected)
 
@@ -347,6 +409,7 @@ class InspectorPanel:
         self._refresh_behaviour_ui()
         self._refresh_trigger_ui()
         self._refresh_pickup_ui()
+        self._refresh_convert_ui()
 
     def _entity_texture_name(self, e):
         """Best-effort texture name for an entity, '' if none/unreadable."""

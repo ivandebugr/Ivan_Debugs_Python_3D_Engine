@@ -146,6 +146,62 @@ class DeleteEntityCommand(Command):
         self.editor._refresh_hierarchy()
 
 
+class ConvertEntityCommand(Command):
+    """Convert one placed entity to a different type (block ↔ trigger ↔ pickup),
+    in place at its current position/scale. v1.7 Step 2.
+
+    Implemented as an atomic delete-old + restore-new over the same snapshot
+    machinery every other editor command uses: `from_snap` fully describes the
+    entity as it is now, `to_snap` describes what it should become (the target
+    type marker set, position/scale carried across by the caller). execute()
+    destroys the current entity and rebuilds from `to_snap`; undo() destroys the
+    converted entity and rebuilds from `from_snap`. Both directions go through
+    `_restore_entity`, so a converted entity is byte-identical to a freshly placed
+    one of that type (single construction site — no drift).
+
+    Selection is NOT restored here (the command owns entity lifecycle only); the
+    caller re-selects the rebuilt entity so the inspector/gizmo refresh to it.
+    Exposes `.entity` as the currently-live entity after each execute/undo so the
+    caller can re-select it."""
+
+    def __init__(self, editor, entity, from_snap, to_snap):
+        self.editor    = editor
+        self.entity    = entity
+        self.from_snap = from_snap
+        self.to_snap   = to_snap
+
+    def __repr__(self):
+        def kind(s):
+            return ('trigger' if s.get('is_trigger') else
+                    'pickup' if s.get('is_pickup') else
+                    'enemy' if s.get('is_enemy') else 'block')
+        return f"ConvertEntityCommand({kind(self.from_snap)} -> {kind(self.to_snap)})"
+
+    def _swap(self, snap):
+        """Destroy the current entity and rebuild from `snap`; return the new one."""
+        from ursina import destroy
+        for lst in (self.editor.blocks, self.editor.enemies,
+                    getattr(self.editor, 'triggers', []),
+                    getattr(self.editor, 'pickups', [])):
+            if self.entity in lst:
+                lst.remove(self.entity)
+        # Drop the doomed entity from selection BEFORE destroying it, so no later
+        # _update_inspector/gizmo.refresh reads .color/.position on the dead
+        # NodePath (destroy assertion). Undo/redo don't re-select; that's fine —
+        # the entity just ends up deselected, same as delete-undo.
+        self.editor.selected.discard(self.entity)
+        destroy(self.entity)
+        self.entity = _restore_entity(self.editor, snap)
+        self.editor._refresh_hierarchy()
+        return self.entity
+
+    def execute(self):
+        self._swap(self.to_snap)
+
+    def undo(self):
+        self._swap(self.from_snap)
+
+
 class MoveEntityCommand(Command):
     """Move entity to new_pos; undo restores old_pos, redo reapplies new_pos."""
 
