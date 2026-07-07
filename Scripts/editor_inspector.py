@@ -1186,10 +1186,15 @@ class InspectorPanel:
             self.editor.gizmo.refresh()
 
     def apply_layout(self, aspect, half_w):
-        """Reposition the panel for the current aspect ratio — flush right."""
+        """Reposition the panel for the current aspect ratio — flush right.
+
+        Collapsed (v1.7 C1): editor._effective_insp_w reclaims the space for
+        the viewport; visibility itself is driven by set_visible (called from
+        editor._toggle_panel), not from width here.
+        """
         if self.panel is None:
             return
-        insp_w = self.editor._LAYOUT_INSP_W
+        insp_w = self.editor._effective_insp_w
         self.panel.x = half_w - insp_w * 0.5
         self.panel.y = 0
         self.panel.scale_x = insp_w

@@ -296,6 +296,8 @@ class AssetBrowser:
     # -------------------------------------------------------------------------
 
     def _is_over_browser(self):
+        if not self.editor.panel_visible['browser']:
+            return False
         my = mouse.y
         return (self._BROWSER_Y - self._BROWSER_H * 0.5) <= my <= (self._BROWSER_Y + self._BROWSER_H * 0.5)
 
@@ -342,7 +344,7 @@ class AssetBrowser:
         # align() (IndexError: list index out of range on linewidths[-1]). Kept for
         # consistency with the other arrow glyphs even though '^'/'v' aren't delimiters.
         aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
-        scroll_ind_x = aspect * 0.5 - ed._LAYOUT_INSP_W - 0.03
+        scroll_ind_x = aspect * 0.5 - ed._effective_insp_w - 0.03
         self._browser_scroll_up = Text(
             parent=camera.ui,
             text='^',
@@ -505,8 +507,8 @@ class AssetBrowser:
         """Number of card columns that fit in the browser's usable width."""
         aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
         half_w = aspect * 0.5
-        left = -half_w + self.editor._LAYOUT_HIER_W + 0.02
-        right = half_w - self.editor._LAYOUT_INSP_W - 0.02
+        left = -half_w + self.editor._effective_hier_w + 0.02
+        right = half_w - self.editor._effective_insp_w - 0.02
         usable = right - left
         cols = max(1, int(usable / self._CARD_PITCH))
         return cols
@@ -522,7 +524,7 @@ class AssetBrowser:
         row, col = divmod(index, cols)
         aspect = getattr(window, 'aspect_ratio', 16 / 9) or 16 / 9
         half_w = aspect * 0.5
-        left = -half_w + self.editor._LAYOUT_HIER_W + 0.02
+        left = -half_w + self.editor._effective_hier_w + 0.02
         first_x = left + self._CARD_PITCH * 0.5
         first_y = self._BROWSER_Y + self._BROWSER_H * 0.5 - self._CARD_PITCH * 0.5 - 0.02
         cx = first_x + col * self._CARD_PITCH
@@ -653,7 +655,7 @@ class AssetBrowser:
         self._layout_browser_tabs(half_w)
 
         # Scroll indicators — flush to right of the card grid, at top/bottom.
-        scroll_ind_x = half_w - self.editor._LAYOUT_INSP_W - 0.03
+        scroll_ind_x = half_w - self.editor._effective_insp_w - 0.03
         if self._browser_scroll_up is not None:
             self._browser_scroll_up.x = scroll_ind_x
             self._browser_scroll_up.y = self._BROWSER_Y + self._BROWSER_H * 0.5 - 0.02
@@ -670,7 +672,7 @@ class AssetBrowser:
         tab_order = ('texture', 'model', 'sound')
         tab_w = 0.12
         tab_gap = 0.01
-        start_x = -half_w + self.editor._LAYOUT_HIER_W + tab_w * 0.5 + 0.01
+        start_x = -half_w + self.editor._effective_hier_w + tab_w * 0.5 + 0.01
         for i, cat in enumerate(tab_order):
             btn = tabs.get(cat)
             if btn is None:

@@ -132,10 +132,15 @@ class HierarchyPanel:
         self.header_buttons = {}
 
     def apply_layout(self, aspect, half_w):
-        """Reposition the panel for the current aspect ratio — flush left."""
+        """Reposition the panel for the current aspect ratio — flush left.
+
+        Collapsed (v1.7 C1): panel.enabled tracks editor.panel_visible['hierarchy']
+        directly (toggled in editor._toggle_panel), so only positioning/sizing —
+        driven by the effective (possibly zero-reclaimed) width — happens here.
+        """
         if self.panel is None:
             return
-        hier_w = self.editor._LAYOUT_HIER_W
+        hier_w = self.editor._effective_hier_w
         self.panel.x = -half_w + hier_w * 0.5
         self.panel.y = 0
         self.panel.scale_x = hier_w

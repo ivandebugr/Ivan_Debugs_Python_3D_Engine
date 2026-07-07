@@ -84,7 +84,8 @@ def _launch():
         text="Drag from Models tab: Place block/enemy | Shift+LClick: Select | RDrag: Box-select\n"
              "Delete: Remove selected | Ctrl+Z: Undo | Ctrl+Y/Shift+Z: Redo | Esc: Cancel drag\n"
              "Ctrl+S: Save | G: Cycle snap | F5: Play-in-editor | Scroll: browse cards\n"
-             "Ctrl+1-5: Save cam bookmark | 1-5: Recall bookmark",
+             "Ctrl+1-5: Save cam bookmark | 1-5: Recall bookmark\n"
+             "Ctrl+H/I/B: Toggle hierarchy/inspector/browser panel",
         parent=camera.ui,
         position=(-.88, .48),
         origin=(-.5, .5),

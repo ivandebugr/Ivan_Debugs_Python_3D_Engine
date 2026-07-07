@@ -129,6 +129,11 @@ class LevelEditor(Entity):
         # Bookmarks (loaded from prefs)
         self._bookmarks = {str(i): None for i in range(1, 6)}
 
+        # Panel collapse state (v1.7 C1) — per-panel visibility, independent of
+        # _set_editor_ui_visible's play-mode show/hide-everything. Persisted via
+        # _save_prefs/_load_prefs (v1.7 C2 extends this with saved presets).
+        self.panel_visible = {'hierarchy': True, 'inspector': True, 'browser': True}
+
         # Undo/redo
         self._history = UndoRedoStack()
 
@@ -232,6 +237,36 @@ class LevelEditor(Entity):
         )
         self._stats_accum = 0.0       # seconds since last stats refresh
 
+        # Panel collapse chevrons (v1.7 C1) — one small button per collapsible
+        # panel; text flips between '[H]'/'[h]' etc. to indicate collapse
+        # state. Positions are set by _apply_layout, same pattern as the
+        # toolbar buttons above. A bare '<'/'>' or '^'/'v' single-char label
+        # crashes Text.align() (list index out of range on linewidths) — same
+        # class of footgun as HC14's empty-string/lone-bracket crash — so use
+        # bracketed letter labels instead, matching the hierarchy panel's
+        # existing ASCII [+]/[-] collapse-marker convention.
+        self._hier_chevron = Button(
+            parent=camera.ui, text='[H]', scale=(.025, .04),
+            on_click=lambda: self._toggle_panel('hierarchy'),
+            color=color.dark_gray, text_color=color.white,
+            z=-1, eternal=True,
+        )
+        self._hier_chevron.text_entity.world_scale = Vec3(8, 8, 1)
+        self._insp_chevron = Button(
+            parent=camera.ui, text='[I]', scale=(.025, .04),
+            on_click=lambda: self._toggle_panel('inspector'),
+            color=color.dark_gray, text_color=color.white,
+            z=-1, eternal=True,
+        )
+        self._insp_chevron.text_entity.world_scale = Vec3(8, 8, 1)
+        self._browser_chevron = Button(
+            parent=camera.ui, text='[B]', scale=(.025, .04),
+            on_click=lambda: self._toggle_panel('browser'),
+            color=color.dark_gray, text_color=color.white,
+            z=-1, eternal=True,
+        )
+        self._browser_chevron.text_entity.world_scale = Vec3(8, 8, 1)
+
         self.model_preview = Entity(
             model='cube',
             color=color.white33,
@@ -313,11 +348,43 @@ class LevelEditor(Entity):
     # Layout (border-anchored UI repositioning on window resize)
     # -------------------------------------------------------------------------
 
-    # Panel widths (camera.ui units). Kept constant so labels/fields inside
-    # the panels retain their proportions; only x-position changes with aspect.
+    # Panel widths (camera.ui units) when expanded. Kept constant so labels/
+    # fields inside the panels retain their proportions; only x-position
+    # changes with aspect. _effective_*_w below return 0 when collapsed
+    # (v1.7 C1) so _apply_layout reclaims the space for the viewport.
     _LAYOUT_HIER_W = 0.20
     _LAYOUT_INSP_W = 0.30   # ~17% of a 16:9 window — wide enough for the 3-column grid
     _LAYOUT_PANEL_H = 0.9
+    _LAYOUT_CHEVRON_W = 0.03   # strip reserved for a collapsed panel's chevron
+
+    @property
+    def _effective_hier_w(self):
+        return self._LAYOUT_HIER_W if self.panel_visible['hierarchy'] else self._LAYOUT_CHEVRON_W
+
+    @property
+    def _effective_insp_w(self):
+        return self._LAYOUT_INSP_W if self.panel_visible['inspector'] else self._LAYOUT_CHEVRON_W
+
+    @property
+    def _effective_browser_h(self):
+        return self.browser._BROWSER_H if self.panel_visible['browser'] else self._LAYOUT_CHEVRON_W
+
+    def _toggle_panel(self, name):
+        """Show/hide one collapsible panel (v1.7 C1) and re-derive layout to
+        reclaim/return its screen space. Browser cards cascade via its own
+        set_visible (camera.ui-parented, per the v1.7 scoping report)."""
+        self.panel_visible[name] = not self.panel_visible[name]
+        visible = self.panel_visible[name]
+        if name == 'hierarchy':
+            self.hierarchy.panel.enabled = visible
+            self._hier_chevron.text = '[H]' if visible else '[h]'
+        elif name == 'inspector':
+            self.inspector.set_visible(visible)
+            self._insp_chevron.text = '[I]' if visible else '[i]'
+        elif name == 'browser':
+            self.browser.set_visible(visible)
+            self._browser_chevron.text = '[B]' if visible else '[b]'
+        self._apply_layout()
 
     # Horizontal toolbar (Texture/Snap/Play/Move/Place) — a single Unity/Blender-style
     # strip that sits in the thin band ABOVE the inspector (inspector top edge is y=0.45
@@ -366,7 +433,7 @@ class LevelEditor(Entity):
         except Exception as e:
             logger.log('ERROR', f"_apply_layout lens refresh {type(e).__name__}: {e}")
 
-        hier_w = self._LAYOUT_HIER_W
+        hier_w = self._effective_hier_w
 
         # Hierarchy — flush left (panel owns its own layout)
         if self.hierarchy is not None:
@@ -380,6 +447,19 @@ class LevelEditor(Entity):
         # scroll indicators own their own layout).
         if self.browser is not None:
             self.browser.apply_layout(aspect, half_w)
+
+        # Panel collapse chevrons (v1.7 C1) — sit just inside the reclaimed
+        # edge so they're clickable whether the panel is expanded or collapsed.
+        insp_w = self._effective_insp_w
+        if getattr(self, '_hier_chevron', None) is not None:
+            self._hier_chevron.x = -half_w + hier_w - self._LAYOUT_CHEVRON_W * 0.5
+            self._hier_chevron.y = self._LAYOUT_PANEL_H * 0.5 - 0.03
+        if getattr(self, '_insp_chevron', None) is not None:
+            self._insp_chevron.x = half_w - insp_w + self._LAYOUT_CHEVRON_W * 0.5
+            self._insp_chevron.y = self._LAYOUT_PANEL_H * 0.5 - 0.03
+        if getattr(self, '_browser_chevron', None) is not None:
+            self._browser_chevron.x = -half_w + hier_w + self._LAYOUT_CHEVRON_W * 0.5
+            self._browser_chevron.y = self.browser._BROWSER_Y + self._effective_browser_h * 0.5
 
         # --- Toolbar (BUG B fix) ---
         # Scale button widths proportionally when the viewport is narrower
@@ -732,7 +812,14 @@ class LevelEditor(Entity):
         return self.hierarchy.typing()
 
     def _is_over_panel(self, panel):
-        """Return True if the mouse cursor is currently over the given UI panel quad."""
+        """Return True if the mouse cursor is currently over the given UI panel quad.
+
+        A collapsed panel (v1.7 C1) is invisible but keeps a thin chevron-width
+        strip for layout purposes — it must not still swallow clicks meant for
+        the viewport, so disabled panels never count as "over".
+        """
+        if not panel.enabled:
+            return False
         mx, my = mouse.x, mouse.y
         px, py = panel.x, panel.y
         hw = panel.scale_x * 0.5
@@ -912,7 +999,12 @@ class LevelEditor(Entity):
         return data
 
     def _set_editor_ui_visible(self, visible):
-        self.inspector.set_visible(visible)
+        # Collapsible panels (v1.7 C1): on restore (visible=True), respect
+        # whatever the user last set via _toggle_panel rather than forcing
+        # every panel back open. On hide (visible=False), everything goes
+        # dark regardless — play mode hides ALL editor chrome.
+        self.inspector.set_visible(visible and self.panel_visible['inspector'])
+        hier_visible = visible and self.panel_visible['hierarchy']
         for widget in [self.hierarchy.panel,
                        self.snap_button,
                        self.play_button, self._move_button, self._place_button,
@@ -923,11 +1015,17 @@ class LevelEditor(Entity):
                 if getattr(widget, 'destroy_source', None) is not None:
                     logger.log('WARN', f'_set_editor_ui_visible: skipped destroyed widget {widget}')
                     continue
-                widget.enabled = visible
+                widget.enabled = hier_visible if widget is self.hierarchy.panel else visible
+
+        for chevron in (getattr(self, '_hier_chevron', None),
+                        getattr(self, '_insp_chevron', None),
+                        getattr(self, '_browser_chevron', None)):
+            if chevron:
+                chevron.enabled = visible
 
         # Asset browser (panel + tab buttons + scroll indicators) — the band
         # owns its own show/hide, including per-tab card visibility.
-        self.browser.set_visible(visible)
+        self.browser.set_visible(visible and self.panel_visible['browser'])
 
     # -------------------------------------------------------------------------
     # Play-in-editor (v1.6 split)
@@ -1015,6 +1113,15 @@ class LevelEditor(Entity):
 
         if key == 's' and held_keys['control']:
             self.save_level()
+
+        # Panel collapse toggles (v1.7 C1). Ctrl-modified so they never fire
+        # while typing 'h'/'i'/'b' into an inspector/hierarchy-search field.
+        if key == 'h' and held_keys['control']:
+            self._toggle_panel('hierarchy')
+        if key == 'i' and held_keys['control']:
+            self._toggle_panel('inspector')
+        if key == 'b' and held_keys['control']:
+            self._toggle_panel('browser')
 
         # Undo / Redo
         if key == 'z' and held_keys['control'] and held_keys['shift']:
