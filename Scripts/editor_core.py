@@ -1256,8 +1256,12 @@ class LevelEditor(Entity):
                 seen.add(key)
                 deduped.append(item)
 
-        with open(self.filename, 'w') as f:
-            json.dump(deduped, f, indent=4)
+        try:
+            with open(self.filename, 'w') as f:
+                json.dump(deduped, f, indent=4)
+        except Exception as e:
+            logger.log('ERROR', f"save_level failed: {type(e).__name__}: {e}")
+            return
         print(f'Saved level to {self.filename} ({len(deduped)} entries)')
         logger.log('INFO', f"Level saved: {os.path.abspath(self.filename)} ({len(deduped)} entries)")
         self._history.clear()
