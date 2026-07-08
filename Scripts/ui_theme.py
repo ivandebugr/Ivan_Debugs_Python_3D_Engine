@@ -102,6 +102,8 @@ class ThemedButton(Button):
         callback = getattr(self, '_themed_callback', None)
         if callback:
             callback()
+        if self.is_empty():   # callback may have torn down this screen (e.g. start_game)
+            return
         self.animate_scale(
             self.scale * BUTTON_CLICK_ANIM_SCALE,
             duration=BUTTON_CLICK_ANIM_DURATION,
