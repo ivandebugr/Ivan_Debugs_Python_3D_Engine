@@ -38,6 +38,17 @@ ENEMY_VISUAL_SCALE    = 0.9
 # disc/no-legs shape.
 ENEMY_VISUAL_POSITION = (0, 0.5, 0)
 
+# Walk-bob (v1.7): cheap fake-locomotion — a sine vertical offset added to the
+# cosmetic visual_model's LOCAL y while the enemy is actually translating
+# (chase/patrol). No rig/animation needed. The offset rides on top of the
+# neutral ENEMY_VISUAL_POSITION.y, and eases back to 0 when the enemy stops so
+# it never freezes mid-cycle. Amplitude is in the child's LOCAL space (parent
+# scale_y=3 multiplies it to world) — keep it subtle.
+ENEMY_BOB_AMPLITUDE = 0.04    # local-y sine amplitude (~0.12 world units at scale 3)
+ENEMY_BOB_SPEED     = 9.0     # radians/sec — cadence of the bob
+ENEMY_BOB_EASE      = 8.0     # per-sec lerp rate easing the offset to neutral when stopped
+ENEMY_BOB_MOVE_EPS  = 1e-4    # min per-frame horizontal move (sq) to count as "moving"
+
 
 class Enemy(AliveEntity):
     def __init__(self, spawn_position, player, hp=ENEMY_HP_DEFAULT, enemy_type='default', rotation_y=0, behaviour_tree=None):
@@ -104,6 +115,14 @@ class Enemy(AliveEntity):
         self._occluded        = False   # cached result — updated on throttle interval
         self._occlusion_timer = 0.0     # counts down; raycast fires when <= 0
 
+        # Walk-bob state (v1.7). _bob_phase advances only while moving; _bob_offset
+        # is the applied local-y delta, eased toward 0 when stopped. _prev_position
+        # snapshots position each frame so update() can tell if the enemy actually
+        # translated (chase_step/patrol_step are the only movers).
+        self._bob_phase    = 0.0
+        self._bob_offset   = 0.0
+        self._prev_position = Vec3(self.position)
+
         self.shadow = GroundShadow(self, scale=(1.5, 1.5))
 
         self.health_bar = HealthBar(
@@ -140,6 +159,8 @@ class Enemy(AliveEntity):
         # frame. ChaseNode may move the enemy via self.chase_step().
         self._tree.tick(self, time.dt)
 
+        self._update_bob()
+
         self.health_bar.world_position = self.world_position + Vec3(0, 3.75, 0)
         self.health_bar.value          = self.health
         self.health_bar.enabled        = player_dist < 200 and not self._occluded
@@ -148,6 +169,33 @@ class Enemy(AliveEntity):
 
         if self.health <= 0:
             self.die()
+
+    def _update_bob(self):
+        """Drive the visual_model's local-y walk-bob from actual translation.
+
+        Movement is detected by comparing this frame's position to last frame's
+        (chase_step/patrol_step are the only movers), not by behaviour-tree
+        state — so a chase node that's blocked against a wall and not actually
+        translating correctly reads as "not moving" and the bob eases out.
+        The bob phase only advances while moving; when stopped, the applied
+        offset lerps back to 0 so the mesh settles at neutral instead of
+        freezing mid-cycle.
+        """
+        delta = self.position - self._prev_position
+        moving = (delta.x * delta.x + delta.z * delta.z) > ENEMY_BOB_MOVE_EPS
+        self._prev_position = Vec3(self.position)
+
+        if moving:
+            self._bob_phase += ENEMY_BOB_SPEED * time.dt
+            target = math.sin(self._bob_phase) * ENEMY_BOB_AMPLITUDE
+        else:
+            target = 0.0
+        # Ease toward the target every frame — a live sine while moving, a decay
+        # to neutral when stopped. lerp factor clamped so a long frame can't
+        # overshoot.
+        self._bob_offset = lerp(self._bob_offset, target,
+                                min(1.0, ENEMY_BOB_EASE * time.dt))
+        self.visual_model.y = ENEMY_VISUAL_POSITION[1] + self._bob_offset
 
     def chase_step(self, direction, dt):
         """Move one frame toward `direction`, avoiding walls (called by ChaseNode).
@@ -215,6 +263,19 @@ class Enemy(AliveEntity):
             debug=False,
         )
         return hit.hit and getattr(hit.entity, '_collision_layer', 0) != Layers.PLAYER
+
+    def can_see_player(self) -> bool:
+        """True if nothing solid blocks the enemy→player line of sight.
+
+        Duck-typed LOS accessor called by DetectPlayerNode (behaviour_nodes.py),
+        which stays Ursina-import-free and delegates the raycast here — the same
+        delegation pattern as chase_step/patrol_step. Reuses the existing
+        _is_occluded() sweep (walls block, the player does not; other enemies on
+        Layers.ENEMY also block, matching _is_occluded), so no new raycast
+        convention is introduced. A live raycast, not the throttled _occluded
+        cache, so detection is correct independent of update()'s occlusion timer.
+        """
+        return not self._is_occluded()
 
     def shoot(self):
         """Fire one enemy bullet toward the player via the pool; resets cooldown via invoke."""
