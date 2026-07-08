@@ -25,6 +25,7 @@ from Scripts.ui_theme import (
     HUD_MARGIN, BUTTON_SCALE, BUTTON_GAP, FONT_BOLD,
     ACCENT_WIN, ACCENT_LOSE, CROSSHAIR_COLOR,
     BUTTON_TEXTURE, BUTTON_CLICK_SOUND,
+    HUD_PANEL_TEXTURE, HUD_PANEL_COLOR,
 )
 import pyglet
 
@@ -74,6 +75,15 @@ def _get_version_string():
     except Exception as e:
         logger.log('ERROR', f"_get_version_string failed: {type(e).__name__}: {e}")
     return ''
+
+
+def _apply_debug_stats_setting(enabled: bool):
+    """Show/hide Ursina's built-in top-right fps/entity/collider counters as
+    one group, per the show_debug_stats setting. Called at boot and whenever
+    SettingsMenu toggles it live."""
+    window.fps_counter.enabled = enabled
+    window.entity_counter.enabled = enabled
+    window.collider_counter.enabled = enabled
 
 
 def _themed_button(**kwargs):
@@ -142,8 +152,12 @@ class PlayerHUD:
         # aspectRatioChanged handler (window.update_aspect_ratio, which rescales every
         # camera.ui child's x by the aspect delta) keeps these pinned to their corners
         # on resize — the same pattern the level editor's border-anchored UI relies on.
+        # visible (not enabled) reflects the show_hints setting — enabled=False
+        # would stash the model entirely, which show()/hide() below don't undo
+        # since they only ever toggle .visible.
         self.hint_text = Text(
             text='Move: WASD | Jump: Space | Shoot: LMB | Reload: R | Mouse: Esc | Fullscreen: F',
+            visible=game_settings['show_hints'],
             parent=camera.ui,
             position=window.bottom_left + Vec2(HUD_MARGIN, HUD_MARGIN),
             origin=(-0.5, -0.5),
@@ -156,12 +170,34 @@ class PlayerHUD:
         # update_ammo() (called from the global update() below, PLAYING-gated).
         # Polling instead of hooking every shoot()/switch_to()/reload() call site
         # keeps WeaponInventory/Weapon free of any HUD dependency.
+        #
+        # ammo_panel: HL2-style backdrop behind the counter (Extra/ outlined frame,
+        # tinted black + translucent — see ui_theme.HUD_PANEL_COLOR). Corner-pinned
+        # to window.bottom_right - margin like the old bare ammo_text was, so
+        # window.update_aspect_ratio still rescales it correctly on resize.
+        # ammo_text is then centered on the panel's *center* (derived from the
+        # panel's own corner anchor + half its scale) via origin=(0,0), instead
+        # of a fixed nudge — keeps it centered regardless of string length
+        # ('INF' vs 'RELOADING' vs '30/30').
+        panel_scale = Vec2(0.2, 0.09)
+        panel_anchor = window.bottom_right + Vec2(-HUD_MARGIN, HUD_MARGIN)
+        panel_center = panel_anchor - Vec2(panel_scale.x / 2, -panel_scale.y / 2)
+        self.ammo_panel = Entity(
+            parent=camera.ui,
+            model='quad',
+            texture=_resolve_texture(HUD_PANEL_TEXTURE),
+            color=HUD_PANEL_COLOR,
+            scale=panel_scale,
+            position=panel_anchor,
+            origin=(0.5, -0.5),
+            z=0,
+        )
         self.ammo_text = Text(
             text='',
             enabled=False,
             parent=camera.ui,
-            position=window.bottom_right + Vec2(-HUD_MARGIN, HUD_MARGIN),
-            origin=(0.5, -0.5),
+            position=panel_center,
+            origin=(0, 0),
             scale=1.2,
             color=TEXT_PRIMARY,
             z=-1,
@@ -177,8 +213,12 @@ class PlayerHUD:
         weapon = inventory.active_weapon if inventory else None
         if weapon is None:
             self.ammo_text.enabled = False
+            if self.ammo_panel:
+                self.ammo_panel.enabled = False
             return
         self.ammo_text.enabled = True
+        if self.ammo_panel:
+            self.ammo_panel.enabled = True
         if weapon.max_ammo < 0:
             self.ammo_text.text = 'INF'
         elif weapon.reloading:
@@ -191,10 +231,14 @@ class PlayerHUD:
         self.crosshair.visible = True
         if self.health_bar:
             self.health_bar.visible = True
+        # hint_text still honours the show_hints setting on top of the pause
+        # toggle — re-showing the HUD must not override an explicit opt-out.
         if self.hint_text:
-            self.hint_text.visible = True
+            self.hint_text.visible = game_settings['show_hints']
         if self.ammo_text:
             self.ammo_text.visible = True
+        if self.ammo_panel:
+            self.ammo_panel.visible = True
 
     def hide(self):
         self._visible = False
@@ -205,6 +249,8 @@ class PlayerHUD:
             self.hint_text.visible = False
         if self.ammo_text:
             self.ammo_text.visible = False
+        if self.ammo_panel:
+            self.ammo_panel.visible = False
 
     def destroy(self):
         if self.crosshair:
@@ -216,6 +262,9 @@ class PlayerHUD:
         if self.ammo_text:
             destroy(self.ammo_text)
             self.ammo_text = None
+        if self.ammo_panel:
+            destroy(self.ammo_panel)
+            self.ammo_panel = None
         # health_bar/player lifetimes are owned by Player/start_game() — do not destroy here
         self.health_bar = None
         self.player = None
@@ -643,27 +692,41 @@ class SettingsMenu(Entity):
         self.resolution_button = _themed_button(
             text=f'Resolution: {res_w}x{res_h}',
             text_color=TEXT_PRIMARY,
-            scale=BUTTON_SCALE, y=0.15, parent=self,
+            scale=BUTTON_SCALE, y=0.19, parent=self,
         )
         self.resolution_button.on_click = self.cycle_resolution
 
         self.sfx_slider = Slider(
             min=0, max=1, default=game_settings['sfx_volume'],
             text='SFX Volume', dynamic=False,
-            parent=self, y=0.02, x=-0.09,
+            parent=self, y=0.09, x=-0.09,
         )
         self.sfx_slider.on_value_changed = self.on_sfx_changed
 
         self.music_slider = Slider(
             min=0, max=1, default=game_settings['music_volume'],
             text='Music Volume', dynamic=False,
-            parent=self, y=-0.05, x=-0.09,
+            parent=self, y=0.03, x=-0.09,
         )
         self.music_slider.on_value_changed = self.on_music_changed
 
+        self.debug_stats_button = _themed_button(
+            text=self._debug_stats_label(),
+            text_color=TEXT_PRIMARY,
+            scale=BUTTON_SCALE, y=-0.08, parent=self,
+        )
+        self.debug_stats_button.on_click = self.toggle_debug_stats
+
+        self.hints_button = _themed_button(
+            text=self._hints_label(),
+            text_color=TEXT_PRIMARY,
+            scale=BUTTON_SCALE, y=-0.18, parent=self,
+        )
+        self.hints_button.on_click = self.toggle_hints
+
         self.back_button = _themed_button(
             text='Back', text_color=TEXT_PRIMARY,
-            scale=BUTTON_SCALE, y=-0.2, parent=self,
+            scale=BUTTON_SCALE, y=-0.28, parent=self,
         )
         self.back_button.on_click = self.close
 
@@ -682,6 +745,25 @@ class SettingsMenu(Entity):
 
     def on_music_changed(self):
         game_settings['music_volume'] = self.music_slider.value
+        save_settings(game_settings)
+
+    def _debug_stats_label(self):
+        return f"Debug Stats: {'On' if game_settings['show_debug_stats'] else 'Off'}"
+
+    def _hints_label(self):
+        return f"Hints: {'On' if game_settings['show_hints'] else 'Off'}"
+
+    def toggle_debug_stats(self):
+        game_settings['show_debug_stats'] = not game_settings['show_debug_stats']
+        self.debug_stats_button.text = self._debug_stats_label()
+        _apply_debug_stats_setting(game_settings['show_debug_stats'])
+        save_settings(game_settings)
+
+    def toggle_hints(self):
+        game_settings['show_hints'] = not game_settings['show_hints']
+        self.hints_button.text = self._hints_label()
+        if game.hud and game.hud.hint_text:
+            game.hud.hint_text.visible = game_settings['show_hints']
         save_settings(game_settings)
 
     def close(self):
@@ -771,7 +853,7 @@ if __name__ == '__main__':
     camera.clip_plane_near = 0.01
     window.title = "Ivan's 3D Engine"
     window.exit_button.visible = False
-    window.fps_counter.enabled = True
+    _apply_debug_stats_setting(game_settings['show_debug_stats'])
     window.fps_limit = 60
     mouse.visible = True
 

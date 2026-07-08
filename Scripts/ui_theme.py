@@ -62,3 +62,12 @@ HUD_MARGIN        = 0.04   # inset from screen edge for corner-anchored HUD elem
 # (3:1), matching BUTTON_SCALE's 0.3:0.1 ratio so it stretches without distortion.
 BUTTON_TEXTURE      = 'ui/Blue/Default/button_rectangle_depth_gradient'
 BUTTON_CLICK_SOUND  = 'ui/click_001'
+
+# HUD readout backdrop (ammo counter) — Half-Life 2 style: a translucent black
+# panel behind the number instead of bare text floating on the world. Reuses
+# the theme-agnostic outlined frame from Extra/ rather than a colored button,
+# then tints it black + low alpha (the source PNG is opaque white, so color=
+# fully repaints it — see button_rectangle_line.png's white fill/transparent
+# corners). Same 192x64 (3:1) source as BUTTON_TEXTURE.
+HUD_PANEL_TEXTURE = 'ui/Extra/Default/button_rectangle_line'
+HUD_PANEL_COLOR   = color.rgba(0, 0, 0, 140/255)

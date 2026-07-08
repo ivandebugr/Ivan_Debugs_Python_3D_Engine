@@ -16,6 +16,8 @@ DEFAULTS = {
     'resolution_index': 0,
     'sfx_volume': 1.0,
     'music_volume': 1.0,
+    'show_debug_stats': True,
+    'show_hints': True,
 }
 
 
