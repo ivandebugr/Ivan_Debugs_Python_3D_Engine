@@ -6,11 +6,20 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import Layers, collision_manager, swept_move_blocked
 from Scripts.game import game, Game
 from Scripts.ground_shadow import GroundShadow
+from Scripts.game_settings import game_settings
 
 # 5 swept-ray heights: feet → knee → waist → shoulder → forehead (entity.y-0.4 to entity.y+1.9)
 # True only for debugging swept collision — creates 200 eternal entities, never enable in production
 SWEPT_OFFSETS = (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
                  Vec3(0, 1.5, 0), Vec3(0, 1.9, 0))
+
+# Headbob tuning: sinusoidal camera offset while grounded + moving, scaled to
+# actual movement speed (not just "is a key held") so bumping into a wall stops
+# the bob instead of playing it at full speed with zero displacement.
+BOB_FREQUENCY   = 9.0
+BOB_HEIGHT      = 0.035
+BOB_SIDE        = 0.015   # horizontal component is half-frequency (figure-8 gait)
+BOB_EASE_SPEED  = 8       # how fast the offset eases toward target/zero each frame
 
 
 class Player(FirstPersonController):
@@ -28,6 +37,10 @@ class Player(FirstPersonController):
         self.speed = 8
         self.vertical_speed = 0
         self.mouse_sensitivity = Vec2(4000, 4000)
+
+        self._bob_time      = 0
+        self._bob_offset    = Vec2(0, 0)   # current eased (y, x) camera bob offset
+        self._move_fraction = 0            # 0..1 of self.speed, set by handle_horizontal_movement
 
         # center=(0,0.75,0) keeps feet at entity.y-0.5 and raises top to entity.y+2.0
         self.collider = BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))
@@ -138,6 +151,7 @@ class Player(FirstPersonController):
             self.y -= penetration
 
         self.handle_horizontal_movement()
+        self.update_camera_bob()
 
         self.shadow.update()
 
@@ -204,18 +218,40 @@ class Player(FirstPersonController):
         raw = Vec3(self.forward * (held_keys['w'] - held_keys['s']) +
                    self.right * (held_keys['d'] - held_keys['a']))
         if not raw.length_squared():
+            self._move_fraction = 0
             return
         d = raw.normalized()
         move = d * self.speed * time.dt
         if not self._swept_blocked(self.position, d, move.length()):
             self.position += move
+            self._move_fraction = 1
             return
         x = Vec3(move.x, 0, 0)
         z = Vec3(0, 0, move.z)
         if x.length() and not self._swept_blocked(self.position, x.normalized(), abs(move.x)):
             self.position += x
+            self._move_fraction = 1
         elif z.length() and not self._swept_blocked(self.position, z.normalized(), abs(move.z)):
             self.position += z
+            self._move_fraction = 1
+        else:
+            self._move_fraction = 0
+
+    def update_camera_bob(self):
+        """Sinusoidal camera offset while grounded + moving, eased toward zero
+        (never snapped) so toggling mid-stride or hitting a wall doesn't pop the
+        camera — same reset discipline as weapon sway.
+        """
+        target = Vec2(0, 0)
+        if game_settings['camera_bob_enabled'] and self.grounded and self._move_fraction:
+            self._bob_time += time.dt * BOB_FREQUENCY
+            target = Vec2(
+                math.sin(self._bob_time * 0.5) * BOB_SIDE,
+                abs(math.sin(self._bob_time)) * BOB_HEIGHT,
+            )
+        self._bob_offset = lerp(self._bob_offset, target, min(time.dt * BOB_EASE_SPEED, 1))
+        camera.x = self._bob_offset.x
+        camera.y = self._bob_offset.y
 
     def on_enable(self):
         # FirstPersonController's built-in pink diamond cursor sits at screen
