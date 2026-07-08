@@ -243,6 +243,32 @@ class GameTestHarness:
              contextlib.redirect_stderr(self._stdout_buf):
             play_button.on_click()
 
+        # The Play button is a ThemedButton (v1.7): on_click plays a press
+        # animation and DEFERS the real start_game() callback by
+        # BUTTON_CLICK_ANIM_DURATION (0.1s) via invoke() (Scripts/ui_theme.py).
+        # So start_game() — which sets game.player and flips state to PLAYING —
+        # does not run synchronously inside on_click(); it fires a few frames
+        # later once that 0.1s timer elapses. The old fixed `step(3)` in the
+        # scenarios wasn't enough wall-clock to cross 0.1s, so game.player was
+        # still None when gameover_then_r dereferenced it (win_then_r only
+        # passed by accident: with no game ever started, the enemy count is 0
+        # and the win condition fired immediately). Step here until the game
+        # actually reaches PLAYING — waiting on the real state, not a magic
+        # frame count, so this stays correct if the animation duration is tuned.
+        from Scripts.game import game, Game
+        with contextlib.redirect_stdout(self._stdout_buf), \
+             contextlib.redirect_stderr(self._stdout_buf):
+            for _ in range(120):   # generous cap (~2s of frames); real transition takes <10
+                if game.state == Game.PLAYING and game.player is not None:
+                    break
+                self.app.step()
+        if game.state != Game.PLAYING or game.player is None:
+            raise RuntimeError(
+                "game did not reach PLAYING after clicking Play — the deferred "
+                "ThemedButton callback (start_game) never fired (ui_theme.py "
+                "BUTTON_CLICK_ANIM_DURATION / main.py start_game wiring)"
+            )
+
     # ------------------------------------------------------------------
     # Drive input / frames
     # ------------------------------------------------------------------
