@@ -18,7 +18,7 @@ from Scripts.asset_resolve import (
 )
 from Scripts.session_logger import get_game_logger
 from Scripts.game_settings import (
-    RESOLUTIONS, load_settings, save_settings, apply_audio_settings,
+    RESOLUTIONS, game_settings, save_settings, apply_audio_settings,
 )
 from Scripts.ui_theme import (
     BG_OVERLAY, TEXT_PRIMARY, TEXT_SECONDARY,
@@ -39,11 +39,10 @@ import pyglet
 # sessions trace it.
 logger = get_game_logger()
 
-# Loaded once at import time; SettingsMenu mutates this dict in place and
+# game_settings is the shared singleton dict from Scripts/game_settings.py (loaded
+# once at that module's import time). SettingsMenu mutates it in place and
 # persists it via save_settings() so game.py/main_menu() and any future
 # screen all see the same in-memory values without re-reading the file.
-game_settings = load_settings()
-
 
 def _is_live(entity) -> bool:
     """True if `entity`'s NodePath is still attached (not already destroyed).
@@ -728,9 +727,23 @@ class SettingsMenu(Entity):
         )
         self.hints_button.on_click = self.toggle_hints
 
+        self.weapon_sway_button = _themed_button(
+            text=self._weapon_sway_label(),
+            text_color=TEXT_PRIMARY,
+            scale=BUTTON_SCALE, y=-0.28, parent=self,
+        )
+        self.weapon_sway_button.on_click = self.toggle_weapon_sway
+
+        self.camera_bob_button = _themed_button(
+            text=self._camera_bob_label(),
+            text_color=TEXT_PRIMARY,
+            scale=BUTTON_SCALE, y=-0.38, parent=self,
+        )
+        self.camera_bob_button.on_click = self.toggle_camera_bob
+
         self.back_button = _themed_button(
             text='Back', text_color=TEXT_PRIMARY,
-            scale=BUTTON_SCALE, y=-0.28, parent=self,
+            scale=BUTTON_SCALE, y=-0.48, parent=self,
         )
         self.back_button.on_click = self.close
 
@@ -768,6 +781,22 @@ class SettingsMenu(Entity):
         self.hints_button.text = self._hints_label()
         if game.hud and game.hud.hint_text:
             game.hud.hint_text.visible = game_settings['show_hints']
+        save_settings(game_settings)
+
+    def _weapon_sway_label(self):
+        return f"Weapon Sway: {'On' if game_settings['weapon_sway_enabled'] else 'Off'}"
+
+    def _camera_bob_label(self):
+        return f"Camera Bob: {'On' if game_settings['camera_bob_enabled'] else 'Off'}"
+
+    def toggle_weapon_sway(self):
+        game_settings['weapon_sway_enabled'] = not game_settings['weapon_sway_enabled']
+        self.weapon_sway_button.text = self._weapon_sway_label()
+        save_settings(game_settings)
+
+    def toggle_camera_bob(self):
+        game_settings['camera_bob_enabled'] = not game_settings['camera_bob_enabled']
+        self.camera_bob_button.text = self._camera_bob_label()
         save_settings(game_settings)
 
     def close(self):
