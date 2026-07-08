@@ -12,15 +12,19 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.level_io import load_level_data
-from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_texture as _resolve_texture
+from Scripts.asset_resolve import (
+    resolve_model as _resolve_model, resolve_texture as _resolve_texture,
+    resolve_sound as _resolve_sound,
+)
 from Scripts.session_logger import get_game_logger
 from Scripts.game_settings import (
     RESOLUTIONS, load_settings, save_settings, apply_audio_settings,
 )
 from Scripts.ui_theme import (
-    BG_PANEL, BG_OVERLAY, TEXT_PRIMARY, TEXT_SECONDARY,
+    BG_OVERLAY, TEXT_PRIMARY, TEXT_SECONDARY,
     HUD_MARGIN, BUTTON_SCALE, BUTTON_GAP, FONT_BOLD,
     ACCENT_WIN, ACCENT_LOSE, CROSSHAIR_COLOR,
+    BUTTON_TEXTURE, BUTTON_CLICK_SOUND,
 )
 import pyglet
 
@@ -73,12 +77,24 @@ def _get_version_string():
 
 
 def _themed_button(**kwargs):
-    """Button() with the shared bold title font applied to its label.
+    """Button() with the shared Kenney texture, click sound and bold title font.
 
     Button has no font= constructor kwarg — its text_entity is built internally,
     so the font must be set on text_entity after construction (Text.font_setter
     rebuilds the glyph geometry on assignment, per ursina/text.py).
+
+    color= is a multiplicative tint over the texture (Entity.color_setter ->
+    setColorScale), so it defaults to white here instead of the old BG_PANEL —
+    tinting the Kenney PNG with a dark panel color would muddy its own shading.
+    Callers that still pass color= (e.g. text_color-only calls) get that tint
+    applied on top of the texture, which is intentional if ever needed.
+    pressed_sound takes a real Audio instance (not a bare string) because
+    Button.input() passes strings straight to Audio(), whose clip_setter globs
+    under Ursina's own asset folders rather than the registry-resolved path.
     """
+    kwargs.setdefault('texture', BUTTON_TEXTURE)
+    kwargs.setdefault('color', color.white)
+    kwargs.setdefault('pressed_sound', Audio(_resolve_sound(BUTTON_CLICK_SOUND), autoplay=False))
     button = Button(**kwargs)
     if button.text_entity:
         button.text_entity.font = FONT_BOLD
@@ -453,10 +469,10 @@ def main_menu():
         color=TEXT_SECONDARY,
     )
 
-    play_button = _themed_button(text='Play', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP * 1.5)
-    editor_button = _themed_button(text='Level Editor', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP * 0.5)
-    settings_button = _themed_button(text='Settings', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP * 0.5)
-    quit_button = _themed_button(text='Quit', color=BG_PANEL, text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP * 1.5)
+    play_button = _themed_button(text='Play', text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP * 1.5)
+    editor_button = _themed_button(text='Level Editor', text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=BUTTON_GAP * 0.5)
+    settings_button = _themed_button(text='Settings', text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP * 0.5)
+    quit_button = _themed_button(text='Quit', text_color=TEXT_PRIMARY, scale=BUTTON_SCALE, y=-BUTTON_GAP * 1.5)
     main_menu_buttons = [play_button, editor_button, settings_button, quit_button]
 
     def launch_level_editor():
@@ -626,7 +642,7 @@ class SettingsMenu(Entity):
         res_w, res_h = RESOLUTIONS[game_settings['resolution_index']]
         self.resolution_button = _themed_button(
             text=f'Resolution: {res_w}x{res_h}',
-            color=BG_PANEL, text_color=TEXT_PRIMARY,
+            text_color=TEXT_PRIMARY,
             scale=BUTTON_SCALE, y=0.15, parent=self,
         )
         self.resolution_button.on_click = self.cycle_resolution
@@ -646,7 +662,7 @@ class SettingsMenu(Entity):
         self.music_slider.on_value_changed = self.on_music_changed
 
         self.back_button = _themed_button(
-            text='Back', color=BG_PANEL, text_color=TEXT_PRIMARY,
+            text='Back', text_color=TEXT_PRIMARY,
             scale=BUTTON_SCALE, y=-0.2, parent=self,
         )
         self.back_button.on_click = self.close
@@ -688,7 +704,6 @@ class PauseMenu(Entity):
 
         self.continue_button = _themed_button(
             text='Continue',
-            color=BG_PANEL,
             text_color=TEXT_PRIMARY,
             scale=BUTTON_SCALE,
             y=BUTTON_GAP,
@@ -696,7 +711,6 @@ class PauseMenu(Entity):
         )
         self.main_menu_button = _themed_button(
             text='Main Menu',
-            color=BG_PANEL,
             text_color=TEXT_PRIMARY,
             scale=BUTTON_SCALE,
             y=0.0,
@@ -704,7 +718,6 @@ class PauseMenu(Entity):
         )
         self.quit_button = _themed_button(
             text='Quit',
-            color=BG_PANEL,
             text_color=TEXT_PRIMARY,
             scale=BUTTON_SCALE,
             y=-BUTTON_GAP,
