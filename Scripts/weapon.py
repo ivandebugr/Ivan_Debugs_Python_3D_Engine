@@ -5,12 +5,20 @@ from Scripts.collision_system import (
     AliveEntity, Layers, can_hit, collision_manager
 )
 from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_sound as _resolve_sound
+from Scripts.game_settings import game_settings
 import time as _time
 import random
 
 
 POOL_SIZE_PLAYER = 30
 POOL_SIZE_ENEMY  = 60
+
+# Weapon sway tuning: mouse-look delta -> local x/y offset, smoothed toward target
+# each frame (exponential ease, not a spring) and clamped so a fast flick can't
+# throw the viewmodel far enough to obscure the crosshair.
+SWAY_MOUSE_SCALE = 0.02
+SWAY_MAX         = 0.03
+SWAY_SMOOTH      = 8
 
 
 # ---------------------------------------------------------------------------
@@ -333,6 +341,23 @@ class Weapon(Entity):
         self.last_shot    = 0
         self.ammo         = self.max_ammo
         self.reloading    = False
+        self._sway_offset = Vec2(0, 0)   # smoothed lag behind mouse-look delta
+
+    def update(self):
+        """Weapon sway: lags a small offset behind mouse-look delta, smoothed each
+        frame, added on top of original_pos/recoil. When the toggle is off the
+        offset eases back to zero instead of snapping, so mid-sway disable doesn't
+        pop the viewmodel.
+        """
+        target = Vec2(0, 0)
+        if game_settings['weapon_sway_enabled'] and mouse.locked:
+            target = Vec2(
+                clamp(-mouse.velocity[0] * SWAY_MOUSE_SCALE, -SWAY_MAX, SWAY_MAX),
+                clamp(-mouse.velocity[1] * SWAY_MOUSE_SCALE, -SWAY_MAX, SWAY_MAX),
+            )
+        self._sway_offset = lerp(self._sway_offset, target, min(time.dt * SWAY_SMOOTH, 1))
+        self.x = self.original_pos.x + self._sway_offset.x
+        self.y = self.original_pos.y + self._sway_offset.y
 
     def shoot(self):
         """Base shoot: cooldown/ammo gate + single bullet. Shotgun overrides for spread."""
@@ -381,8 +406,10 @@ class Weapon(Entity):
         self.reloading = False
 
     def _play_shoot_animation(self):
-        self.animate_position(self.original_pos + Vec3(0, 0, -0.2), duration=0.05)
-        self.animate_position(self.original_pos, delay=0.05, duration=0.15, curve=curve.out_quad)
+        # z-only: x/y are owned by update()'s sway offset every frame (animating
+        # them here would fight that per-frame write and jitter the viewmodel).
+        self.animate_z(self.original_pos.z - 0.2, duration=0.05)
+        self.animate_z(self.original_pos.z, delay=0.05, duration=0.15, curve=curve.out_quad)
 
     def _play_shoot_sound(self):
         """One-shot fire-and-forget SFX; auto_destroy=True cleans itself up after playing."""

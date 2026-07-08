@@ -18,6 +18,8 @@ DEFAULTS = {
     'music_volume': 1.0,
     'show_debug_stats': True,
     'show_hints': True,
+    'weapon_sway_enabled': True,
+    'camera_bob_enabled': True,
 }
 
 
@@ -41,6 +43,13 @@ def save_settings(settings):
             json.dump(settings, f, indent=4)
     except Exception:
         pass
+
+
+# Shared singleton so gameplay modules (weapon.py, player_controller.py) can read
+# live toggle state without importing main.py (which imports them — would be
+# circular). main.py's SettingsMenu mutates this same dict in place and calls
+# save_settings() on every change, so all modules see updates immediately.
+game_settings = load_settings()
 
 
 def apply_audio_settings(settings):
