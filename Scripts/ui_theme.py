@@ -5,7 +5,9 @@ HealthBar (health_bar.py). All colours are 0-1 floats per the Ursina 8.3.0
 color.rgb() footgun (CLAUDE.md Compatibility section) — never 0-255 ints here.
 """
 
-from ursina import color
+from ursina import color, curve
+from ursina.prefabs.button import Button
+from ursina.scripts.property_generator import generate_properties_for_class
 
 # Bold weight for titles/buttons only — Ursina's bundled OpenSans-Regular.ttf
 # has no bold variant, which flattens visual hierarchy against hint/body text.
@@ -71,3 +73,37 @@ BUTTON_CLICK_SOUND  = 'ui/click_001'
 # corners). Same 192x64 (3:1) source as BUTTON_TEXTURE.
 HUD_PANEL_TEXTURE = 'ui/Extra/Default/button_rectangle_line'
 HUD_PANEL_COLOR   = color.rgba(0, 0, 0, 140/255)
+
+# Click-scale animation duration/dip, shared so every Kenney-themed screen feels
+# the same. Kept short so it reads as tactile feedback, not a delay before the
+# real on_click callback (fired immediately, in parallel with the animation).
+BUTTON_CLICK_ANIM_DURATION = 0.1
+BUTTON_CLICK_ANIM_SCALE    = 0.9
+
+
+@generate_properties_for_class()
+class ThemedButton(Button):
+    """Button that plays a quick scale-down-then-back on click.
+
+    on_click is overridden (not wrapped at each call site) so every screen —
+    main menu, settings, intro, pause, end — gets the animation for free just
+    by using _themed_button(). The animation runs via animate_scale and never
+    delays the real callback, which is invoked synchronously first.
+    """
+
+    def on_click_setter(self, value):
+        super().on_click_setter(value)
+        self._themed_callback = value
+
+    def on_click_getter(self):
+        return self._play_click_anim
+
+    def _play_click_anim(self):
+        callback = getattr(self, '_themed_callback', None)
+        if callback:
+            callback()
+        self.animate_scale(
+            self.scale * BUTTON_CLICK_ANIM_SCALE,
+            duration=BUTTON_CLICK_ANIM_DURATION,
+            curve=curve.out_expo_boomerang,
+        )

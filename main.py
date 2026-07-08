@@ -26,6 +26,7 @@ from Scripts.ui_theme import (
     ACCENT_WIN, ACCENT_LOSE, CROSSHAIR_COLOR,
     BUTTON_TEXTURE, BUTTON_CLICK_SOUND,
     HUD_PANEL_TEXTURE, HUD_PANEL_COLOR,
+    ThemedButton,
 )
 import pyglet
 
@@ -87,7 +88,8 @@ def _apply_debug_stats_setting(enabled: bool):
 
 
 def _themed_button(**kwargs):
-    """Button() with the shared Kenney texture, click sound and bold title font.
+    """ThemedButton() with the shared Kenney texture, click sound, bold title
+    font, and click-scale animation.
 
     Button has no font= constructor kwarg — its text_entity is built internally,
     so the font must be set on text_entity after construction (Text.font_setter
@@ -105,7 +107,7 @@ def _themed_button(**kwargs):
     kwargs.setdefault('texture', BUTTON_TEXTURE)
     kwargs.setdefault('color', color.white)
     kwargs.setdefault('pressed_sound', Audio(_resolve_sound(BUTTON_CLICK_SOUND), autoplay=False))
-    button = Button(**kwargs)
+    button = ThemedButton(**kwargs)
     if button.text_entity:
         button.text_entity.font = FONT_BOLD
     return button
@@ -132,12 +134,14 @@ class PlayerHUD:
             scale=(0.02, 0.02),
             z=-1,
         )
-        # The viewmodel's second display region (weapon.py's dual-camera gun
-        # rendering, sort 15) leaves the depth buffer populated with no clear
-        # between it and the UI region (sort 20, depth-test ON by default in
-        # Ursina's Camera._set_up) — without this the crosshair silently loses
-        # the depth test and never renders. Same fix as the editor gizmo handles
-        # (editor_gizmo.py): depth test/write off + fixed bin so it always wins.
+        # The UI region (sort 20) inherits depth-test ON by default (Ursina's
+        # Camera._set_up) and there is no depth clear between it and the earlier
+        # passes, so without forcing depth-test off the crosshair silently loses
+        # the depth test against leftover depth and never renders. This is robust
+        # regardless of what earlier regions do to the depth buffer (weapon.py's
+        # VM region at sort 15 now clears depth for its own pass — that does not
+        # affect this crosshair, which ignores depth entirely). Same fix as the
+        # editor gizmo handles (editor_gizmo.py): depth test/write off + fixed bin.
         self.crosshair.setDepthTest(False)
         self.crosshair.setDepthWrite(False)
         self.crosshair.setBin('fixed', 100)
