@@ -60,6 +60,7 @@ class Enemy(AliveEntity):
             parent=self,
             model=_resolve_model(ENEMY_VISUAL_MODEL),
             position=ENEMY_VISUAL_POSITION,
+            rotation_y=180,   # enemy-flying.glb's forward axis is reversed vs. the collider's — relative offset, stays correct as the parent turns
             scale=ENEMY_VISUAL_SCALE,
         )
 
