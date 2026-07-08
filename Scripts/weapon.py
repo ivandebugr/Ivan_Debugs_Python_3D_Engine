@@ -199,11 +199,12 @@ _enemy_bullet_pool  = BulletPool(EnemyBullet,  size=POOL_SIZE_ENEMY)
 # the wall, so the wall is drawn over it.
 #
 # The fix is the standard Unity/Unreal approach: render the gun with a SECOND
-# camera in its own later pass, with depth-test/write off on the gun itself, so
-# the viewmodel composites on top of the world regardless of world depth.
-# (Clearing the depth/colour buffer for that pass was the first approach tried —
-# it blanked the whole world underneath on macOS GL 2.1, so clear-depth stays OFF;
-# see _setup_viewmodel_camera().)
+# camera in its own later pass that clears ONLY the depth buffer, with depth-test
+# ON on the gun, so the viewmodel composites on top of the world regardless of
+# world depth AND the gun's own geometry sorts correctly against itself.
+# (Clearing *colour* for that pass was an early misstep — it blanked the whole
+# world underneath on macOS GL 2.1. Depth-only clear is safe: the world colour is
+# already in the shared framebuffer and untouched. See _setup_viewmodel_camera().)
 #
 # Mechanism (Panda3D camera bitmasks + a dedicated display region):
 #   - VIEWMODEL_MASK is a single dedicated draw bit.
@@ -213,8 +214,9 @@ _enemy_bullet_pool  = BulletPool(EnemyBullet,  size=POOL_SIZE_ENEMY)
 #     sees it.
 #   - The viewmodel camera shares the main camera's transform (parented to
 #     base.cam) and draws in a display region sorted after the world (0) but
-#     before the UI (20). Depth-test/write off on the gun (Weapon.__init__) plus
-#     clear-depth OFF on the region is what makes the gun always win.
+#     before the UI (20). The region clears depth first; depth-test/write ON on
+#     the gun (Weapon.__init__) then sorts its own overlapping parts and lands the
+#     whole gun on top of the world (whose depth was wiped for this pass).
 
 VIEWMODEL_MASK = BitMask32.bit(7)   # dedicated draw bit for viewmodel geometry
 
@@ -249,12 +251,17 @@ def _setup_viewmodel_camera():
     vm_np.reparent_to(base.cam)   # share the main camera's world transform exactly
 
     # Dedicated display region, drawn AFTER the world (sort 0) and Ursina's render2d
-    # (sort 10) but BEFORE the UI region (sort 20). Leave clear-depth OFF: the gun
-    # itself runs with depth-test off (set in Weapon.__init__), so because this pass
-    # draws after the whole world pass it always lands on top — and NOT clearing
-    # depth/colour keeps the already-rendered world visible underneath.
+    # (sort 10) but BEFORE the UI region (sort 20). Clear ONLY the depth buffer for
+    # this region (colour clear stays OFF): the gun runs with depth-test ON (set in
+    # Weapon.__init__), so a fresh per-pass depth buffer is what lets the gun's own
+    # overlapping sub-parts sort correctly AND still land on top of the world (whose
+    # colour was already drawn into the shared framebuffer and is NOT touched by a
+    # depth-only clear). The earlier "clearing depth blanks the world" finding was a
+    # misdiagnosis — clearing *colour* is what blanked it; depth-only is safe.
     dr = base.win.make_display_region()
     dr.set_sort(15)
+    dr.set_clear_depth_active(True)   # depth-only — colour clear stays OFF (default)
+    dr.set_clear_depth(1.0)
     dr.set_camera(vm_np)
 
     _viewmodel_camera = vm_np
@@ -312,10 +319,14 @@ class Weapon(Entity):
         _setup_viewmodel_camera()
         self.hide(BitMask32.all_on())   # invisible to the main camera...
         self.show(VIEWMODEL_MASK)       # ...visible only to the viewmodel camera
-        # Depth test/write off: the viewmodel pass runs after the whole world pass,
-        # so an always-pass gun lands on top regardless of how close a wall is.
-        self.setDepthTest(False)
-        self.setDepthWrite(False)
+        # Depth test/write ON: the gun mesh is a single merged Geom (all material
+        # groups in one node), so its overlapping sub-parts can only sort correctly
+        # via the depth buffer — there are no separable child nodes to setBin. The
+        # VM display region clears depth first (see _setup_viewmodel_camera), so the
+        # gun still lands on top of the world (world colour already drawn, world
+        # depth wiped for this pass) regardless of how close a wall is.
+        self.setDepthTest(True)
+        self.setDepthWrite(True)
         self.shader = unlit_shader  # vertex colors from MTL; no scene lighting on viewmodel
         self.player       = player
         self.original_pos = Vec3(self.position)
@@ -409,7 +420,7 @@ class Shotgun(Weapon):
     reload_time  = 1.5
 
     view_model    = 'Shotgun_1'
-    view_scale    = 0.14
+    view_scale    = 0.21   # 1.5x — v1.7 cosmetic pass, viewmodel read as too small
     view_position = (0.45, -0.4, 0.65)
     view_rotation = (0, 90, 0)
 
@@ -453,7 +464,7 @@ class Rifle(Weapon):
     # Uses the base Weapon.shoot() — single bullet along camera.forward, no spread.
 
     view_model    = 'AssaultRifle_1'
-    view_scale    = 0.18
+    view_scale    = 0.27   # 1.5x — v1.7 cosmetic pass, viewmodel read as too small
     view_position = (0.4, -0.4, 0.6)
     view_rotation = (0, 90, 0)
     shoot_sound   = 'blaster_repeater'
