@@ -15,7 +15,10 @@ to this file.
 
 Step 2 scope — ``IdleNode`` and ``AttackNode``. Step 3 added ``ChaseNode``.
 Step 4 added ``PatrolNode``. Step 5 adds ``FleeNode``. Decorators are a later
-step and are not implemented here, not even partially.
+step and are not implemented here, not even partially. v1.7 adds
+``DetectPlayerNode`` — a range + line-of-sight condition gate that fronts the
+combat branch of every preset (see its class docstring); it delegates the LOS
+raycast to ``enemy.can_see_player()``, keeping this layer Ursina-import-free.
 
 Purity contract (same as Layer 1)
 ----------------------------------
@@ -412,3 +415,90 @@ class FleeNode(BehaviourNode):
         direction = (enemy.position - enemy.player.position).normalized()
         enemy.chase_step(direction, dt)
         return Status.RUNNING
+
+
+# Hysteresis margin for DetectPlayerNode (see class docstring). The LOSE radius
+# is `detection_range * DETECT_LOSE_MARGIN`, slightly wider than the ACQUIRE
+# radius (`detection_range`), so the enemy does not flicker detected/undetected
+# when the player strafes exactly along the range boundary — it must move
+# meaningfully further out (or break line of sight) before detection drops.
+# 1.15 (a 15% band) is derived, not guessed: the player moves at speed 8
+# (player_controller) and enemies re-evaluate every frame, so at a 20 FPS floor
+# (dt_max = 0.05s, the same floor PATROL_WAYPOINT_THRESHOLD uses) the player
+# covers at most 8 * 0.05 = 0.4u per frame. For the default detection_range of
+# 100 the band is 15u wide — ~37 worst-case frames of travel to cross it, far
+# more than the 1-frame oscillation window a zero-margin cutoff would leave, so
+# a player jittering on the boundary can never toggle detection frame-to-frame.
+# The band scales with detection_range, so tighter/wider presets stay stable too.
+DETECT_LOSE_MARGIN = 1.15
+
+
+class DetectPlayerNode(BehaviourNode):
+    """Gate the combat branch on the player being both in range AND visible.
+
+    This is a **condition** node: it never moves the enemy and never shoots, and
+    it returns only ``SUCCESS`` (player detected) or ``FAILURE`` (not detected) —
+    never ``RUNNING``. Prepended to a combat ``Sequence`` (``Sequence([Detect,
+    Chase, Attack])``), a ``FAILURE`` here aborts the Sequence at child 0 so the
+    parent ``Selector`` falls through to the preset's non-combat branch (Patrol
+    or Idle). Because it never returns ``RUNNING``, it preserves the stateless
+    restart-from-child-0 convention (``behaviour_tree.py``): every tick the gate
+    is re-checked from scratch before any chasing or shooting happens.
+
+    Two-part check, spec v1 (no field-of-view cone, no last-known-position
+    memory — both are deliberately out of scope, easy future additions):
+
+    - **Range** — ``(enemy.position - enemy.player.position).length()``, the
+      SAME true-length convention ``ChaseNode`` / ``AttackNode`` / ``FleeNode``
+      use, so the whole tree agrees on how distance is measured.
+    - **Line of sight** — delegated to ``enemy.can_see_player()`` (a bool). The
+      raycast itself is Ursina-land and cannot live in this pure layer, so — the
+      same reason ``ChaseNode`` delegates movement to ``enemy.chase_step`` — the
+      LOS query is delegated to the enemy. This file imports no ``raycast`` /
+      Ursina; ``can_see_player`` is duck-typed (``Enemy.can_see_player`` wraps
+      the existing ``_is_occluded`` raycast — walls block, the player does not).
+
+    Hysteresis (per-instance state — safe under the one-tree-per-enemy ownership
+    contract, ``behaviour_tree.py``): a single ``detection_range`` cutoff would
+    flicker detected/undetected when the player sits on the boundary. Instead
+    two radii are used, tracked by ``self._detected``:
+
+    - not currently detected → flip to detected only when
+      ``distance <= detection_range`` AND ``can_see_player()``.
+    - currently detected → stay detected while
+      ``distance <= detection_range * DETECT_LOSE_MARGIN`` AND
+      ``can_see_player()``; drop to undetected otherwise.
+
+    Line of sight has NO hysteresis — a wall breaking LOS drops detection
+    immediately (instant lose-track, per spec). The margin only widens the
+    *range* boundary, which is the only axis a boundary-hugging player can
+    jitter across frame-to-frame. Losing LOS or leaving the widened range both
+    reset ``self._detected`` to ``False`` the same tick.
+
+    Per-instance state — ``self._detected`` lives on ``self``, private to one
+    enemy's tree. No cross-frame movement state, no cursor; the only thing
+    carried between ticks is which of the two radii applies this frame.
+    """
+
+    def __init__(self, detection_range: float, lose_margin: float = DETECT_LOSE_MARGIN):
+        self.detection_range = detection_range
+        self.lose_margin = lose_margin
+        self._detected = False
+
+    def tick(self, enemy: object, dt: float) -> Status:
+        # LOS first: no line of sight means undetected immediately, regardless
+        # of range or prior state (instant lose-track when a wall intervenes).
+        if not enemy.can_see_player():
+            self._detected = False
+            return Status.FAILURE
+
+        distance = (enemy.position - enemy.player.position).length()
+        # Widen the keep-radius only while already detected (hysteresis).
+        cutoff = (self.detection_range * self.lose_margin
+                  if self._detected else self.detection_range)
+        if distance <= cutoff:
+            self._detected = True
+            return Status.SUCCESS
+
+        self._detected = False
+        return Status.FAILURE

@@ -28,6 +28,7 @@ from Scripts.behaviour_tree import Cooldown, Selector, Sequence, Status
 from Scripts.behaviour_nodes import (
     AttackNode,
     ChaseNode,
+    DetectPlayerNode,
     FleeNode,
     IdleNode,
     PatrolNode,
@@ -84,16 +85,23 @@ class MockEnemy:
     gameplay correctness (that's the smoke test).
     """
 
-    def __init__(self, position, player=None, health=100):
+    def __init__(self, position, player=None, health=100, sees_player=True):
         self.position = position
         self.player = player
         self.health = health
         self.shoot_count = 0
         self.chase_calls = []
         self.patrol_calls = []
+        # DetectPlayerNode delegates LOS to can_see_player(); defaults True so
+        # existing preset tests (which assume the player is visible) are
+        # unaffected. Detection tests flip it to False to simulate a wall.
+        self.sees_player = sees_player
 
     def shoot(self):
         self.shoot_count += 1
+
+    def can_see_player(self):
+        return self.sees_player
 
     def chase_step(self, direction, dt):
         self.chase_calls.append((direction, dt))
@@ -135,9 +143,11 @@ class TestFactoryPresets(unittest.TestCase):
                          ["Sequence", "IdleNode"])
         seq = tree.children[0]
         self.assertEqual([type(c).__name__ for c in seq.children],
-                         ["ChaseNode", "AttackNode"])
+                         ["DetectPlayerNode", "ChaseNode", "AttackNode"])
         # Pinned to enemy.py tuned constants (100 / 30 / 1.0 today).
-        chase, attack = seq.children
+        detect, chase, attack = seq.children
+        self.assertEqual(detect.detection_range, 100,
+                         "gate range must equal ChaseNode's detection_range")
         self.assertEqual(chase.detection_range, 100)
         self.assertEqual(chase.stop_range, 30)           # stop_range == attack_range
         self.assertEqual(attack.attack_range, 30)
@@ -159,7 +169,9 @@ class TestFactoryPresets(unittest.TestCase):
         # Shape: Selector([Sequence([Chase60, Attack25/0.8]), Patrol, Idle]).
         self.assertEqual([type(c).__name__ for c in tree.children],
                          ["Sequence", "PatrolNode", "IdleNode"])
-        chase, attack = tree.children[0].children
+        detect, chase, attack = tree.children[0].children
+        self.assertIsInstance(detect, DetectPlayerNode)
+        self.assertEqual(detect.detection_range, 60)     # gate matches ChaseNode
         self.assertEqual(chase.detection_range, 60)      # doc literal, less aggressive
         self.assertEqual(chase.stop_range, 25)
         self.assertEqual(attack.attack_range, 25)
@@ -215,8 +227,16 @@ class TestFactoryPresets(unittest.TestCase):
         self.assertEqual(len(flees), 1)
         self.assertEqual(flees[0].flee_threshold_hp, 30)   # preset table values
         self.assertEqual(flees[0].flee_range, 15)
-        # Second Sequence reuses the tuned default chase/attack.
-        chase, attack = tree.children[1].children
+        # Flee branch is intentionally UNGATED — no DetectPlayerNode in it (a
+        # hurt enemy flees in reaction to damage, not to a fresh sighting).
+        self.assertEqual([type(c).__name__ for c in flee_seq.children],
+                         ["FleeNode", "IdleNode"])
+        self.assertEqual(_find(flee_seq, DetectPlayerNode), [],
+                         "flee branch must not carry a detection gate")
+        # Second Sequence reuses the tuned default chase/attack, now gated.
+        detect, chase, attack = tree.children[1].children
+        self.assertIsInstance(detect, DetectPlayerNode)
+        self.assertEqual(detect.detection_range, 100)
         self.assertEqual(chase.detection_range, 100)
         self.assertEqual(attack.attack_range, 30)
         self.assertEqual(attack.cooldown, 1.0)
@@ -244,7 +264,9 @@ class TestFactoryPresets(unittest.TestCase):
         self.assertIsInstance(tree, Selector)
         self.assertEqual([type(c).__name__ for c in tree.children],
                          ["Sequence", "IdleNode"])
-        chase, attack = tree.children[0].children
+        detect, chase, attack = tree.children[0].children
+        self.assertIsInstance(detect, DetectPlayerNode)
+        self.assertEqual(detect.detection_range, 150)    # gate matches ChaseNode
         self.assertEqual(chase.detection_range, 150, "wider than default's 100")
         self.assertEqual(chase.stop_range, 40)
         self.assertEqual(attack.attack_range, 40, "longer reach than default's 30")
@@ -262,6 +284,36 @@ class TestFactoryPresets(unittest.TestCase):
         self.assertIs(default_tree.tick(default_enemy, DT), Status.SUCCESS,
                       "default enemy ignores a player at 120u (out of its 100 range)")
         self.assertEqual(default_enemy.chase_calls, [])
+
+    # ---- item 6: detection gate closes the LOS loophole ---------------------
+
+    def test_default_blocked_los_falls_through_to_idle(self):
+        # In-range but no line of sight (sees_player=False): the gate FAILs, the
+        # combat Sequence aborts, and the Selector falls through to Idle — the
+        # enemy does NOT chase or shoot through a wall (the Gotcha this fixes).
+        tree = BehaviourTreeFactory.build("default", {})
+        blind = MockEnemy(Vec(0, 0, 0), MockPlayer(Vec(10, 0, 0)), sees_player=False)
+        self.assertIs(tree.tick(blind, DT), Status.SUCCESS, "falls through to Idle")
+        self.assertEqual(blind.chase_calls, [], "no chase without LOS")
+        self.assertEqual(blind.shoot_count, 0, "no shot through the wall")
+        # Same enemy WITH line of sight engages normally.
+        seen = MockEnemy(Vec(0, 0, 0), MockPlayer(Vec(10, 0, 0)), sees_player=True)
+        self.assertIs(tree.tick(seen, DT), Status.SUCCESS)
+        self.assertEqual(seen.shoot_count, 1, "engages once the player is visible")
+
+    def test_patrol_then_attack_blocked_los_patrols_instead_of_chasing(self):
+        # In chase range but no LOS -> combat gate FAILs -> Selector falls
+        # through to the (ungated) PatrolNode branch: the enemy patrols rather
+        # than chasing through the wall. This is the exact Gotcha:272 scenario.
+        config = {"waypoints": [[3, 1, 0], [7, 1, -4]]}
+        tree = BehaviourTreeFactory.build("patrol_then_attack", config,
+                                          waypoint_factory=_vec_waypoint)
+        blind = MockEnemy(Vec(0, 0, 0), MockPlayer(Vec(10, 0, 0)), sees_player=False)
+        result = tree.tick(blind, DT)
+        self.assertIn(result, (Status.RUNNING, Status.SUCCESS))
+        self.assertEqual(blind.chase_calls, [], "no chase without LOS")
+        self.assertEqual(blind.shoot_count, 0, "no shot without LOS")
+        self.assertEqual(len(blind.patrol_calls), 1, "patrols instead")
 
 
 class FakeClock:
@@ -299,7 +351,9 @@ class TestCautiousPreset(unittest.TestCase):
         # Shape: Selector([Sequence([Chase, Cooldown(Attack)]), Idle]).
         self.assertEqual([type(c).__name__ for c in tree.children],
                          ["Sequence", "IdleNode"])
-        chase, cooldown = tree.children[0].children
+        detect, chase, cooldown = tree.children[0].children
+        self.assertIsInstance(detect, DetectPlayerNode)
+        self.assertEqual(detect.detection_range, 100)    # gate matches ChaseNode
         self.assertIsInstance(chase, ChaseNode)
         self.assertIsInstance(cooldown, Cooldown)
         self.assertIsInstance(cooldown.child, AttackNode)
@@ -367,7 +421,8 @@ class TestUnknownPreset(unittest.TestCase):
         self.assertIsInstance(tree, Selector)
         self.assertEqual([type(c).__name__ for c in tree.children],
                          ["Sequence", "IdleNode"])
-        chase, attack = tree.children[0].children
+        detect, chase, attack = tree.children[0].children
+        self.assertIsInstance(detect, DetectPlayerNode)
         self.assertEqual((chase.detection_range, chase.stop_range), (100, 30))
         self.assertEqual((attack.attack_range, attack.cooldown), (30, 1.0))
         self.assertEqual(_find(tree, PatrolNode), [], "default has no patrol")
@@ -432,8 +487,9 @@ class TestEnemyConstructorIntegration(unittest.TestCase):
                              ["Sequence", "IdleNode"])
             seq = enemy._tree.children[0]
             self.assertEqual([type(c).__name__ for c in seq.children],
-                             ["ChaseNode", "AttackNode"])
-            chase, attack = seq.children
+                             ["DetectPlayerNode", "ChaseNode", "AttackNode"])
+            detect, chase, attack = seq.children
+            self.assertEqual(detect.detection_range, 100)
             self.assertEqual((chase.detection_range, chase.stop_range), (100, 30))
             self.assertEqual((attack.attack_range, attack.cooldown), (30, 1.0))
         finally:

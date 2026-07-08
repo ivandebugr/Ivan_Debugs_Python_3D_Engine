@@ -21,7 +21,14 @@ import math
 import unittest
 
 import Scripts.behaviour_nodes as bn
-from Scripts.behaviour_nodes import AttackNode, ChaseNode, FleeNode, IdleNode, PatrolNode
+from Scripts.behaviour_nodes import (
+    AttackNode,
+    ChaseNode,
+    DetectPlayerNode,
+    FleeNode,
+    IdleNode,
+    PatrolNode,
+)
 from Scripts.behaviour_tree import Status
 
 
@@ -96,7 +103,7 @@ class MockEnemy:
     """
 
     def __init__(self, position, player=None, move_on_patrol_step=False,
-                 health=100, move_on_chase_step=False):
+                 health=100, move_on_chase_step=False, sees_player=True):
         self.position = position
         self.player = player
         self.shoot_count = 0
@@ -105,9 +112,18 @@ class MockEnemy:
         self.move_on_patrol_step = move_on_patrol_step
         self.health = health
         self.move_on_chase_step = move_on_chase_step
+        # DetectPlayerNode delegates its line-of-sight raycast to
+        # can_see_player() (the real Enemy.can_see_player wraps _is_occluded).
+        # Defaults True so every pre-existing chase/attack/flee test — which
+        # assumes the player is always visible — is unaffected. Detection tests
+        # flip it to False to simulate a wall breaking LOS.
+        self.sees_player = sees_player
 
     def shoot(self):
         self.shoot_count += 1
+
+    def can_see_player(self):
+        return self.sees_player
 
     def chase_step(self, direction, dt):
         self.chase_calls.append((direction, dt))
@@ -619,6 +635,145 @@ class TestFleeNode(unittest.TestCase):
         node.tick(enemy, DT)
         self.assertEqual(len(enemy.chase_calls[0]), 2,
                          "chase_step call signature is (direction, dt) only — no speed arg")
+
+
+class TestDetectPlayerNode(unittest.TestCase):
+    """DetectPlayerNode (v1.7): condition gate — SUCCESS when the player is in
+    range AND visible, FAILURE otherwise. Never RUNNING, never moves/shoots.
+    Range boundary has hysteresis; LOS does not."""
+
+    def test_in_range_and_visible_succeeds(self):
+        enemy, _ = make_pair(distance=50)              # 50 <= detection 100
+        enemy.sees_player = True
+        node = DetectPlayerNode(detection_range=100)
+        self.assertIs(node.tick(enemy, DT), Status.SUCCESS)
+
+    def test_in_range_but_blocked_fails(self):
+        # In range, but a wall breaks LOS -> FAILURE (no hysteresis on LOS).
+        enemy, _ = make_pair(distance=50)
+        enemy.sees_player = False
+        node = DetectPlayerNode(detection_range=100)
+        self.assertIs(node.tick(enemy, DT), Status.FAILURE)
+
+    def test_out_of_range_fails_even_if_visible(self):
+        enemy, _ = make_pair(distance=150)             # 150 > detection 100
+        enemy.sees_player = True
+        node = DetectPlayerNode(detection_range=100)
+        self.assertIs(node.tick(enemy, DT), Status.FAILURE)
+
+    def test_never_moves_or_shoots(self):
+        # Condition node: must not touch chase_step/patrol_step/shoot in any state.
+        for dist, sees in ((50, True), (50, False), (150, True)):
+            enemy, _ = make_pair(distance=dist)
+            enemy.sees_player = sees
+            DetectPlayerNode(detection_range=100).tick(enemy, DT)
+            self.assertEqual(enemy.chase_calls, [])
+            self.assertEqual(enemy.patrol_calls, [])
+            self.assertEqual(enemy.shoot_count, 0)
+
+    def test_never_returns_running(self):
+        # Whatever the state, the gate resolves immediately (SUCCESS/FAILURE) so
+        # the parent Sequence never short-circuits mid-frame at the gate — this
+        # is what preserves the stateless restart-from-child-0 convention.
+        for dist, sees in ((10, True), (99, True), (101, True), (50, False)):
+            enemy, _ = make_pair(distance=dist)
+            enemy.sees_player = sees
+            result = DetectPlayerNode(detection_range=100).tick(enemy, DT)
+            self.assertIn(result, (Status.SUCCESS, Status.FAILURE))
+            self.assertIsNot(result, Status.RUNNING)
+
+    def test_boundary_distance_equal_to_range_is_in_range(self):
+        # distance == detection_range counts as detected (`<=` cutoff), matching
+        # ChaseNode/AttackNode's inclusive boundary convention.
+        enemy, _ = make_pair(distance=100)
+        enemy.sees_player = True
+        self.assertIs(DetectPlayerNode(detection_range=100).tick(enemy, DT),
+                      Status.SUCCESS)
+
+    def test_hysteresis_keeps_detection_in_the_margin_band(self):
+        # Once detected, the enemy stays detected out to detection_range *
+        # lose_margin, then drops beyond it — no flicker on the acquire boundary.
+        node = DetectPlayerNode(detection_range=100, lose_margin=1.15)
+
+        # Acquire at 90 (<= 100).
+        enemy, player = make_pair(distance=90)
+        enemy.sees_player = True
+        self.assertIs(node.tick(enemy, DT), Status.SUCCESS)
+        self.assertTrue(node._detected)
+
+        # Drift to 110: outside the ACQUIRE radius (100) but inside the widened
+        # KEEP radius (115) -> still detected. A zero-margin gate would drop here.
+        player.position = Vec(110, 0, 0)
+        self.assertIs(node.tick(enemy, DT), Status.SUCCESS,
+                      "must stay detected inside the hysteresis band")
+
+        # Drift to 120: beyond the KEEP radius (115) -> detection drops.
+        player.position = Vec(120, 0, 0)
+        self.assertIs(node.tick(enemy, DT), Status.FAILURE)
+        self.assertFalse(node._detected)
+
+    def test_undetected_uses_narrow_acquire_radius_not_the_widened_one(self):
+        # A fresh (never-detected) node at 110 must NOT acquire, even though 110
+        # is inside the widened keep-radius — the wide radius only applies once
+        # already detected. Proves the hysteresis is directional.
+        enemy, _ = make_pair(distance=110)             # 110 > acquire 100
+        enemy.sees_player = True
+        node = DetectPlayerNode(detection_range=100, lose_margin=1.15)
+        self.assertIs(node.tick(enemy, DT), Status.FAILURE,
+                      "not-yet-detected must use the narrow acquire radius")
+
+    def test_losing_los_drops_detection_immediately_no_hysteresis(self):
+        # Acquire, then break LOS while still well in range -> FAILURE that same
+        # tick (LOS has no hysteresis, unlike range) and _detected resets.
+        node = DetectPlayerNode(detection_range=100)
+        enemy, _ = make_pair(distance=30)
+        enemy.sees_player = True
+        self.assertIs(node.tick(enemy, DT), Status.SUCCESS)
+
+        enemy.sees_player = False                       # wall drops in
+        self.assertIs(node.tick(enemy, DT), Status.FAILURE)
+        self.assertFalse(node._detected)
+
+
+class TestDetectPlayerNodeInSequence(unittest.TestCase):
+    """The gated combat branch — Sequence([Detect, Chase, Attack]) — must abort
+    at the gate (no chase, no shot) when the player is out of range or blocked,
+    and fall through to Idle in the surrounding Selector."""
+
+    def setUp(self):
+        self.clock = FakeClock()
+        self._real_time = bn._time
+        bn._time = self.clock
+
+    def tearDown(self):
+        bn._time = self._real_time
+
+    def _tree(self):
+        from Scripts.behaviour_tree import Selector, Sequence
+        return Selector([
+            Sequence([DetectPlayerNode(detection_range=100),
+                      ChaseNode(detection_range=100, stop_range=30),
+                      AttackNode(attack_range=30, cooldown=1.0)]),
+            IdleNode(),
+        ])
+
+    def test_blocked_los_in_range_falls_through_to_idle(self):
+        # In attack range but no LOS: gate FAILs -> Sequence aborts at child 0
+        # -> no chase, no shot -> Selector falls through to Idle SUCCESS.
+        enemy, _ = make_pair(distance=10)
+        enemy.sees_player = False
+        result = self._tree().tick(enemy, DT)
+        self.assertIs(result, Status.SUCCESS, "falls through to IdleNode")
+        self.assertEqual(enemy.chase_calls, [], "gate blocks chase when no LOS")
+        self.assertEqual(enemy.shoot_count, 0, "gate blocks the shot when no LOS")
+
+    def test_visible_and_close_still_chases_and_shoots(self):
+        # Gate passes -> behaves exactly like the ungated default tree.
+        enemy, _ = make_pair(distance=20)              # within stop_range 30
+        enemy.sees_player = True
+        result = self._tree().tick(enemy, DT)
+        self.assertIs(result, Status.SUCCESS, "Detect->Chase(stop)->Attack fires")
+        self.assertEqual(enemy.shoot_count, 1)
 
 
 if __name__ == "__main__":

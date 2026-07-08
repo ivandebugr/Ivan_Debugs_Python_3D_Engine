@@ -38,11 +38,13 @@ is built from ``ENEMY_DETECTION_RANGE`` / ``ENEMY_ATTACK_RANGE`` /
 ``ENEMY_SHOOT_COOLDOWN`` imported from ``enemy.py`` — NOT hard-coded literals —
 so it always equals whatever the project has tuned those to. Today those are
 100 / 30 / 1.0, which match the doc table's illustrative ``ChaseNode(100)`` /
-``AttackNode(30, 1.0)``; pinning to the constants keeps the regression
-guarantee ("default preset == the interim TODO tree it replaces") true even if
-a future playtest retunes them. The other three presets use the doc's literal
-values, which are *intentionally* different per the spec (patrol enemies less
-aggressive; aggressive enemies wider/faster) — stated inline at each preset.
+``AttackNode(30, 1.0)``; pinning to the constants keeps engagement ranges in
+lockstep with the enemy's tuning even if a future playtest retunes them. (As of
+the v1.7 detection gate the default preset is no longer bit-for-bit the interim
+TODO tree — it additionally requires line of sight — but its ranges/cadence are
+still exactly the tuned constants.) The other three presets use the doc's
+literal values, which are *intentionally* different per the spec (patrol enemies
+less aggressive; aggressive enemies wider/faster) — stated inline at each preset.
 
 ChaseNode's two-arg signature (detection_range, stop_range)
 -----------------------------------------------------------
@@ -57,6 +59,23 @@ enemy stops closing precisely where it can start shooting.
 Unknown preset names degrade gracefully — they log a warning and fall back to
 ``"default"`` rather than raising, per the spec ("Unknown preset name → log
 warning, fall back to default").
+
+Detection gate (v1.7 — range + line of sight)
+----------------------------------------------
+Every preset's chase/attack Sequence is fronted by ``DetectPlayerNode`` so the
+enemy engages only when the player is within range AND has line of sight (no
+wall between them) — closing the "enemies chase/shoot through walls" gap
+(``brain/Gotchas.md``: ChaseNode detection was pure distance). The detector's
+range is pinned to the SAME value that preset's ``ChaseNode`` uses (so detect
+and chase agree on the range), and it returns only SUCCESS/FAILURE — never
+RUNNING — so a lost target aborts the combat Sequence at child 0 and the
+Selector falls through to the preset's own non-combat fallback (Patrol/Idle),
+preserving the stateless restart-from-child-0 convention.
+
+The ``"flee_when_low"`` flee branch is deliberately NOT gated: a low-HP enemy
+flees in reaction to damage already taken, not to a fresh sighting, so it keeps
+fleeing even after it rounds a corner and breaks LOS. Only that preset's
+chase/attack branch carries the gate.
 """
 
 from __future__ import annotations
@@ -64,6 +83,7 @@ from __future__ import annotations
 from Scripts.behaviour_nodes import (
     AttackNode,
     ChaseNode,
+    DetectPlayerNode,
     FleeNode,
     IdleNode,
     PatrolNode,
@@ -142,12 +162,14 @@ class BehaviourTreeFactory:
             The root :class:`BehaviourNode` of a freshly built tree.
         """
         if preset_name == "default":
-            # Pinned to enemy.py's tuned constants (100 / 30 / 1.0 today) so
-            # this preset reproduces the interim TODO tree it replaces exactly.
+            # Pinned to enemy.py's tuned constants (100 / 30 / 1.0 today).
             # ChaseNode's stop_range == attack_range: stop closing where you can
-            # start shooting.
+            # start shooting. DetectPlayerNode(detection_range) fronts the
+            # Sequence (v1.7) so chase/attack only engage a player in range AND
+            # visible — the same detection_range ChaseNode uses.
             return Selector([
                 Sequence([
+                    DetectPlayerNode(ENEMY_DETECTION_RANGE),
                     ChaseNode(ENEMY_DETECTION_RANGE, ENEMY_ATTACK_RANGE),
                     AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
                 ]),
@@ -163,7 +185,7 @@ class BehaviourTreeFactory:
             # then IdleNode if there is no route.
             waypoints = _to_waypoints(config.get("waypoints", []), waypoint_factory)
             children = [
-                Sequence([ChaseNode(60, 25), AttackNode(25, 0.8)]),
+                Sequence([DetectPlayerNode(60), ChaseNode(60, 25), AttackNode(25, 0.8)]),
             ]
             # PatrolNode raises on an empty waypoint list (Step 4 contract), so a
             # config with no waypoints simply has no patrol branch — it degrades
@@ -187,8 +209,14 @@ class BehaviourTreeFactory:
             # The chase/attack branch reuses the tuned default constants so a
             # recovered enemy fights exactly like a "default" one.
             return Selector([
+                # Flee branch is intentionally UNGATED — a hurt enemy flees in
+                # reaction to damage already taken, not to a fresh sighting, so
+                # it keeps fleeing even without current line of sight (module
+                # docstring "Detection gate"). Only the chase/attack branch below
+                # carries DetectPlayerNode.
                 Sequence([FleeNode(30, 15), IdleNode()]),
                 Sequence([
+                    DetectPlayerNode(ENEMY_DETECTION_RANGE),
                     ChaseNode(ENEMY_DETECTION_RANGE, ENEMY_ATTACK_RANGE),
                     AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
                 ]),
@@ -199,7 +227,7 @@ class BehaviourTreeFactory:
             # Intentionally MORE aggressive than default (doc literals
             # 150/40/0.4): wider detection, longer reach, much faster fire rate.
             return Selector([
-                Sequence([ChaseNode(150, 40), AttackNode(40, 0.4)]),
+                Sequence([DetectPlayerNode(150), ChaseNode(150, 40), AttackNode(40, 0.4)]),
                 IdleNode(),
             ])
 
@@ -218,6 +246,7 @@ class BehaviourTreeFactory:
             # unreachable in this preset shape.
             return Selector([
                 Sequence([
+                    DetectPlayerNode(ENEMY_DETECTION_RANGE),
                     ChaseNode(ENEMY_DETECTION_RANGE, ENEMY_ATTACK_RANGE),
                     Cooldown(
                         AttackNode(ENEMY_ATTACK_RANGE, ENEMY_SHOOT_COOLDOWN),
