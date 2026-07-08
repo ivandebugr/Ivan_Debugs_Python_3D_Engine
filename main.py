@@ -853,6 +853,7 @@ if __name__ == '__main__':
     camera.clip_plane_near = 0.01
     window.title = "Ivan's 3D Engine"
     window.exit_button.visible = False
+    window.cog_button.enabled = False  # Ursina's built-in dev-mode gear/editor-UI menu toggle
     _apply_debug_stats_setting(game_settings['show_debug_stats'])
     window.fps_limit = 60
     mouse.visible = True
