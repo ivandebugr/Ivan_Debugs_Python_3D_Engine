@@ -28,7 +28,7 @@ VALID_ENEMY_TYPES = ('default',)  # extend here as new types are added
 # this file depends on is untouched. Kept centered/scaled to roughly fill
 # that collider footprint; source mesh bounds ~1.2w x 0.875h x 0.76d.
 ENEMY_VISUAL_MODEL    = 'enemy-flying'
-ENEMY_VISUAL_SCALE    = 1.3
+ENEMY_VISUAL_SCALE    = 0.9
 # Child position is in the parent's LOCAL (unscaled) space — local Y is
 # multiplied by the collider cube's scale_y=3 to get world offset, and
 # origin_y=-0.5 already makes the cube's own position its feet (verified
@@ -48,7 +48,7 @@ class Enemy(AliveEntity):
         super().__init__(
             model='cube',
             visible_self=False,   # collision proxy only — visible=False would also hide the visual child below
-            scale=(1.5, 3, 1.5),
+            scale=(3, 3, 3),
             position=spawn_position,
             rotation_y=rotation_y,
             collider='box',
@@ -63,6 +63,18 @@ class Enemy(AliveEntity):
             rotation_y=180,   # enemy-flying.glb's forward axis is reversed vs. the collider's — relative offset, stays correct as the parent turns
             scale=ENEMY_VISUAL_SCALE,
         )
+        # panda3d-gltf imports enemy-flying.glb with TransparencyAttrib:dual on its
+        # ModelRoot (the glTF material's alpha handling), which routes the mesh into
+        # the *transparent* render bin — drawn after all opaque geometry and not
+        # depth-sorted against walls, so the drone bleeds through walls it stands near
+        # (verified via A/B screenshot: dual → mesh pokes through, M_none → clean
+        # occlusion). The mesh is opaque, so force it back into the opaque pass to
+        # depth-test normally like every other world entity. Clear on the whole
+        # subtree — the attrib sits on the ModelRoot child, not the Entity node.
+        from panda3d.core import TransparencyAttrib
+        self.visual_model.setTransparency(TransparencyAttrib.M_none)
+        for _child in self.visual_model.getChildren():
+            _child.setTransparency(TransparencyAttrib.M_none)
 
         self.health      = hp
         self.max_health  = hp
