@@ -16,8 +16,8 @@ POOL_SIZE_ENEMY  = 60
 # Weapon sway tuning: mouse-look delta -> local x/y offset, smoothed toward target
 # each frame (exponential ease, not a spring) and clamped so a fast flick can't
 # throw the viewmodel far enough to obscure the crosshair.
-SWAY_MOUSE_SCALE = 0.02
-SWAY_MAX         = 0.03
+SWAY_MOUSE_SCALE = 0.3
+SWAY_MAX         = 0.6
 SWAY_SMOOTH      = 8
 
 
