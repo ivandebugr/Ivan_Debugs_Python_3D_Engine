@@ -496,10 +496,22 @@ class Weapon(Entity):
         # with both sway (x/y position) and recoil (z position) without fighting
         # either — headbob (player_controller.py) only touches camera.x/y
         # position too, so rotation_x is untouched by anything else.
+        # interrupt='finish' on each RETURN tween is load-bearing. animate()
+        # interrupts the property's shared animator slot at *creation* time, not
+        # when the tween starts interpolating — so with the default
+        # interrupt='kill', the return call (created in the same frame as the
+        # punch) kills the punch tween the instant it's created, and its delay=
+        # only postpones when it *starts*, not when it interrupts. Net: the punch
+        # never runs and the property animates rest-to-rest (z_min stays at rest,
+        # rotation_x never reaches the kick). 'finish' instead runs the punch
+        # tween's finish() at creation, snapping the property to the punch/kick
+        # peak (z-0.2 / rotation_x-8) before the return eases it back — so the
+        # punch value is actually reached. See Gotchas: "same-frame animate()
+        # calls on one property self-cancel via shared animator + interrupt='kill'".
         self.animate_z(self.original_pos.z - 0.2, duration=0.05)
-        self.animate_z(self.original_pos.z, delay=0.05, duration=0.15, curve=curve.out_quad)
+        self.animate_z(self.original_pos.z, delay=0.05, duration=0.15, curve=curve.out_quad, interrupt='finish')
         self.animate_rotation_x(self.original_rotation_x - 8, duration=0.04)
-        self.animate_rotation_x(self.original_rotation_x, delay=0.04, duration=0.15, curve=curve.out_quad)
+        self.animate_rotation_x(self.original_rotation_x, delay=0.04, duration=0.15, curve=curve.out_quad, interrupt='finish')
 
     def _play_shoot_sound(self):
         """One-shot fire-and-forget SFX; auto_destroy=True cleans itself up after playing."""
