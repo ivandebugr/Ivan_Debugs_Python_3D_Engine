@@ -4,7 +4,11 @@ from panda3d.core import BitMask32, Camera as PandaCamera, NodePath, Quat
 from Scripts.collision_system import (
     AliveEntity, Layers, can_hit, collision_manager
 )
-from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_sound as _resolve_sound
+from Scripts.asset_resolve import (
+    resolve_model as _resolve_model,
+    resolve_sound as _resolve_sound,
+    resolve_texture as _resolve_texture,
+)
 from Scripts.game_settings import game_settings
 import time as _time
 import random
@@ -12,6 +16,7 @@ import random
 
 POOL_SIZE_PLAYER = 30
 POOL_SIZE_ENEMY  = 60
+POOL_SIZE_MUZZLE_FLASH = 4
 
 # Weapon sway tuning: mouse-look delta -> local x/y offset, smoothed toward target
 # each frame (exponential ease, not a spring) and clamped so a fast flick can't
@@ -190,11 +195,86 @@ class EnemyBullet(AliveEntity):
 
 
 # ---------------------------------------------------------------------------
+# MuzzleFlash — pooled cosmetic quad, no collision (not an AliveEntity)
+# ---------------------------------------------------------------------------
+
+MUZZLE_FLASH_DURATION = 0.06
+
+class MuzzleFlash(Entity):
+    """Small billboard-style quad flashed at the gun's muzzle on each shot.
+
+    Purely cosmetic (no collider, not registered with collision_manager) — never
+    an authority in the raycast damage path. Pooled the same way bullets are:
+    position-parked while inactive rather than enabled-toggled (same unstash()
+    assertion risk described in weapon.py Hard Constraint 6 applies to any
+    pooled entity, not just bullets).
+    """
+
+    _PARK = Vec3(0, -10000, 0)
+
+    def __init__(self):
+        super().__init__(
+            model='quad',
+            texture=_resolve_texture('burst'),
+            scale=0.3,
+            billboard=True,
+            always_on_top=True,
+            position=MuzzleFlash._PARK,
+        )
+        self.setDepthTest(True)
+        self.setDepthWrite(True)
+
+    def play(self, position, scale=0.3):
+        self.position = position
+        self.scale = scale
+        self.alpha = 1
+        self.animate_scale(scale * 1.6, duration=MUZZLE_FLASH_DURATION, curve=curve.linear)
+        self.animate('alpha', 0, duration=MUZZLE_FLASH_DURATION, curve=curve.linear)
+        invoke(self._park, delay=MUZZLE_FLASH_DURATION)
+
+    def _park(self):
+        self.position = MuzzleFlash._PARK
+
+
+class MuzzleFlashPool:
+    """Tiny round-robin pool — flashes are so short-lived a free-list isn't
+    needed; cycling through a fixed set of quads is simpler and sufficient."""
+
+    def __init__(self, size=POOL_SIZE_MUZZLE_FLASH):
+        self._size    = size
+        self._flashes = []   # built lazily on first play(), same as reset() leaves it
+        self._next    = 0
+
+    def play(self, position, scale=0.3):
+        if not self._flashes:
+            self._flashes = [MuzzleFlash() for _ in range(self._size)]
+            self._next = 0
+        # Drain a stale (externally-destroyed) quad the same way BulletPool does —
+        # main_menu()'s entity sweep can destroy parked quads between scenes.
+        if self._flashes[self._next].is_empty():
+            self._flashes[self._next] = MuzzleFlash()
+        flash = self._flashes[self._next]
+        self._next = (self._next + 1) % len(self._flashes)
+        flash.play(position, scale=scale)
+
+    def reset(self):
+        """Discard all pooled quads. Call during scene teardown, before
+        main_menu() sweeps scene.entities — mirrors BulletPool.reset(). The pool
+        rebuilds from scratch lazily on the next play() call."""
+        for flash in self._flashes:
+            if not flash.is_empty():
+                destroy(flash)
+        self._flashes = []
+        self._next = 0
+
+
+# ---------------------------------------------------------------------------
 # Pools — module-level singletons
 # ---------------------------------------------------------------------------
 
 _player_bullet_pool = BulletPool(PlayerBullet, size=POOL_SIZE_PLAYER)
 _enemy_bullet_pool  = BulletPool(EnemyBullet,  size=POOL_SIZE_ENEMY)
+_muzzle_flash_pool  = MuzzleFlashPool(size=POOL_SIZE_MUZZLE_FLASH)
 
 
 # ---------------------------------------------------------------------------
@@ -388,11 +468,13 @@ class Weapon(Entity):
         )
 
     def _consume_shot(self):
-        """Decrement ammo (if finite), play the recoil animation + SFX, stamp last_shot."""
+        """Decrement ammo (if finite), play the recoil animation + SFX + muzzle
+        flash, stamp last_shot."""
         if self.ammo > 0:
             self.ammo -= 1
         self._play_shoot_animation()
         self._play_shoot_sound()
+        _muzzle_flash_pool.play(self.world_position + camera.forward * 0.8)
         self.last_shot = _time.time()
 
     def reload(self):
@@ -611,6 +693,8 @@ def get_enemy_bullet_pool() -> BulletPool:
 
 
 def reset_bullet_pools():
-    """Discard all pooled bullets. Call during scene teardown before main_menu() sweeps entities."""
+    """Discard all pooled bullets and muzzle flashes. Call during scene teardown
+    before main_menu() sweeps entities."""
     _player_bullet_pool.reset()
     _enemy_bullet_pool.reset()
+    _muzzle_flash_pool.reset()
