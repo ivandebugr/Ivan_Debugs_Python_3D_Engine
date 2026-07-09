@@ -338,6 +338,7 @@ class Weapon(Entity):
         self.shader = unlit_shader  # vertex colors from MTL; no scene lighting on viewmodel
         self.player       = player
         self.original_pos = Vec3(self.position)
+        self.original_rotation_x = self.rotation_x
         self.last_shot    = 0
         self.ammo         = self.max_ammo
         self.reloading    = False
@@ -406,10 +407,16 @@ class Weapon(Entity):
         self.reloading = False
 
     def _play_shoot_animation(self):
-        # z-only: x/y are owned by update()'s sway offset every frame (animating
-        # them here would fight that per-frame write and jitter the viewmodel).
+        # z-only position: x/y are owned by update()'s sway offset every frame
+        # (animating them here would fight that per-frame write and jitter the
+        # viewmodel). Kick uses rotation_x instead of position, so it composes
+        # with both sway (x/y position) and recoil (z position) without fighting
+        # either — headbob (player_controller.py) only touches camera.x/y
+        # position too, so rotation_x is untouched by anything else.
         self.animate_z(self.original_pos.z - 0.2, duration=0.05)
         self.animate_z(self.original_pos.z, delay=0.05, duration=0.15, curve=curve.out_quad)
+        self.animate_rotation_x(self.original_rotation_x - 8, duration=0.04)
+        self.animate_rotation_x(self.original_rotation_x, delay=0.04, duration=0.15, curve=curve.out_quad)
 
     def _play_shoot_sound(self):
         """One-shot fire-and-forget SFX; auto_destroy=True cleans itself up after playing."""
