@@ -288,6 +288,32 @@ class GameTestHarness:
             for _ in range(n):
                 self.app.step()
 
+    def real_step(self, n: int = 1, frame_ms: float = 20.0):
+        """step() but with ~real wall-clock between frames.
+
+        A bare step() loop advances Panda3D's clock by whatever real time
+        elapsed between calls — near zero in a tight Python loop. That is fine
+        for most scenarios, but it breaks anything timed against *real* time
+        rather than scaled game time: while the pause menu holds
+        application.time_scale=0, the scaled `time.dt` is 0, so a normal
+        step() loop never elapses a deferred callback. ThemedButton's press
+        callback is invoke(..., ignore_paused=True), which advances on the
+        unscaled real-time clock (time.dt_unscaled) precisely so it still fires
+        under pause — but that clock only moves if real wall-clock actually
+        passes between frames. This busy-waits ~frame_ms per frame to model the
+        ~16ms cadence of interactive play, so pause-window timing behaves here
+        the way it does at the keyboard."""
+        if self.app is None:
+            raise RuntimeError("launch_main()/launch_editor() before real_step()")
+        import time as _wall
+        with contextlib.redirect_stdout(self._stdout_buf), \
+             contextlib.redirect_stderr(self._stdout_buf):
+            for _ in range(n):
+                deadline = _wall.perf_counter() + frame_ms / 1000.0
+                while _wall.perf_counter() < deadline:
+                    pass
+                self.app.step()
+
     # ------------------------------------------------------------------
     # Crash capture
     # ------------------------------------------------------------------
@@ -408,11 +434,95 @@ def scenario_editor_f5_roundtrip() -> Optional[CrashReport]:
     return h.capture_crash("editor_f5_roundtrip")
 
 
+def scenario_pause_stacked_clicks() -> Optional[CrashReport]:
+    """The Issue A crash: pause -> click Continue AND Main Menu in the SAME
+    paused (time_scale=0) window -> advance real frames -> exactly ONE
+    transition, no crash.
+
+    The four standing scenarios all step against scaled game time, so none of
+    them ever exercises a click made while time_scale=0 — which is exactly the
+    window the pause-menu crash lived in. Pre-fix, both buttons' press callbacks
+    (deferred by invoke() on the scaled clock) froze under pause, then fired in a
+    burst once time resumed: Continue's resume immediately followed by Main
+    Menu's teardown against now-stale state -> crash. This scenario reproduces
+    that exact interleaving and holds time_scale=0 across real frames via
+    real_step(), the way interactive play does.
+
+    Post-fix expectation: ThemedButton's callback is invoke(ignore_paused=True)
+    so it fires in real time under pause, and a class-level transition lock makes
+    the second click (Main Menu) a no-op while the first is pending. Net: the game
+    resumes to PLAYING (Continue won), the main menu is NOT also built, and no
+    Panda3D assertion or Python exception is raised."""
+    h = GameTestHarness()
+    h.launch_main()
+    h.step(5)
+    h.start_real_game()
+    h.step(3)
+
+    from Scripts.game import game, Game
+    from ursina import scene, application
+
+    if game.state != Game.PLAYING:
+        return CrashReport(
+            scenario="pause_stacked_clicks",
+            raw_output=f"Exception: game not PLAYING before pause ({game.state})",
+        )
+
+    # Pause exactly like main.py's Escape handler.
+    h.press("escape")
+    h.step(1)
+    if game.state != Game.PAUSED or application.time_scale != 0 or game.pause_menu is None:
+        return CrashReport(
+            scenario="pause_stacked_clicks",
+            raw_output=(f"Exception: pause did not engage "
+                        f"(state={game.state}, time_scale={application.time_scale}, "
+                        f"pause_menu={game.pause_menu})"),
+        )
+
+    def _find(text):
+        return next((e for e in scene.entities
+                     if getattr(e, "text", None) == text
+                     and type(e).__name__ == "ThemedButton"), None)
+
+    cont, main_menu_btn = _find("Continue"), _find("Main Menu")
+    if cont is None or main_menu_btn is None:
+        return CrashReport(
+            scenario="pause_stacked_clicks",
+            raw_output="Exception: pause-menu Continue/Main Menu buttons not found",
+        )
+
+    # Stacked clicks inside the one paused window — the crash interleaving.
+    with contextlib.redirect_stdout(h._stdout_buf), \
+         contextlib.redirect_stderr(h._stdout_buf):
+        cont.on_click()          # Continue.resume_game — should win
+        main_menu_btn.on_click()  # Main Menu — should be locked out
+
+    # Real wall-clock frames so the ignore_paused (real-time) callback elapses.
+    h.real_step(12)
+
+    report = h.capture_crash("pause_stacked_clicks")
+    if report is not None:
+        return report
+
+    # No crash — now assert exactly ONE transition happened.
+    resumed = game.state == Game.PLAYING and application.time_scale == 1
+    menu_also_built = any(getattr(e, "text", None) == "Play" for e in scene.entities)
+    if not resumed or menu_also_built:
+        return CrashReport(
+            scenario="pause_stacked_clicks",
+            raw_output=(f"Exception: expected exactly one transition (resume) but "
+                        f"state={game.state}, time_scale={application.time_scale}, "
+                        f"main_menu_built={menu_also_built}"),
+        )
+    return None
+
+
 SCENARIOS = {
     "load_and_close": scenario_load_and_close,
     "win_then_r": scenario_win_then_r,
     "gameover_then_r": scenario_gameover_then_r,
     "editor_f5_roundtrip": scenario_editor_f5_roundtrip,
+    "pause_stacked_clicks": scenario_pause_stacked_clicks,
 }
 
 

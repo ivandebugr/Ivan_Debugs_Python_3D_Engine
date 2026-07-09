@@ -5,7 +5,7 @@ HealthBar (health_bar.py). All colours are 0-1 floats per the Ursina 8.3.0
 color.rgb() footgun (CLAUDE.md Compatibility section) — never 0-255 ints here.
 """
 
-from ursina import color, curve
+from ursina import color, curve, invoke
 from ursina.prefabs.button import Button
 from ursina.scripts.property_generator import generate_properties_for_class
 
@@ -74,22 +74,49 @@ BUTTON_CLICK_SOUND  = 'ui/click_001'
 HUD_PANEL_TEXTURE = 'ui/Extra/Default/button_rectangle_line'
 HUD_PANEL_COLOR   = color.rgba(0, 0, 0, 140/255)
 
-# Click-scale animation duration/dip, shared so every Kenney-themed screen feels
-# the same. Kept short so it reads as tactile feedback, not a delay before the
-# real on_click callback (fired immediately, in parallel with the animation).
+# Click press-feedback (scale-down + darken), shared so every Kenney-themed screen
+# feels the same. The real on_click callback is delayed by this duration so the
+# press is visible even on buttons whose callback destroys the screen (Play,
+# Continue, Main Menu, Back) — previously those never showed the animation at all
+# because the callback ran first and tore the button down before it could play.
 BUTTON_CLICK_ANIM_DURATION = 0.1
 BUTTON_CLICK_ANIM_SCALE    = 0.9
+BUTTON_CLICK_DARKEN        = -0.2   # color.tint() amount; negative = darker
 
 
 @generate_properties_for_class()
 class ThemedButton(Button):
-    """Button that plays a quick scale-down-then-back on click.
+    """Button that plays a scale-down + darken press effect, then fires on_click.
 
     on_click is overridden (not wrapped at each call site) so every screen —
-    main menu, settings, intro, pause, end — gets the animation for free just
-    by using _themed_button(). The animation runs via animate_scale and never
-    delays the real callback, which is invoked synchronously first.
+    main menu, settings, intro, pause, end — gets the effect for free just by
+    using _themed_button(). The real callback is delayed by BUTTON_CLICK_ANIM_DURATION
+    via invoke() (a self-registering Sequence, independent of this entity) so it
+    still fires even if the animation's own entity is destroyed first by something
+    else — and so every screen gets a visible press before the action, not a
+    simultaneous or after-the-fact flash.
+
+    Pause-safety (v1.7): the pause menu pauses the game with application.time_scale=0,
+    which zeroes the scaled `time.dt` that a plain invoke() Sequence advances on —
+    so the deferred callback would freeze until time resumed, then fire in a burst
+    against torn-down state. The deferred invoke() is therefore ignore_paused=True
+    (which also forces unscaled=True, advancing on real-time time.dt_unscaled), so
+    pause-menu buttons — whose whole job is to act *on* the paused state — fire
+    promptly in real time regardless of time_scale.
+
+    Two guards close the crash window this class previously left open:
+    * `_transition_pending` (class-level): once any button's deferred action is
+      pending, every button's press is ignored until it resolves — so a paused
+      window can't queue two conflicting transitions (e.g. Continue's resume AND
+      Main Menu's teardown) that then both fire at once.
+    * `_pending_seq` (per-instance): the invoke() Sequence is held so on_destroy()
+      can kill() it — otherwise a destroyed button's callback survives free-floating
+      in application.sequences and fires later against stale state.
     """
+
+    # True while any ThemedButton's deferred callback is queued but not yet fired.
+    # Class-level on purpose: the lock spans the whole menu, not one button.
+    _transition_pending = False
 
     def on_click_setter(self, value):
         super().on_click_setter(value)
@@ -99,13 +126,37 @@ class ThemedButton(Button):
         return self._play_click_anim
 
     def _play_click_anim(self):
-        callback = getattr(self, '_themed_callback', None)
-        if callback:
-            callback()
-        if self.is_empty():   # callback may have torn down this screen (e.g. start_game)
+        # Ignore stacked clicks while a transition is already queued — prevents
+        # two menu buttons' actions from both being deferred in the same window.
+        if ThemedButton._transition_pending:
             return
+        self.model.setColorScale(self.color.tint(BUTTON_CLICK_DARKEN))
         self.animate_scale(
             self.scale * BUTTON_CLICK_ANIM_SCALE,
             duration=BUTTON_CLICK_ANIM_DURATION,
             curve=curve.out_expo_boomerang,
         )
+        ThemedButton._transition_pending = True
+        # ignore_paused=True so the callback fires in real time even under the
+        # pause menu's application.time_scale=0 (see class docstring). invoke()
+        # returns the self-registering Sequence; hold it so on_destroy can cancel.
+        self._pending_seq = invoke(
+            self._fire_callback, delay=BUTTON_CLICK_ANIM_DURATION, ignore_paused=True
+        )
+
+    def _fire_callback(self):
+        self._pending_seq = None
+        ThemedButton._transition_pending = False
+        callback = getattr(self, '_themed_callback', None)
+        if callback:
+            callback()
+
+    def on_destroy(self):
+        # A pending deferred callback lives free in application.sequences and holds
+        # a bound-method ref to this (now-destroyed) button — kill it so it can't
+        # fire against torn-down state, and release the class-level lock it held.
+        seq = getattr(self, '_pending_seq', None)
+        if seq is not None:
+            seq.kill()
+            self._pending_seq = None
+            ThemedButton._transition_pending = False
