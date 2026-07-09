@@ -16,10 +16,10 @@ SWEPT_OFFSETS = (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
 # Headbob tuning: sinusoidal camera offset while grounded + moving, scaled to
 # actual movement speed (not just "is a key held") so bumping into a wall stops
 # the bob instead of playing it at full speed with zero displacement.
-BOB_FREQUENCY   = 9.0
-BOB_HEIGHT      = 0.035
-BOB_SIDE        = 0.015   # horizontal component is half-frequency (figure-8 gait)
-BOB_EASE_SPEED  = 8       # how fast the offset eases toward target/zero each frame
+BOB_FREQUENCY   = 8
+BOB_HEIGHT      = 0.6
+BOB_SIDE        = 0.3  # horizontal component is half-frequency (figure-8 gait)
+BOB_EASE_SPEED  = 2       # how fast the offset eases toward target/zero each frame
 
 
 class Player(FirstPersonController):
