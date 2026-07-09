@@ -152,6 +152,7 @@ class Player(FirstPersonController):
 
         self.handle_horizontal_movement()
         self.update_camera_bob()
+        self.handle_auto_fire()
 
         self.shadow.update()
 
@@ -213,6 +214,20 @@ class Player(FirstPersonController):
         """
         return swept_move_blocked(self, origin, direction, distance,
                                   SWEPT_OFFSETS, self.skin_width)
+
+    def handle_auto_fire(self):
+        """Continuous fire for 'auto' fire_mode weapons while left mouse is held.
+
+        Semi-auto weapons (Pistol/Shotgun) fire only from the discrete
+        'left mouse down' event in input() — unaffected by this. shoot()'s own
+        cooldown gate (_ready_to_fire) still caps the rate; this only supplies
+        the repeated calls a held automatic weapon needs.
+        """
+        if game.state != Game.PLAYING:
+            return
+        weapon = self.inventory.active_weapon
+        if weapon and weapon.fire_mode == 'auto' and held_keys['left mouse']:
+            weapon.shoot()
 
     def handle_horizontal_movement(self):
         raw = Vec3(self.forward * (held_keys['w'] - held_keys['s']) +

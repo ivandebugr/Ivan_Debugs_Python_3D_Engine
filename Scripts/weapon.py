@@ -375,6 +375,7 @@ class Weapon(Entity):
     bullet_speed = 50
     max_ammo     = -1   # -1 = infinite
     reload_time  = 1.0
+    fire_mode    = 'semi'   # 'semi' = once per discrete click, 'auto' = continuous while held
 
     view_model    = '3d models/gun.obj'
     view_scale    = 0.06
@@ -577,6 +578,7 @@ class Rifle(Weapon):
     bullet_speed = 80
     max_ammo     = 24
     reload_time  = 1.2
+    fire_mode    = 'auto'   # continuous fire while held; still gated by cooldown
     # Uses the base Weapon.shoot() — single bullet along camera.forward, no spread.
 
     view_model    = 'AssaultRifle_1'
