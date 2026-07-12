@@ -14,9 +14,10 @@ Scripts/level_editor.py __main__):
 
 Important: ursina.shader.imported_shaders holds different object instances
 than direct imports. We patch every live instance reachable by entity.py:
-both direct-import refs AND imported_shaders dict entries. We also delete
-._shader on any already-compiled instance so entity.py's "if not
-value.compiled" guard triggers a fresh recompile.
+both direct-import refs AND imported_shaders dict entries. We set compiled=False
+on each so entity.py's "if not value.compiled" guard triggers a fresh recompile
+on next assignment. We deliberately do NOT delete ._shader — see the note in
+_patch_shader_obj for why (Text reads it without a compiled-guard).
 
 Do NOT upgrade these shaders back to #version 130+ without a verified Core
 Profile context (see CLAUDE.md, Ursina 8.3.0 Compatibility).
@@ -26,9 +27,17 @@ Profile context (see CLAUDE.md, Ursina 8.3.0 Compatibility).
 def _patch_shader_obj(obj, vertex_src, fragment_src):
     obj.vertex = vertex_src
     obj.fragment = fragment_src
+    # compiled=False makes entity.py's shader_setter recompile on next assignment
+    # (entity.py:827 `if not value.compiled: value.compile()`). Do NOT delete
+    # obj._shader: unlike entity.shader_setter, Text.create_text_section reads
+    # shader._shader UNCONDITIONALLY (ursina/text.py:251,
+    # `setShader(self.shader._shader)`) with no compiled-guard, so any Text that
+    # rebuilds its glyphs in the same frame as this patch would hit
+    # AttributeError('_shader') during the gap between the del and the recompile.
+    # The already-compiled _shader is a valid #version 120 program (the source we
+    # re-supply here is byte-identical), so leaving it in place is safe — the
+    # recompile still happens, just without a missing-attribute window.
     obj.compiled = False
-    if hasattr(obj, '_shader'):
-        del obj._shader
 
 
 _UNLIT_VERT = (
