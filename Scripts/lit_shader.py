@@ -35,14 +35,25 @@ Ambient + one directional/point light, Lambert diffuse:
   which we normalise the vector from the surface and apply distance
   attenuation. Both cases are handled so the shader is correct either way.
 
-Integration
------------
-Registered into compat.patch_shaders_to_glsl120() so it participates in the
-same post-window-setup recompile pass as the unlit/text shaders (Hard
-Constraint 7 — shaders re-initialised during window setup must be
-re-triggered). See compat.py for the mechanism. The source is authored at 120,
-so compat re-supplies byte-identical 120 source; the load-bearing effect is the
-`._shader` reset that forces a fresh recompile after Ursina()/window setup.
+Integration — deliberately OUTSIDE compat.py's patch loop
+---------------------------------------------------------
+compat.patch_shaders_to_glsl120() exists to rewrite Ursina's STOCK shaders down
+to #version 120 and force their recompile after window setup. This shader is NOT
+registered there, on purpose:
+
+  - It is already authored at #version 120, so there is nothing to down-patch.
+  - It is referenced only by world geometry (level blocks + ground) created in
+    main_menu()/load_level(), which run AFTER window setup — so it compiles
+    fresh on first render without needing compat's post-setup recompile trigger.
+  - compat's `_patch_shader_obj()` does `del obj._shader`; that reset is only
+    race-safe for the stock shaders because of the exact ordering they rely on.
+    Putting this shader through the same path inherits a latent
+    AttributeError('_shader') window for no benefit.
+
+So the wiring is plain Ursina: `Entity(..., shader=lit_shader)` in main.py, plus
+a single DirectionalLight + scene.ambient_color created inside main_menu() (after
+its scene sweep, which would otherwise destroy the light) to drive
+p3d_LightSource[0] / p3d_LightModel.ambient. Nothing to register.
 """
 
 from ursina.shader import Shader

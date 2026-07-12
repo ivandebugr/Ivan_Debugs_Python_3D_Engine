@@ -11,6 +11,7 @@ from Scripts.weapon import AmmoPickup
 from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
+from Scripts.lit_shader import lit_shader
 from Scripts.level_io import load_level_data
 from Scripts.asset_resolve import (
     resolve_model as _resolve_model, resolve_texture as _resolve_texture,
@@ -381,7 +382,8 @@ def load_level():
                 color=color.rgb(*entry['colour']),
                 rotation=tuple(entry['rotation']),
                 scale=tuple(entry['scale']),
-                name='level_block'
+                name='level_block',
+                shader=lit_shader,   # GLSL 1.20 lit path — lit by the sun + ambient set in main_menu()
             )
             # v1.5 Step 4: lookup-name for open_door. Structural name stays
             # 'level_block' (cleanup sweeps depend on it) — door identity is a
@@ -482,6 +484,16 @@ def main_menu():
     camera.name = 'main_camera'
     camera.parent = scene
 
+    # Scene lighting for the GLSL 1.20 lit path (Scripts/lit_shader.py). Created
+    # HERE, after the sweep above — the sweep destroys every non-camera scene
+    # entity (a DirectionalLight included), so a sun set once at app init would
+    # not survive the first menu rebuild. One directional "sun" fills
+    # p3d_LightSource[0]; scene.ambient_color fills p3d_LightModel.ambient. Both
+    # are read by lit_shader; unlit geometry (HUD, gun viewmodel) ignores them.
+    scene.ambient_color = color.rgb(0.35, 0.35, 0.40)
+    sun = DirectionalLight()
+    sun.look_at(Vec3(-0.6, -1, -0.4))
+
     ground = Entity(
         model='cube',
         collider='box',
@@ -489,7 +501,8 @@ def main_menu():
         scale=(100, 1, 100),
         texture='assets/textures/floor_ground_grass.png',
         texture_scale=(50, 50),
-        name='ground'
+        name='ground',
+        shader=lit_shader,   # GLSL 1.20 lit path — lit by the sun + ambient set in main_menu()
     )
 
     load_level()
