@@ -7,3 +7,4 @@ logs/
 assets/manifest.json
 .DS_Store
 .worktrees/
+tools/shader_out/
