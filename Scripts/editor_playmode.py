@@ -64,6 +64,7 @@ class PlayModeController:
                                        ed._editor_camera.rotation_y,
                                        ed._editor_camera.rotation_z)
         ed._set_editor_ui_visible(False)
+        self._set_light_proxies_visible(False)
         ed.gizmo.root.enabled = False
         # Disable EditorCamera so it stops driving camera position/rotation.
         # FirstPersonController's __init__ sets camera.parent = self, taking over.
@@ -110,6 +111,7 @@ class PlayModeController:
         ed._play_mode = False
         self._restore_editor_level()
         ed._set_editor_ui_visible(True)
+        self._set_light_proxies_visible(True)
         ed.gizmo.refresh()
         mouse.locked = False
         mouse.visible = True
@@ -123,6 +125,25 @@ class PlayModeController:
             ed._editor_camera.rotation_z = self._saved_cam_rot.z
             self._saved_cam_pos = None
             self._saved_cam_rot = None
+
+    def _set_light_proxies_visible(self, visible):
+        """Show/hide the editor's sun proxies around the F5 round-trip.
+
+        The sun proxy is an editor affordance (sphere + aim line) that would
+        otherwise float in the middle of the played level — but unlike blocks and
+        enemies it must NOT be swept by teardown: main.py consumes 'light' entries
+        via _apply_level_lighting() and skips them when spawning entities, so
+        _restore_editor_level() has no rebuild branch for lights. Destroying a
+        proxy would drop the authored sun for good. Visibility is the only safe
+        lever, so toggle `enabled` and leave the entity and its light_config alone
+        (the aim line is a child, so it follows).
+
+        Skips destroyed refs: self.lights can hold stale entries between the
+        _build_level_data() liveness sweeps.
+        """
+        for light in self.editor.lights:
+            if _is_live(light):
+                light.enabled = visible
 
     def _restore_editor_level(self):
         """Rebuild editor blocks/enemies from the play snapshot after exiting play mode.
