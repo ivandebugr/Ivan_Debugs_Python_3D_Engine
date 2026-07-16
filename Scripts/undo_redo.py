@@ -461,6 +461,43 @@ class ChangePickupConfigCommand(Command):
         self._apply(self.old_config)
 
 
+class ChangeLightConfigCommand(Command):
+    """Apply a new light config (colour/intensity) to ONE light proxy; undo restores
+    the prior config. v1.7 Step 4.
+
+    Whole-dict snapshot granularity, same rationale as ChangePickupConfigCommand.
+    A plain ChangePropertyCommand(light, 'light_config', ...) would set the attribute
+    correctly but leave the viewport proxy tinted with the OLD colour and the
+    inspector rows stale on undo — the refresh has to be inside the command, since
+    that is the only code that runs on both execute and undo.
+
+    NOT used for direction: the sun's aim lives in the proxy's rotation (what the
+    ring gizmo writes and what the serializer reads), so direction edits push a
+    RotateEntityCommand instead — one representation, one command type.
+    """
+
+    def __init__(self, editor, light, new_config):
+        self.editor     = editor
+        self.light      = light
+        self.old_config = dict(getattr(light, 'light_config', {}))
+        self.new_config = dict(new_config)
+
+    def __repr__(self):
+        return f"ChangeLightConfigCommand(new={self.new_config})"
+
+    def _apply(self, config):
+        self.light.light_config = dict(config)
+        if self.editor is not None:
+            self.editor._sync_light_proxy(self.light)
+            self.editor._refresh_light_ui()
+
+    def execute(self):
+        self._apply(self.new_config)
+
+    def undo(self):
+        self._apply(self.old_config)
+
+
 class UndoRedoStack:
     def __init__(self, max_depth=50):
         self._undo = deque(maxlen=max_depth)
