@@ -8,6 +8,21 @@ tags:
 
 Things that have bitten before and will bite again.
 
+## View-dependent shader effects need an angle sweep, not one static frame — 2026-07-16
+**Context:** v1.7 floor-specular investigation. Verifying a narrow specular highlight (`pow(dot(N,H), 32)`, `lit_shader.py`) in the floor material with a single offscreen camera position.
+**Symptom:** A single static frame dump measured the specular term as effectively invisible, producing a false "premise doesn't hold" report — before an angle sweep caught the highlight clearly visible from other yaw/pitch positions.
+**Root cause:** Any effect with an N·V or reflection-direction dependency (specular lobes, rim/Fresnel terms) is only bright within a narrow cone of view angles relative to the light and surface normal. A high specular exponent (32 here) narrows that cone further, so one arbitrarily-chosen camera angle can easily land outside it while the effect is fully working.
+**Fix:** When verifying any view-dependent shader effect, sweep the viewing angle (yaw/pitch around the surface, not just one shot) as part of the verification — never conclude "not visible" from a single static frame.
+**Related:** see the next entry below — this session also hit a second, compounding trap around *where* that verification runs.
+**Source:** v1.7 floor-specular investigation, 2026-07-16
+
+## Prefer the live in-game tuning tool over new offscreen harnesses for view-dependent checks — 2026-07-16
+**Context:** Same v1.7 floor-specular investigation. The project already has a live in-game tuning tool (`dev_shader_tuning.py`, Ctrl+M) that renders the real game scene and lets uniforms be adjusted while watching the actual view.
+**Symptom:** Building new offscreen harnesses to re-verify the same specular behavior surfaced artifacts of the test scene itself, not the real game — happened twice this session (grass-texture noise, a clipped white floor) before the live tool's own in-game check settled the question.
+**Root cause:** A purpose-built offscreen harness necessarily constructs its own scene (geometry, camera, lighting) to render headlessly. That scene is not the shipped game scene, so it can introduce its own visual artifacts (texture tiling, clipping, framing) that are easy to mistake for the effect under test — especially for view-dependent effects where framing/geometry choices matter.
+**Fix:** For view-dependent tuning (specular, rim/Fresnel, anything camera-angle-dependent), prefer the live in-game tool that reflects the real view. Reach for offscreen harnesses for camera-angle-independent checks instead — shader compile/link success, geometry/shape correctness, uniform value plumbing, etc. — where a synthetic scene can't produce a misleading result.
+**Source:** v1.7 floor-specular investigation, 2026-07-16; see `Scripts/dev_shader_tuning.py`
+
 ## `invoke()`/`Sequence` deferred callbacks freeze under `application.time_scale=0` (the pause mechanism) — 2026-07-09
 **Context:** v1.7 pause-menu crash. Every menu button is a `ThemedButton` (`Scripts/ui_theme.py`) that plays a press animation then fires its real `on_click` via `invoke(self._fire_callback, delay=0.1)`. The pause menu pauses the game with `application.time_scale = 0` (main.py:957) — the project's pause mechanism.
 **Symptom:** A pause-menu button click appears to do nothing while paused, then all frozen clicks fire in a burst the instant time resumes — the observed crash was Continue's `resume_game` immediately followed by Main Menu's `return_to_menu()` teardown running against now-stale/torn-down state, because both were queued during the same paused window.
