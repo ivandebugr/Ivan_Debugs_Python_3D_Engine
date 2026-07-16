@@ -21,6 +21,7 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.lit_shader import lit_shader
+from Scripts import dev_shader_tuning  # TEMPORARY dev-only lit_shader live-tuning; see module docstring
 from Scripts import level_io
 from Scripts.level_io import load_level_data
 from Scripts.asset_resolve import (
@@ -1051,6 +1052,8 @@ if __name__ == '__main__':
         if key == 'left mouse' and not window.fullscreen and game.state == Game.PLAYING:
             mouse.locked = True
             mouse.visible = False
+
+        dev_shader_tuning.handle_input(key)  # TEMPORARY — see Scripts/dev_shader_tuning.py
 
 
     app.run()
