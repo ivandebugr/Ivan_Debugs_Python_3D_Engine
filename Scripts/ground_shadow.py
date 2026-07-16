@@ -21,7 +21,7 @@ class GroundShadow:
         self.quad = Entity(
             model='quad',
             texture=_resolve_texture('blob_shadow'),
-            color=(0, 0, 0, 1),
+            color=(0, 0, 0, 0.4),
             rotation_x=90,
             scale=scale,
             always_on_top=False,
