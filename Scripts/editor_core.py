@@ -24,6 +24,7 @@ from Scripts.undo_redo import (
 )
 from Scripts.asset_resolve import resolve_model as _resolve_model, resolve_texture as _resolve_texture
 from Scripts.session_logger import get_editor_logger
+from Scripts import level_io
 from Scripts.level_io import load_level_data, DEFAULT_MODEL
 from Scripts.editor_hierarchy import HierarchyPanel
 from Scripts.editor_gizmo import GizmoController
@@ -89,6 +90,14 @@ class LevelEditor(Entity):
         # triggers — placeholder carries a single pickup_config dict (pickup_type/
         # weapon_type/amount); the runtime/F5 factory turns it into a live AmmoPickup.
         self.pickups = []
+        # v1.7 Step 4: the scene's directional sun, tracked as a fifth type. Same
+        # config-store role as triggers/pickups — the placeholder is an editor-only
+        # proxy carrying light_config (light_type/colour/intensity); main.py builds
+        # the real DirectionalLight from the saved entry. A level always has exactly
+        # one sun today (load materialises level_io.default_light_entry() when the
+        # file has none), but this is a list, not a scalar, so the Fable scoping
+        # pass can add more lights without reshaping core state.
+        self.lights = []
         self.filename = 'level.json'
         self.current_texture = 'white_cube'
         self.current_mode = 'block'
@@ -804,6 +813,17 @@ class LevelEditor(Entity):
     # Selection
     # -------------------------------------------------------------------------
 
+    def _selectable(self):
+        """Every entity the user can click, box-select or see in the hierarchy.
+
+        Consolidates what used to be six separate
+        `self.blocks + self.enemies + self.triggers + self.pickups` concatenations.
+        They all had to grow the new self.lights term together (v1.7 Step 4) or the
+        sun would be pickable in one path and inert in another — exactly the kind of
+        drift level_io.py was created to kill. One accessor, one place to extend.
+        """
+        return self.blocks + self.enemies + self.triggers + self.pickups + self.lights
+
     def _snapshot_color(self, entity):
         if not hasattr(entity, '_original_color'):
             entity._original_color = entity.color
@@ -811,7 +831,7 @@ class LevelEditor(Entity):
     def _select(self, entity, additive=False):
         if not additive:
             self._deselect_all()
-        if entity in (self.blocks + self.enemies + self.triggers + self.pickups):
+        if entity in self._selectable():
             self._snapshot_color(entity)
             self.selected.add(entity)
             entity.color = color.orange
@@ -932,6 +952,62 @@ class LevelEditor(Entity):
         self.pickups.append(e)
         return e
 
+    def _make_light_entity(self, position, rotation, light_config):
+        """Build (and track) the editor's sun proxy — single construction site shared
+        by level load and F5-restore (same DRY rationale as _make_trigger_entity).
+
+        The proxy is a small emissive-looking sphere with a short line pointing down
+        its aim direction, so the sun reads as a *direction* in the viewport rather
+        than just a dot. It carries light_config (light_type/colour/intensity) as a
+        raw dict — config-store role, never a live DirectionalLight; main.py builds
+        the real light from the saved entry.
+
+        The sun has no meaningful position in the lighting math (a directional light
+        is direction-only), but it needs one to hang a gizmo on and to be clickable,
+        so position is honoured and persisted purely as editor framing.
+
+        Collider is a box so the mouse picker can hit it. Appends to self.lights.
+        """
+        cfg = {
+            'light_type': 'directional',
+            'colour':     list(level_io.DEFAULT_LIGHT_COLOUR),
+            'intensity':  level_io.DEFAULT_LIGHT_INTENSITY,
+        }
+        cfg.update(light_config or {})
+        tint = self._light_proxy_color(cfg)
+        e = Entity(
+            model='sphere',
+            color=tint,
+            scale=0.6,
+            position=tuple(position),
+            rotation=tuple(rotation),
+            collider='box',
+            name='light_sun',
+        )
+        e._original_color = tint
+        e.light_config = cfg
+        # Aim indicator: a child line down +Z, so it inherits the proxy's rotation
+        # and always shows where the sun actually points. Parented to the proxy (not
+        # the scene) so it follows move/rotate for free. No collider — it must never
+        # steal the pick from the sphere or the gizmo rings drawn around it.
+        Entity(
+            parent=e,
+            model=Mesh(vertices=[Vec3(0, 0, 0), Vec3(0, 0, 4)], mode='line', thickness=3),
+            color=color.yellow,
+            name='light_sun_aim',
+        )
+        self.lights.append(e)
+        return e
+
+    @staticmethod
+    def _light_proxy_color(light_config):
+        """Viewport tint for the sun proxy: its own colour, floored so a black or very
+        dim sun is still visible enough to click. Intensity deliberately does NOT scale
+        this — a 0-intensity sun must stay selectable, and the proxy is an editor
+        affordance, not a photometric preview."""
+        r, g, b = (list(light_config.get('colour', (1, 1, 1))) + [1, 1, 1])[:3]
+        return color.rgb(max(r, 0.25), max(g, 0.25), max(b, 0.25))
+
     # -------------------------------------------------------------------------
     # Convert entity type (v1.7 Step 2) — block ↔ trigger ↔ pickup, in place
     # -------------------------------------------------------------------------
@@ -952,13 +1028,21 @@ class LevelEditor(Entity):
     }
 
     def _entity_type_name(self, e):
-        """Editor type tag for a tracked entity ('block'/'enemy'/'trigger'/'pickup')."""
+        """Editor type tag for a tracked entity ('block'/'enemy'/'trigger'/'pickup'/'light')."""
         if e in self.enemies:
             return 'enemy'
         if e in self.triggers:
             return 'trigger'
         if e in self.pickups:
             return 'pickup'
+        # v1.7 Step 4: lights MUST be named before the 'block' fallthrough. This
+        # function's result keys _CONVERT_TARGETS, and 'block' maps to
+        # (trigger, pickup) — so letting a selected sun fall through would offer
+        # Convert->Trigger/Pickup on it and corrupt it into a plain entity with no
+        # light_config. 'light' has no _CONVERT_TARGETS entry, so both the convert
+        # UI and _convert_selected no-op on it.
+        if e in self.lights:
+            return 'light'
         return 'block'
 
     def _convert_target_snapshot(self, e, target_type):
@@ -1012,7 +1096,7 @@ class LevelEditor(Entity):
             return
         x0, x1 = sorted([self._box_start.x, mouse.x])
         y0, y1 = sorted([self._box_start.y, mouse.y])
-        for e in self.blocks + self.enemies + self.triggers + self.pickups:
+        for e in self._selectable():
             try:
                 screen_pos = e.screen_position
                 if x0 <= screen_pos.x <= x1 and y0 <= screen_pos.y <= y1:
@@ -1256,16 +1340,19 @@ class LevelEditor(Entity):
         live_enemies = [e for e in self.enemies if getattr(e, 'destroy_source', None) is None]
         live_triggers = [t for t in self.triggers if getattr(t, 'destroy_source', None) is None]
         live_pickups = [p for p in self.pickups if getattr(p, 'destroy_source', None) is None]
+        live_lights = [l for l in self.lights if getattr(l, 'destroy_source', None) is None]
         dropped = ((len(self.blocks) - len(live_blocks))
                    + (len(self.enemies) - len(live_enemies))
                    + (len(self.triggers) - len(live_triggers))
-                   + (len(self.pickups) - len(live_pickups)))
+                   + (len(self.pickups) - len(live_pickups))
+                   + (len(self.lights) - len(live_lights)))
         if dropped:
             logger.log('WARN', f'_build_level_data: dropped {dropped} destroyed entity refs')
             self.blocks[:] = live_blocks
             self.enemies[:] = live_enemies
             self.triggers[:] = live_triggers
             self.pickups[:] = live_pickups
+            self.lights[:] = live_lights
         for block in live_blocks:
             actual_color = getattr(block, '_original_color', block.color)
             tex_name = ''
@@ -1336,6 +1423,25 @@ class LevelEditor(Entity):
                 'pickup_type': config.get('pickup_type', 'ammo'),
                 'weapon_type': config.get('weapon_type', 'pistol'),
                 'amount':      config.get('amount', 30),
+            })
+        for light in live_lights:
+            # v1.7 Step 4: serialize the sun. 'direction' is derived from the proxy's
+            # live rotation, NOT from a stored vector — the rotation gizmo is the
+            # aiming affordance, so after a ring drag the rotation is authoritative
+            # and a stale cached direction would silently discard the drag.
+            cfg = getattr(light, 'light_config', {})
+            direction = level_io.rotation_to_direction(
+                [light.rotation_x, light.rotation_y, light.rotation_z])
+            colour = list(cfg.get('colour', level_io.DEFAULT_LIGHT_COLOUR))
+            data.append({
+                'type': 'light',
+                # light_type round-trips verbatim so a future non-directional entry
+                # survives a save from this build rather than being rewritten.
+                'light_type': cfg.get('light_type', 'directional'),
+                'position':  [light.x, light.y, light.z],
+                'direction': [round(d, 4) for d in direction],
+                'colour':    [round(c, 3) for c in colour],
+                'intensity': round(float(cfg.get('intensity', level_io.DEFAULT_LIGHT_INTENSITY)), 3),
             })
         return data
 
@@ -1416,7 +1522,7 @@ class LevelEditor(Entity):
         """Update the entity/collider stats readout from the editor's own level data."""
         if getattr(self, '_stats_text', None) is None:
             return
-        placed = self.blocks + self.enemies + self.triggers + self.pickups
+        placed = self._selectable()
         entities = len(placed)
         colliders = sum(1 for e in placed if getattr(e, 'collider', None) is not None)
         self._stats_text.text = f'entities: {entities}   colliders: {colliders}'
@@ -1552,6 +1658,17 @@ class LevelEditor(Entity):
                         or self._box_selecting or self.browser._dragging)
             if self.selected and not typing and not mid_drag:
                 for e in list(self.selected):
+                    # v1.7 Step 4: the sun is selectable but NOT deletable. A level
+                    # with no light renders unlit, and load already guarantees
+                    # exactly one sun (materialising defaults when the file has
+                    # none) — so deleting it would either be silently undone on the
+                    # next load or leave the scene black. Skipping here is the whole
+                    # guard: no delete path means DeleteEntityCommand needs no light
+                    # branch and _entity_snapshot needs no light case. Revisit if the
+                    # Fable scoping pass introduces multiple/optional lights.
+                    if e in self.lights:
+                        logger.log('INFO', 'Delete skipped: the sun light cannot be deleted')
+                        continue
                     snapshot = self._entity_snapshot(e)
                     etype = ('enemy' if e in self.enemies else
                              'trigger' if e in self.triggers else
@@ -1641,7 +1758,7 @@ class LevelEditor(Entity):
             # Step 4/5: selection (shift) or tool-mode action
             if held_keys['shift']:
                 # Shift+click: add/remove from selection — same in both tool modes
-                if hovered in (self.blocks + self.enemies + self.triggers + self.pickups):
+                if hovered in self._selectable():
                     if hovered in self.selected:
                         self.selected.discard(hovered)
                         hovered.color = getattr(hovered, '_original_color', color.white)
@@ -1656,7 +1773,7 @@ class LevelEditor(Entity):
             elif self._tool == 'move':
                 # FIXED (FIX 3 Move mode): select/deselect entities; clicking a surface
                 # never places a new block in Move mode.
-                if hovered in (self.blocks + self.enemies + self.triggers + self.pickups):
+                if hovered in self._selectable():
                     self._select(hovered)
                     return
                 if self.selected:
@@ -1753,17 +1870,33 @@ class LevelEditor(Entity):
 
     def load_existing_level(self):
         """Destroy all current editor entities, then reload from level.json if it exists."""
-        for e in self.blocks + self.enemies + self.triggers + self.pickups:
+        for e in self._selectable():
             destroy(e)
         self.blocks.clear()
         self.enemies.clear()
         self.triggers.clear()
         self.pickups.clear()
+        self.lights.clear()
         self.selected.clear()
 
         try:
             entries = load_level_data(self.filename)
             for entry in entries:
+                if entry['type'] == 'light':
+                    # v1.7 Step 4: editor is now light-aware. Orient the proxy from
+                    # the saved direction vector via the shared conversion, so the
+                    # rotation the gizmo reads matches what main.py aims the real
+                    # DirectionalLight down.
+                    self._make_light_entity(
+                        entry['position'],
+                        level_io.sync_light_rotation(entry['direction']),
+                        {
+                            'light_type': entry['light_type'],
+                            'colour':     entry['colour'],
+                            'intensity':  entry['intensity'],
+                        },
+                    )
+                    continue
                 if entry['type'] == 'trigger':
                     # v1.5 Step 6: editor is now trigger-aware. Build a semi-
                     # transparent volume carrying the raw action lists; it round-
@@ -1827,6 +1960,24 @@ class LevelEditor(Entity):
         except Exception as e:
             logger.log('ERROR', f"{type(e).__name__}: {e}")
             print(f"Error loading level: {e}")
+
+        # v1.7 Step 4: guarantee exactly one sun. Pre-v1.7 level.json files carry no
+        # 'light' entry, and a missing/failed load leaves the list empty — in both
+        # cases materialise the historical main_menu() defaults so the editor always
+        # has a sun to select and the level saves one going forward. Placed outside
+        # the try so it covers the FileNotFoundError path too (a brand-new empty
+        # level still gets editable lighting).
+        if not self.lights:
+            entry = level_io.default_light_entry()
+            self._make_light_entity(
+                entry['position'],
+                level_io.sync_light_rotation(entry['direction']),
+                {
+                    'light_type': entry['light_type'],
+                    'colour':     entry['colour'],
+                    'intensity':  entry['intensity'],
+                },
+            )
 
         self._refresh_hierarchy()
         self._history.clear()
