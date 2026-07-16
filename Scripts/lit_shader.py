@@ -22,9 +22,27 @@ real 2.1 baseline. Verified via the headless GSG harness
 
 Lighting model
 --------------
-Ambient + one directional/point light, Lambert diffuse:
+Ambient + one directional/point light, stylized (v1.7 Candidate L1):
 
-    color.rgb = albedo.rgb * (ambient + light.color * max(N·L, 0) * atten)
+    diffuse  = pow(N·L * 0.5 + 0.5, 2)      Half-Lambert — soft terminator
+    spec     = pow(max(N·H, 0), shininess)  Phong lobe, gated by the diffuse term
+    rim      = pow(1 - N·V, rim_power)      view-dependent edge light
+    lighting = ambient*cool_tint + sun*(diffuse*warm_tint) * atten
+    color.rgb = albedo.rgb * lighting + (spec + rim) * sun.color
+
+Half-Lambert (Valve's warped diffuse, used across the Source engine and TF2)
+remaps N·L from [-1,1] to [0,1] and squares it, so surfaces facing away from
+the sun land near 0.25 instead of hard 0. That is what kills the black-backside
+problem at the source — and it is why `ambient_boost` was retuned down from
+0.18 (see the default_input note below): the old floor existed to rescue
+exactly the case Half-Lambert now handles, so keeping both double-lifts.
+
+Specular and rim are ADDITIVE and deliberately do NOT multiply albedo — that
+is the whole point for this project. The gun MTLs ship near-black diffuse
+(Kd ~0.011-0.09, verified in assets/models/*.mtl), so anything multiplied by
+albedo stays black no matter how bright the light. An additive lobe puts light
+*on top of* a black surface, which is how dark gunmetal reads as metal rather
+than as a silhouette.
 
 - Ambient comes from Panda3D's `p3d_LightModel.ambient` (set via
   `scene.ambient_color` / Ursina's ambient, or defaults to a small lift).
@@ -101,6 +119,13 @@ LIT_FRAG = (
     '    vec3 attenuation;\n'
     '} p3d_LightSource[1];\n'
     'uniform vec4 ambient_boost;\n'
+    'uniform vec4 warm_tint;\n'
+    'uniform vec4 cool_tint;\n'
+    'uniform vec4 rim_color;\n'
+    'uniform float rim_power;\n'
+    'uniform float rim_strength;\n'
+    'uniform float spec_shininess;\n'
+    'uniform float spec_strength;\n'
     'varying vec2 uvs;\n'
     'varying vec4 vertex_color;\n'
     'varying vec3 world_normal;\n'
@@ -118,13 +143,36 @@ LIT_FRAG = (
     '    float atten = p3d_LightSource[0].position.w == 0.0\n'
     '        ? 1.0\n'
     '        : 1.0 / (att3.x + att3.y * dist + att3.z * dist * dist);\n'
-    '    float ndotl = max(dot(N, L), 0.0);\n'
-    '    vec3 diffuse = p3d_LightSource[0].color.rgb * ndotl * atten;\n'
-    '    // ambient_boost is a small constant floor so unlit-facing surfaces never\n'
-    '    // crush to pure black; it is added to Panda3D scene ambient, not a\n'
-    '    // replacement for it.\n'
-    '    vec3 lighting = p3d_LightModel.ambient.rgb + ambient_boost.rgb + diffuse;\n'
-    '    gl_FragColor = vec4(albedo.rgb * lighting, albedo.a);\n'
+    '    // Eye space: the camera sits at the origin looking down -Z, so the\n'
+    '    // surface->eye vector is simply -eye_position normalised.\n'
+    '    vec3 V = normalize(-eye_position);\n'
+    '    // Half-Lambert: remap N.L from [-1,1] to [0,1] and square. Backsides land\n'
+    '    // near 0.25 rather than 0, giving the soft terminator and killing the\n'
+    '    // black-backside case that ambient_boost used to paper over.\n'
+    '    float ndotl = dot(N, L);\n'
+    '    float half_lambert = pow(ndotl * 0.5 + 0.5, 2.0);\n'
+    '    vec3 sun = p3d_LightSource[0].color.rgb;\n'
+    '    vec3 diffuse = sun * warm_tint.rgb * half_lambert * atten;\n'
+    '    // Blinn-Phong half-vector: cheaper than reflect() and better behaved at\n'
+    '    // grazing angles. Gated by the raw (unwarped) N.L so the lobe cannot appear\n'
+    '    // on geometry actually facing away from the sun — Half-Lambert alone would\n'
+    '    // happily light a backside spec.\n'
+    '    vec3 H = normalize(L + V);\n'
+    '    float spec = pow(max(dot(N, H), 0.0), spec_shininess)\n'
+    '               * step(0.0, ndotl) * spec_strength * atten;\n'
+    '    // Rim: brightest where the surface turns away from the eye. Scaled by the\n'
+    '    // warped diffuse so the rim only fires on the sunlit side — an ungated rim\n'
+    '    // haloes the whole silhouette and reads as fake.\n'
+    '    float rim = pow(1.0 - max(dot(N, V), 0.0), rim_power) * rim_strength * half_lambert;\n'
+    '    // Cool ambient vs. warm sun is the whole warm/cool grade — the tints ride\n'
+    '    // the existing ambient/diffuse terms rather than a post-multiply, so a\n'
+    '    // neutral (1,1,1) pair reproduces the old look exactly.\n'
+    '    vec3 lighting = (p3d_LightModel.ambient.rgb + ambient_boost.rgb) * cool_tint.rgb\n'
+    '                  + diffuse;\n'
+    '    // Spec + rim are ADDITIVE, not albedo-multiplied: near-black gun MTLs\n'
+    '    // (Kd ~0.02) would swallow any multiplied highlight and stay black.\n'
+    '    vec3 highlight = sun * spec + rim_color.rgb * rim;\n'
+    '    gl_FragColor = vec4(albedo.rgb * lighting + highlight, albedo.a);\n'
     '}\n'
 )
 
@@ -141,5 +189,22 @@ lit_shader = Shader(
         # legible without a second light, and stops near-black MTL diffuse from
         # rendering as pure black even when no scene light is present.
         'ambient_boost': (0.18, 0.18, 0.18, 1.0),
+        # Warm/cool grade. Sun-side diffuse skews warm, ambient/shadow side skews
+        # cool — the classic TF2 read. Both are gentle (±8%): the sun colour itself
+        # is authored per-level in level.json, so heavy tinting here would fight
+        # the editor's colour picker rather than complement it.
+        'warm_tint': (1.08, 1.02, 0.92, 1.0),
+        'cool_tint': (0.92, 0.96, 1.10, 1.0),
+        # Rim light. Slightly cool-white so it reads as sky bounce rather than a
+        # second sun. rim_power 3 keeps it to the silhouette edge; strength is
+        # deliberately low — rim is the first thing to look fake when overdone.
+        'rim_color': (0.55, 0.62, 0.75, 1.0),
+        'rim_power': 3.0,
+        'rim_strength': 0.35,
+        # Phong lobe. Tight and weak: level blocks and ground are matte, so this is
+        # mostly for the gun/enemy metals. The MTLs' own Ns (~96) informed the
+        # shininess; strength stays low so nothing blows out to white.
+        'spec_shininess': 32.0,
+        'spec_strength': 0.25,
     },
 )
