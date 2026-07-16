@@ -38,7 +38,8 @@ class HierarchyPanel:
         # Search/filter + collapsible sections (Change B).
         self.search_field = None     # InputField pinned above the list
         self.filter = ''             # lower-cased substring; '' = show all
-        self.collapsed = {'block': False, 'enemy': False, 'trigger': False, 'pickup': False}  # per-section fold state
+        # v1.7 Step 4: 'light' joins the fold state as a fifth section (the sun).
+        self.collapsed = {'block': False, 'enemy': False, 'trigger': False, 'pickup': False, 'light': False}  # per-section fold state
         self.header_buttons = {}     # {'block': Button, 'enemy': Button}
         self.swatches = []           # per-row colour swatch quads (parallel to self.buttons)
         self.build()
@@ -59,7 +60,7 @@ class HierarchyPanel:
         ed = self.editor
         flt = self.filter
         rows = []
-        for section, members in (('block', ed.blocks), ('enemy', ed.enemies), ('trigger', ed.triggers), ('pickup', ed.pickups)):
+        for section, members in (('block', ed.blocks), ('enemy', ed.enemies), ('trigger', ed.triggers), ('pickup', ed.pickups), ('light', ed.lights)):
             if flt:
                 matched = [e for e in members if flt in self._label(e).lower()]
             else:
@@ -77,6 +78,13 @@ class HierarchyPanel:
             tag = 'T'
         elif e in ed.pickups:
             tag = 'P'
+        elif e in ed.lights:
+            # v1.7 Step 4: the sun is captioned by its AIM, not its position — a
+            # directional light's position has no effect on the lighting math (it's
+            # editor framing only), so "(x,y,z)" would be actively misleading here.
+            # Named rather than tagged: there is one sun and 'Sun' is what the user
+            # is looking for when they search the panel.
+            return f"Sun (pitch {round(e.rotation_x)}, yaw {round(e.rotation_y)})"
         else:
             tag = 'B'
         return f"{tag} ({round(e.x,1)},{round(e.y,1)},{round(e.z,1)})"
@@ -181,8 +189,8 @@ class HierarchyPanel:
         flt = self.filter
         def _count(members):
             return sum(1 for e in members if not flt or flt in self._label(e).lower())
-        section_count = {'block': _count(ed.blocks), 'enemy': _count(ed.enemies), 'trigger': _count(ed.triggers), 'pickup': _count(ed.pickups)}
-        section_name  = {'block': 'Blocks', 'enemy': 'Enemies', 'trigger': 'Triggers', 'pickup': 'Pickups'}
+        section_count = {'block': _count(ed.blocks), 'enemy': _count(ed.enemies), 'trigger': _count(ed.triggers), 'pickup': _count(ed.pickups), 'light': _count(ed.lights)}
+        section_name  = {'block': 'Blocks', 'enemy': 'Enemies', 'trigger': 'Triggers', 'pickup': 'Pickups', 'light': 'Lighting'}
 
         visible = visual_rows[self.scroll: self.scroll + self._HIER_MAX_VISIBLE]
         for slot, (kind, payload) in enumerate(visible):
