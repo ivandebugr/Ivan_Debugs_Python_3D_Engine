@@ -2,14 +2,8 @@ import re
 import subprocess
 import sys
 
-# Must run before `from ursina import *` — ursina/audio.py calls
-# AudioManager.create_AudioManager() at import time, which crashes inside
-# libp3openal_audio.dylib against this machine's audio setup (macOS 15.7.4;
-# reproduces even isolated from Ursina, independent of which audio device is
-# targeted — see obsidian-mind-main/brain/Gotchas.md). Setting
-# audio-library-name here makes it create a NullAudioManager instead.
-from panda3d.core import loadPrcFileData
-loadPrcFileData('', 'audio-library-name null')
+# Must run before `from ursina import *` — see Scripts/audio_workaround.py.
+from Scripts import audio_workaround  # noqa: F401
 
 from ursina import *
 from Scripts.player_controller import Player

@@ -11,6 +11,9 @@ import sys
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
+# Must run before `from ursina import *` — see Scripts/audio_workaround.py.
+from Scripts import audio_workaround  # noqa: F401,E402
+
 from ursina import *
 from ursina.prefabs.editor_camera import EditorCamera
 from panda3d.core import loadPrcFileData, AntialiasAttrib

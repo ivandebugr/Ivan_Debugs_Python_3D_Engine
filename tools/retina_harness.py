@@ -31,11 +31,14 @@ Exit: 0 = findings reproduce, 1 = metric failed its positive control.
 
 import ctypes
 import ctypes.util
+import os
 import sys
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from Scripts import audio_workaround  # noqa: F401,E402 — OpenAL crash on this Mac
 from panda3d.core import loadPrcFileData
 
-loadPrcFileData('', 'audio-library-name null')   # OpenAL crash on this Mac
 loadPrcFileData('', 'window-type offscreen')
 loadPrcFileData('', 'gl-version 2 1')            # the real ship ceiling
 

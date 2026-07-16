@@ -21,12 +21,12 @@ import os
 import sys
 import traceback
 
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+from Scripts import audio_workaround  # noqa: F401,E402
 from panda3d.core import loadPrcFileData
-loadPrcFileData('', 'audio-library-name null')
 loadPrcFileData('', 'window-type offscreen')
 loadPrcFileData('', 'gl-version 2 1')
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from Scripts.compat import patch_shaders_to_glsl120
 

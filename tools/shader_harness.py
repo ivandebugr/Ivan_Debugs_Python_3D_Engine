@@ -28,18 +28,18 @@ import os
 import re
 import sys
 
-# --- Real ship baseline, BEFORE `from ursina import *` -----------------------
-from panda3d.core import loadPrcFileData
-loadPrcFileData('', 'audio-library-name null')   # OpenAL crash on this Mac
-loadPrcFileData('', 'window-type offscreen')
-loadPrcFileData('', 'gl-version 2 1')             # pin to the 2.1 ceiling we ship on
-loadPrcFileData('', 'gl-debug true')
-loadPrcFileData('', 'notify-level-glgsg debug')
-
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _ROOT = os.path.dirname(_HERE)
 sys.path.insert(0, _ROOT)
 os.chdir(_ROOT)   # so asset/texture relative paths resolve like the real app
+
+# --- Real ship baseline, BEFORE `from ursina import *` -----------------------
+from Scripts import audio_workaround  # noqa: F401,E402 — OpenAL crash on this Mac
+from panda3d.core import loadPrcFileData
+loadPrcFileData('', 'window-type offscreen')
+loadPrcFileData('', 'gl-version 2 1')             # pin to the 2.1 ceiling we ship on
+loadPrcFileData('', 'gl-debug true')
+loadPrcFileData('', 'notify-level-glgsg debug')
 
 OUT_DIR = os.path.join(_HERE, 'shader_out')
 os.makedirs(OUT_DIR, exist_ok=True)
