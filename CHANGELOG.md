@@ -5,6 +5,16 @@ Versions follow [Semantic Versioning](https://semver.org/).
 
 ---
 
+## [1.7.1] - 2026-07-16 — lit shader (GLSL 1.20)
+
+### Added
+- **`Scripts/lit_shader.py`** — hand-written GLSL 1.20 lit shader, wired onto world geometry and
+  the scene sun. Written in 120-compat syntax and verified compiling clean under this Mac's real
+  2.1/GLSL 1.20 context (no `gl-version` override, no core-profile move) — see
+  `obsidian-mind-main/brain/Key Decisions.md` for why core profile was rejected this round.
+
+---
+
 ## [1.7.0] - 2026-07-07 — gizmo precision + panel basics
 
 Implements B1 + B2(field) + C1 + C2 from the v1.7 editor UX scoping report, in Ivan's stated
