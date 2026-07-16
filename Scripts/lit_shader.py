@@ -204,21 +204,20 @@ lit_shader = Shader(
         # not merely dark. 0.06 keeps the safety net at a sixth of its old weight.
         'ambient_boost': (0.06, 0.06, 0.06, 1.0),
         # Warm/cool grade. Sun-side diffuse skews warm, ambient/shadow side skews
-        # cool — the classic TF2 read. Both are gentle (±8%): the sun colour itself
-        # is authored per-level in level.json, so heavy tinting here would fight
-        # the editor's colour picker rather than complement it.
-        'warm_tint': (1.08, 1.02, 0.92, 1.0),
-        'cool_tint': (0.92, 0.96, 1.10, 1.0),
+        # cool — the classic TF2 read. Retuned via Scripts/dev_shader_tuning.py
+        # live-adjustment session, v1.7: stronger than the original ±8% pass.
+        'warm_tint': (1.40, 1.34, 1.24, 1.0),
+        'cool_tint': (1.26, 1.30, 1.44, 1.0),
         # Rim light. Slightly cool-white so it reads as sky bounce rather than a
-        # second sun. rim_power 3 keeps it to the silhouette edge; strength is
-        # deliberately low — rim is the first thing to look fake when overdone.
+        # second sun. rim_power 3 keeps it to the silhouette edge; strength
+        # retuned lower via dev_shader_tuning.py, v1.7.
         'rim_color': (0.55, 0.62, 0.75, 1.0),
         'rim_power': 3.0,
-        'rim_strength': 0.35,
+        'rim_strength': 0.05,
         # Phong lobe. Tight and weak: level blocks and ground are matte, so this is
         # mostly for the gun/enemy metals. The MTLs' own Ns (~96) informed the
-        # shininess; strength stays low so nothing blows out to white.
+        # shininess; strength retuned via dev_shader_tuning.py, v1.7.
         'spec_shininess': 32.0,
-        'spec_strength': 0.25,
+        'spec_strength': 0.35,
     },
 )
