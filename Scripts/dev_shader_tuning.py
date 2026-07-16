@@ -18,13 +18,23 @@ from Scripts.lit_shader import lit_shader
 ENABLED = True
 
 # key: (uniform_name, is_vec4, step). Shift held = nudge down instead of up.
-# Bound to function keys to avoid any collision with gameplay/editor keybinds
-# (r/t/y/i/j/k/etc. are all already spoken for elsewhere in this project).
+# control+<letter>, deliberately NOT any bare function key. Ursina's own
+# window/editor chrome (development_mode=True, which this project runs with)
+# reserves the WHOLE F-row: HotReloader (ursina/prefabs/hot_reloader.py) owns
+# F5 (reload code)/F6 (textures)/F7 (models)/F8 (shaders)/F9 (toggle
+# hotreload); window.make_editor_gui() (ursina/window.py) separately owns
+# F10 (render mode)/F11 (fullscreen)/F12 (editor UI toggle). Confirmed live:
+# binding this tool to F5 triggered Ursina's code-reload mid-frame, tearing
+# down scene.entities while this module's shader-input update was iterating
+# them and crashing the collision grid the next frame. control+letter avoids
+# every reserved single key in both Ursina's chrome and this project's own
+# gameplay/editor bindings (checked against main.py, player_controller.py,
+# editor_core.py — n/m/,/. are unclaimed everywhere).
 _KEYBINDS = {
-    'f5': ('rim_strength', False, 0.05),
-    'f6': ('spec_strength', False, 0.05),
-    'f7': ('warm_tint', True, 0.02),
-    'f8': ('cool_tint', True, 0.02),
+    'control+n': ('rim_strength', False, 0.05),
+    'control+m': ('spec_strength', False, 0.05),
+    'control+,': ('warm_tint', True, 0.02),
+    'control+.': ('cool_tint', True, 0.02),
 }
 
 _current = dict(lit_shader.default_input)
@@ -36,9 +46,9 @@ def _print_value(name):
 
 def handle_input(key):
     """Call from main.py's global input(key). No-op if ENABLED is False."""
-    if not ENABLED:
+    if not ENABLED or not held_keys['control']:
         return
-    binding = _KEYBINDS.get(key)
+    binding = _KEYBINDS.get('control+' + key)
     if binding is None:
         return
     name, is_vec4, step = binding
