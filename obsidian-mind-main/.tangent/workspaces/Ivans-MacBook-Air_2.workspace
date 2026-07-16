@@ -1,0 +1,42 @@
+{
+	"directoryView": {
+		"openDirectories": [],
+		"selection": [
+			"FILES/work/archive/2026"
+		],
+		"sortMode": "name|ascending",
+		"sortFoldersToTop": true,
+		"sortQueriesToTop": true
+	},
+	"tagTreeView": {
+		"openDirectories": [],
+		"selection": [
+			"FILES/work/archive/2026"
+		],
+		"sortMode": "name|ascending",
+		"sortFoldersToTop": true,
+		"sortQueriesToTop": true
+	},
+	"leftSidebar": {
+		"size": 300,
+		"mode": 1,
+		"lastUnfocusedMode": 1,
+		"lastFocusedMode": 0,
+		"currentTab": "files"
+	},
+	"targetFocusModeLevel": 2,
+	"focusing": false,
+	"system": {
+		"showMenu": false,
+		"section": null
+	},
+	"version": 3,
+	"window_state": {
+		"x": 504,
+		"y": 190,
+		"width": 2000,
+		"height": 1200,
+		"maximized": false,
+		"fullscreen": false
+	}
+}

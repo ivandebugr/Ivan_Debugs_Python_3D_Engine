@@ -1,0 +1,164 @@
+{
+	"threadHistory": [
+		{
+			"thread": [
+				"FILES/brain/Gotchas.md"
+			],
+			"currentNode": "FILES/brain/Gotchas.md"
+		},
+		{
+			"thread": [
+				"FILES/brain/Key Decisions.md"
+			],
+			"currentNode": "FILES/brain/Key Decisions.md"
+		},
+		{
+			"thread": [
+				"FILES/brain/Memories.md"
+			],
+			"currentNode": "FILES/brain/Memories.md"
+		},
+		{
+			"thread": [
+				"FILES/brain/North Star.md"
+			],
+			"currentNode": "FILES/brain/North Star.md"
+		},
+		{
+			"thread": [
+				"FILES/brain/Patterns.md"
+			],
+			"currentNode": "FILES/brain/Patterns.md"
+		},
+		{
+			"thread": [
+				"FILES/brain/Skills.md"
+			],
+			"currentNode": "FILES/brain/Skills.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v1.2-level-editor-overhaul.md"
+			],
+			"currentNode": "FILES/work/active/v1.2-level-editor-overhaul.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v1.7-editor-ux-scoping.md"
+			],
+			"currentNode": "FILES/work/active/v1.7-editor-ux-scoping.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v1.7-enemy-detection.md"
+			],
+			"currentNode": "FILES/work/active/v1.7-enemy-detection.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v1.7-fix-backlog.md"
+			],
+			"currentNode": "FILES/work/active/v1.7-fix-backlog.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v2.0-release.md"
+			],
+			"currentNode": "FILES/work/active/v2.0-release.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v1.2-level-editor-overhaul.md"
+			],
+			"currentNode": "FILES/work/active/v1.2-level-editor-overhaul.md"
+		},
+		{
+			"thread": [
+				"FILES/work/active/v1.2-level-editor-overhaul.md",
+				"FILES/brain/Skills.md"
+			],
+			"currentNode": "FILES/work/active/v1.2-level-editor-overhaul.md"
+		}
+	],
+	"threadIndex": 12,
+	"previousSession": "",
+	"map": {
+		"nodes": {
+			"FILES/brain/Gotchas.md": {
+				"node": "FILES/brain/Gotchas.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:24:36.714Z"
+			},
+			"FILES/brain/Key Decisions.md": {
+				"node": "FILES/brain/Key Decisions.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:24:40.931Z"
+			},
+			"FILES/brain/Memories.md": {
+				"node": "FILES/brain/Memories.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:24:43.576Z"
+			},
+			"FILES/brain/North Star.md": {
+				"node": "FILES/brain/North Star.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:24:44.146Z"
+			},
+			"FILES/brain/Patterns.md": {
+				"node": "FILES/brain/Patterns.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:24:44.641Z"
+			},
+			"FILES/brain/Skills.md": {
+				"node": "FILES/brain/Skills.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:24:45.183Z"
+			},
+			"FILES/work/active/v1.2-level-editor-overhaul.md": {
+				"node": "FILES/work/active/v1.2-level-editor-overhaul.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:25:10.632Z"
+			},
+			"FILES/work/active/v1.7-editor-ux-scoping.md": {
+				"node": "FILES/work/active/v1.7-editor-ux-scoping.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:25:11.123Z"
+			},
+			"FILES/work/active/v1.7-enemy-detection.md": {
+				"node": "FILES/work/active/v1.7-enemy-detection.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:25:11.631Z"
+			},
+			"FILES/work/active/v1.7-fix-backlog.md": {
+				"node": "FILES/work/active/v1.7-fix-backlog.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:25:12.104Z"
+			},
+			"FILES/work/active/v2.0-release.md": {
+				"node": "FILES/work/active/v2.0-release.md",
+				"isRoot": true,
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:25:12.758Z"
+			}
+		},
+		"connections": [
+			{
+				"from": "FILES/work/active/v1.2-level-editor-overhaul.md",
+				"to": "FILES/brain/Skills.md",
+				"strength": 2,
+				"dateCreated": "2026-07-12T19:25:17.730Z"
+			}
+		]
+	},
+	"version": 1
+}

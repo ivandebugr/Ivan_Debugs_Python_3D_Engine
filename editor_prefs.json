@@ -6,5 +6,39 @@
         "4": null,
         "5": null
     },
-    "grid_snap": 1.0
+    "grid_snap": null,
+    "layout_presets": {
+        "1": {
+            "hier_w": 0.2,
+            "insp_w": 0.3,
+            "browser_h": 0.20628255208333335,
+            "panel_visible": {
+                "hierarchy": false,
+                "inspector": false,
+                "browser": false
+            }
+        },
+        "2": {
+            "hier_w": 0.2,
+            "insp_w": 0.3,
+            "browser_h": 0.20628255208333335,
+            "panel_visible": {
+                "hierarchy": false,
+                "inspector": false,
+                "browser": false
+            }
+        },
+        "3": {
+            "hier_w": 0.2,
+            "insp_w": 0.3,
+            "browser_h": 0.20628255208333335,
+            "panel_visible": {
+                "hierarchy": false,
+                "inspector": false,
+                "browser": false
+            }
+        },
+        "4": null,
+        "5": null
+    }
 }

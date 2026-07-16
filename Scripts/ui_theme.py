@@ -58,11 +58,10 @@ HUD_MARGIN        = 0.04   # inset from screen edge for corner-anchored HUD elem
 
 # Kenney UI pack (v1.7) — single reference so the whole game's button skin
 # swaps with a one-line edit here instead of per-screen texture paths.
-# 'Blue'/'Default' chosen as a neutral baseline over 'Double' (which adds a
-# second color stripe meant for contrast pairs we don't use). depth_gradient
-# is the raised/drop-shadow render style — button_rectangle_*.png is 192x64
+# 'Extra'/'Default' pack has no depth_gradient variant — depth_line is the
+# closest available raised-border style. button_rectangle_*.png is 192x64
 # (3:1), matching BUTTON_SCALE's 0.3:0.1 ratio so it stretches without distortion.
-BUTTON_TEXTURE      = 'ui/Blue/Default/button_rectangle_depth_gradient'
+BUTTON_TEXTURE      = 'ui/Extra/Default/button_rectangle_depth_line'
 BUTTON_CLICK_SOUND  = 'ui/click_001'
 
 # HUD readout backdrop (ammo counter) — Half-Life 2 style: a translucent black

@@ -1,0 +1,109 @@
+{
+	"threadHistory": [
+		{
+			"thread": [
+				"FILES/bases"
+			],
+			"currentNode": "FILES/bases"
+		}
+	],
+	"threadIndex": 0,
+	"previousSession": "",
+	"map": {
+		"nodes": {
+			"FILES/bases": {
+				"node": "FILES/bases",
+				"isRoot": true,
+				"strength": 3,
+				"dateCreated": "2026-07-12T19:26:09.244Z"
+			},
+			"FILES/bases/1-1 History.base": {
+				"node": "FILES/bases/1-1 History.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.391Z"
+			},
+			"FILES/bases/Competency Map.base": {
+				"node": "FILES/bases/Competency Map.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.391Z"
+			},
+			"FILES/bases/Incidents.base": {
+				"node": "FILES/bases/Incidents.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			"FILES/bases/People Directory.base": {
+				"node": "FILES/bases/People Directory.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			"FILES/bases/Review Evidence.base": {
+				"node": "FILES/bases/Review Evidence.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			"FILES/bases/Templates.base": {
+				"node": "FILES/bases/Templates.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			"FILES/bases/Work Dashboard.base": {
+				"node": "FILES/bases/Work Dashboard.base",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			}
+		},
+		"connections": [
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/1-1 History.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.391Z"
+			},
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/Competency Map.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.391Z"
+			},
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/Incidents.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/People Directory.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/Review Evidence.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/Templates.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			},
+			{
+				"from": "FILES/bases",
+				"to": "FILES/bases/Work Dashboard.base",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:15.392Z"
+			}
+		]
+	},
+	"version": 1
+}

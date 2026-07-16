@@ -19,7 +19,7 @@ SWEPT_OFFSETS = (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
 BOB_FREQUENCY   = 8
 BOB_HEIGHT      = 0.6
 BOB_SIDE        = 0.3  # horizontal component is half-frequency (figure-8 gait)
-BOB_EASE_SPEED  = 2       # how fast the offset eases toward target/zero each frame
+BOB_EASE_SPEED  = 6       # how fast the offset eases toward target/zero each frame
 
 
 class Player(FirstPersonController):

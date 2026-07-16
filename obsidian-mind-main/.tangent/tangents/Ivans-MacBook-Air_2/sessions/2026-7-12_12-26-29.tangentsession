@@ -1,0 +1,307 @@
+{
+	"threadHistory": [
+		{
+			"thread": [
+				"FILES/work"
+			],
+			"currentNode": "FILES/work"
+		},
+		{
+			"thread": [
+				"FILES/work/archive/2026"
+			],
+			"currentNode": "FILES/work/archive/2026"
+		}
+	],
+	"threadIndex": 1,
+	"previousSession": "",
+	"map": {
+		"nodes": {
+			"FILES/work": {
+				"node": "FILES/work",
+				"isRoot": true,
+				"strength": 3,
+				"dateCreated": "2026-07-12T19:26:30.941Z"
+			},
+			"FILES/work/1-1": {
+				"node": "FILES/work/1-1",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.406Z"
+			},
+			"FILES/work/Index.md": {
+				"node": "FILES/work/Index.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.407Z"
+			},
+			"FILES/work/active": {
+				"node": "FILES/work/active",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.407Z"
+			},
+			"FILES/work/archive": {
+				"node": "FILES/work/archive",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.407Z"
+			},
+			"FILES/work/audits": {
+				"node": "FILES/work/audits",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			"FILES/work/incidents": {
+				"node": "FILES/work/incidents",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			"FILES/work/meetings": {
+				"node": "FILES/work/meetings",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			"FILES/work/active/v1.2-level-editor-overhaul.md": {
+				"node": "FILES/work/active/v1.2-level-editor-overhaul.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.985Z"
+			},
+			"FILES/work/active/v1.7-editor-ux-scoping.md": {
+				"node": "FILES/work/active/v1.7-editor-ux-scoping.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			"FILES/work/active/v1.7-enemy-detection.md": {
+				"node": "FILES/work/active/v1.7-enemy-detection.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			"FILES/work/active/v1.7-fix-backlog.md": {
+				"node": "FILES/work/active/v1.7-fix-backlog.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			"FILES/work/active/v2.0-release.md": {
+				"node": "FILES/work/active/v2.0-release.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			"FILES/work/active/v1.6-fix-backlog.md": {
+				"node": "FILES/work/active/v1.6-fix-backlog.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			"FILES/work/active/v1.6-level-editor-refactor.md": {
+				"node": "FILES/work/active/v1.6-level-editor-refactor.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.987Z"
+			},
+			"FILES/work/active/v1.5-gameplay-systems.md": {
+				"node": "FILES/work/active/v1.5-gameplay-systems.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.987Z"
+			},
+			"FILES/work/archive/2026": {
+				"node": "FILES/work/archive/2026",
+				"isRoot": false,
+				"strength": 3,
+				"dateCreated": "2026-07-12T19:26:51.617Z"
+			},
+			"FILES/work/archive/version-map.md": {
+				"node": "FILES/work/archive/version-map.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:51.618Z"
+			},
+			"FILES/work/archive/2026/v1.3-asset-import-pipeline.md": {
+				"node": "FILES/work/archive/2026/v1.3-asset-import-pipeline.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.834Z"
+			},
+			"FILES/work/archive/2026/v1.4-enemy-behaviour-trees.md": {
+				"node": "FILES/work/archive/2026/v1.4-enemy-behaviour-trees.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.834Z"
+			},
+			"FILES/work/archive/2026/v1.5-gameplay-systems.md": {
+				"node": "FILES/work/archive/2026/v1.5-gameplay-systems.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.835Z"
+			},
+			"FILES/work/archive/2026/v1.6-fix-backlog.md": {
+				"node": "FILES/work/archive/2026/v1.6-fix-backlog.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.836Z"
+			},
+			"FILES/work/archive/2026/v1.6-level-editor-refactor.md": {
+				"node": "FILES/work/archive/2026/v1.6-level-editor-refactor.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.837Z"
+			},
+			"FILES/work/archive/2026/v1.7-editor-ux-bundle.md": {
+				"node": "FILES/work/archive/2026/v1.7-editor-ux-bundle.md",
+				"isRoot": false,
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.837Z"
+			}
+		},
+		"connections": [
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/1-1",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.407Z"
+			},
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/Index.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.407Z"
+			},
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/active",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.407Z"
+			},
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/archive",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/audits",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/incidents",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			{
+				"from": "FILES/work",
+				"to": "FILES/work/meetings",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:35.408Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.2-level-editor-overhaul.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.985Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.7-editor-ux-scoping.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.7-enemy-detection.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.7-fix-backlog.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v2.0-release.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.986Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.6-fix-backlog.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.987Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.6-level-editor-refactor.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.987Z"
+			},
+			{
+				"from": "FILES/work/active",
+				"to": "FILES/work/active/v1.5-gameplay-systems.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:44.987Z"
+			},
+			{
+				"from": "FILES/work/archive",
+				"to": "FILES/work/archive/2026",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:51.618Z"
+			},
+			{
+				"from": "FILES/work/archive",
+				"to": "FILES/work/archive/version-map.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:51.618Z"
+			},
+			{
+				"from": "FILES/work/archive/2026",
+				"to": "FILES/work/archive/2026/v1.3-asset-import-pipeline.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.834Z"
+			},
+			{
+				"from": "FILES/work/archive/2026",
+				"to": "FILES/work/archive/2026/v1.4-enemy-behaviour-trees.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.834Z"
+			},
+			{
+				"from": "FILES/work/archive/2026",
+				"to": "FILES/work/archive/2026/v1.5-gameplay-systems.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.835Z"
+			},
+			{
+				"from": "FILES/work/archive/2026",
+				"to": "FILES/work/archive/2026/v1.6-fix-backlog.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.836Z"
+			},
+			{
+				"from": "FILES/work/archive/2026",
+				"to": "FILES/work/archive/2026/v1.6-level-editor-refactor.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.837Z"
+			},
+			{
+				"from": "FILES/work/archive/2026",
+				"to": "FILES/work/archive/2026/v1.7-editor-ux-bundle.md",
+				"strength": 1,
+				"dateCreated": "2026-07-12T19:26:57.837Z"
+			}
+		]
+	},
+	"version": 1
+}

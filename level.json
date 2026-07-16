@@ -1,49 +1,968 @@
 [
-    {"type": "block", "position": [3, 1.5, 8], "scale": [2, 2, 1], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-3, 1.5, 8], "scale": [2, 2, 1], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-
-    {"type": "block", "position": [-12, 2.5, 24.25], "scale": [9, 4, 0.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-12, 2.5, 15.75], "scale": [9, 4, 0.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-16.25, 2.5, 20], "scale": [0.5, 4, 8], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-7.75, 2.5, 22.75], "scale": [0.5, 4, 3.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-7.75, 2.5, 17.25], "scale": [0.5, 4, 3.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-7.75, 4, 20], "scale": [0.5, 1, 2], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-7.75, 2, 20], "scale": [0.5, 3, 2], "texture": "white_cube.png", "colour": [0.627, 0.392, 0.235], "rotation": [0, 0, 0], "door_name": "armory_door"},
-    {"type": "block", "position": [-5, 0.6, 20], "scale": [2, 0.2, 2], "texture": "texture_green_test.png", "colour": [1, 1, 1], "rotation": [0, 0, 0]},
-
-    {"type": "block", "position": [38.25, 2.75, 19], "scale": [0.5, 4.5, 14], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [45.75, 2.75, 19], "scale": [0.5, 4.5, 14], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 2.5, 12], "scale": [7, 4, 0.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [38.25, 2.75, 7], "scale": [0.5, 4.5, 10.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [45.75, 2.75, 7], "scale": [0.5, 4.5, 10.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 2.75, 1.75], "scale": [8, 4.5, 0.5], "texture": "white_cube.png", "colour": [0.431, 0.431, 0.431], "rotation": [0, 0, 0]},
-
-    {"type": "block", "position": [42, 0.55, 18.75], "scale": [7, 0.2, 10.5], "texture": "texture_red_test.png", "colour": [1, 0.45, 0.35], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 0.9, 25], "scale": [2, 0.8, 1.5], "texture": "white_cube.png", "colour": [0.627, 0.627, 0.706], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 1.4, 22], "scale": [1.8, 0.8, 1.5], "texture": "white_cube.png", "colour": [0.627, 0.627, 0.706], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 1.9, 19], "scale": [1.8, 0.8, 1.5], "texture": "white_cube.png", "colour": [0.627, 0.627, 0.706], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 2.4, 16.5], "scale": [1.8, 0.8, 1.5], "texture": "white_cube.png", "colour": [0.627, 0.627, 0.706], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [42, 2.9, 14], "scale": [1.8, 0.8, 1.5], "texture": "white_cube.png", "colour": [0.627, 0.627, 0.706], "rotation": [0, 0, 0]},
-
-    {"type": "block", "position": [-14, 0.75, 18], "scale": [0.8, 0.5, 0.8], "texture": "texture_orange_test.png", "colour": [1, 1, 1], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [-10, 0.75, 18], "scale": [0.8, 0.5, 0.8], "texture": "texture_orange_test.png", "colour": [1, 1, 1], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [45, 0.75, 41], "scale": [0.8, 0.5, 0.8], "texture": "floor_tiles_blue_small.png", "colour": [1, 1, 1], "rotation": [0, 0, 0]},
-    {"type": "block", "position": [43, 0.75, 41], "scale": [0.8, 0.5, 0.8], "texture": "floor_tiles_blue_small.png", "colour": [1, 1, 1], "rotation": [0, 0, 0]},
-
-    {"type": "enemy", "position": [3, 0.5, 16], "hp": 100, "enemy_type": "default", "rotation_y": 180, "behaviour": {"tree": "cautious"}},
-    {"type": "enemy", "position": [-12, 0.5, 21.5], "hp": 100, "enemy_type": "default", "rotation_y": 90, "behaviour": {"tree": "flee_when_low"}},
-    {"type": "enemy", "position": [43, 0.5, 44], "hp": 100, "enemy_type": "default", "rotation_y": 0, "behaviour": {"tree": "patrol_then_attack", "waypoints": [[43, 0.5, 44], [48, 0.5, 44], [48, 0.5, 48], [43, 0.5, 48]]}},
-    {"type": "enemy", "position": [45.5, 0.5, 44.5], "hp": 100, "enemy_type": "default", "rotation_y": 0, "behaviour": {"tree": "patrol_then_attack", "waypoints": [[45.5, 0.5, 44.5], [45.5, 0.5, 47.5]]}},
-    {"type": "enemy", "position": [42, 0.5, 5], "hp": 100, "enemy_type": "default", "rotation_y": 0, "behaviour": {"tree": "aggressive"}},
-
-    {"type": "trigger", "position": [0, -25, 0], "scale": [200, 10, 200], "on_enter": [{"action": "kill_plane"}], "on_exit": []},
-    {"type": "trigger", "position": [42, 1.1, 18.75], "scale": [7, 1.0, 10.5], "on_enter": [{"action": "kill_plane"}], "on_exit": []},
-    {"type": "trigger", "position": [-5, 1.5, 20], "scale": [2, 2.4, 2], "on_enter": [{"action": "open_door", "target": "armory_door"}], "on_exit": []},
-    {"type": "trigger", "position": [42, 1.7, 27], "scale": [7, 2.5, 1.5], "on_enter": [{"action": "checkpoint"}], "on_exit": []},
-    {"type": "trigger", "position": [42, 1.7, 3.5], "scale": [4, 2.5, 2], "on_enter": [{"action": "win_condition"}], "on_exit": []},
-
-    {"type": "pickup", "position": [-14, 1.3, 18], "pickup_type": "weapon", "weapon_type": "shotgun", "amount": 0},
-    {"type": "pickup", "position": [-10, 1.3, 18], "pickup_type": "ammo", "weapon_type": "shotgun", "amount": 8},
-    {"type": "pickup", "position": [45, 1.3, 41], "pickup_type": "weapon", "weapon_type": "rifle", "amount": 0},
-    {"type": "pickup", "position": [43, 1.3, 41], "pickup_type": "ammo", "weapon_type": "rifle", "amount": 24}
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            1.5,
+            8.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            2.0,
+            2.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -3.0,
+            1.5,
+            8.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            2.0,
+            2.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -12.0,
+            2.5,
+            24.25
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            9.0,
+            4.0,
+            0.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -12.0,
+            2.5,
+            15.75
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            9.0,
+            4.0,
+            0.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -16.25,
+            2.5,
+            20.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.0,
+            8.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -7.75,
+            2.5,
+            22.75
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.0,
+            3.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -7.75,
+            2.5,
+            17.25
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.0,
+            3.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -7.75,
+            4.0,
+            20.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            1.0,
+            2.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -7.75,
+            2.0,
+            20.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.627,
+            0.392,
+            0.235
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            3.0,
+            2.0
+        ],
+        "door_name": "armory_door"
+    },
+    {
+        "type": "block",
+        "position": [
+            -5.0,
+            0.6000000238418579,
+            20.0
+        ],
+        "texture": "",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            2.0,
+            0.2,
+            2.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            38.25,
+            2.75,
+            19.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.5,
+            14.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            45.75,
+            2.75,
+            19.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.5,
+            14.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            2.5,
+            12.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            7.0,
+            4.0,
+            0.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            38.25,
+            2.75,
+            7.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.5,
+            10.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            45.75,
+            2.75,
+            7.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.5,
+            4.5,
+            10.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            2.75,
+            1.75
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.431,
+            0.431,
+            0.431
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            8.0,
+            4.5,
+            0.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            0.550000011920929,
+            18.75
+        ],
+        "texture": "",
+        "colour": [
+            1.0,
+            0.45,
+            0.35
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            7.0,
+            0.2,
+            10.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            0.8999999761581421,
+            25.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.627,
+            0.627,
+            0.706
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            2.0,
+            0.8,
+            1.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            1.399999976158142,
+            22.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.627,
+            0.627,
+            0.706
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.8,
+            0.8,
+            1.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            1.899999976158142,
+            19.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.627,
+            0.627,
+            0.706
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.8,
+            0.8,
+            1.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            2.4000000953674316,
+            16.5
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.627,
+            0.627,
+            0.706
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.8,
+            0.8,
+            1.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            42.0,
+            2.9000000953674316,
+            14.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            0.627,
+            0.627,
+            0.706
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.8,
+            0.8,
+            1.5
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -14.0,
+            0.75,
+            18.0
+        ],
+        "texture": "",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.8,
+            0.5,
+            0.8
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            -10.0,
+            0.75,
+            18.0
+        ],
+        "texture": "",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.8,
+            0.5,
+            0.8
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            45.0,
+            0.75,
+            41.0
+        ],
+        "texture": "",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.8,
+            0.5,
+            0.8
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            43.0,
+            0.75,
+            41.0
+        ],
+        "texture": "",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            0.8,
+            0.5,
+            0.8
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            0.0,
+            0.0,
+            0.0
+        ],
+        "texture": "",
+        "colour": [
+            0.314,
+            0.471,
+            0.784
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            0.0,
+            0.0,
+            -1.0
+        ],
+        "texture": "floor_tiles_tan_small_damaged.png",
+        "colour": [
+            0.627,
+            0.627,
+            0.706
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            2.0,
+            7.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ]
+    },
+    {
+        "type": "block",
+        "position": [
+            3.0,
+            2.0,
+            6.0
+        ],
+        "texture": "white_cube.png",
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "rotation": [
+            -0.0,
+            -0.0,
+            0.0
+        ],
+        "scale": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "model": "assets/models/Shotgun_1.obj"
+    },
+    {
+        "type": "enemy",
+        "position": [
+            3.0,
+            0.5,
+            16.0
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": 180.0,
+        "behaviour": {
+            "tree": "cautious"
+        }
+    },
+    {
+        "type": "enemy",
+        "position": [
+            -12.0,
+            0.5,
+            21.5
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": 90.0,
+        "behaviour": {
+            "tree": "flee_when_low"
+        }
+    },
+    {
+        "type": "enemy",
+        "position": [
+            43.0,
+            0.5,
+            44.0
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": -0.0,
+        "behaviour": {
+            "tree": "patrol_then_attack",
+            "waypoints": [
+                [
+                    43,
+                    0.5,
+                    44
+                ],
+                [
+                    48,
+                    0.5,
+                    44
+                ],
+                [
+                    48,
+                    0.5,
+                    48
+                ],
+                [
+                    43,
+                    0.5,
+                    48
+                ]
+            ]
+        }
+    },
+    {
+        "type": "enemy",
+        "position": [
+            45.5,
+            0.5,
+            44.5
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": -0.0,
+        "behaviour": {
+            "tree": "patrol_then_attack",
+            "waypoints": [
+                [
+                    45.5,
+                    0.5,
+                    44.5
+                ],
+                [
+                    45.5,
+                    0.5,
+                    47.5
+                ]
+            ]
+        }
+    },
+    {
+        "type": "enemy",
+        "position": [
+            42.0,
+            0.5,
+            5.0
+        ],
+        "hp": 100,
+        "enemy_type": "default",
+        "rotation_y": -0.0,
+        "behaviour": {
+            "tree": "aggressive"
+        }
+    },
+    {
+        "type": "trigger",
+        "position": [
+            0.0,
+            -25.0,
+            0.0
+        ],
+        "scale": [
+            200.0,
+            10.0,
+            200.0
+        ],
+        "on_enter": [
+            {
+                "action": "kill_plane"
+            }
+        ],
+        "on_exit": []
+    },
+    {
+        "type": "trigger",
+        "position": [
+            42.0,
+            1.100000023841858,
+            18.75
+        ],
+        "scale": [
+            7.0,
+            1.0,
+            10.5
+        ],
+        "on_enter": [
+            {
+                "action": "kill_plane"
+            }
+        ],
+        "on_exit": []
+    },
+    {
+        "type": "trigger",
+        "position": [
+            -5.0,
+            1.5,
+            20.0
+        ],
+        "scale": [
+            2.0,
+            2.4,
+            2.0
+        ],
+        "on_enter": [
+            {
+                "action": "open_door",
+                "target": "armory_door"
+            }
+        ],
+        "on_exit": []
+    },
+    {
+        "type": "trigger",
+        "position": [
+            42.0,
+            1.7000000476837158,
+            27.0
+        ],
+        "scale": [
+            7.0,
+            2.5,
+            1.5
+        ],
+        "on_enter": [
+            {
+                "action": "checkpoint"
+            }
+        ],
+        "on_exit": []
+    },
+    {
+        "type": "trigger",
+        "position": [
+            42.0,
+            1.7000000476837158,
+            3.5
+        ],
+        "scale": [
+            4.0,
+            2.5,
+            2.0
+        ],
+        "on_enter": [
+            {
+                "action": "win_condition"
+            }
+        ],
+        "on_exit": []
+    },
+    {
+        "type": "pickup",
+        "position": [
+            -14.0,
+            1.2999999523162842,
+            18.0
+        ],
+        "pickup_type": "weapon",
+        "weapon_type": "shotgun",
+        "amount": 0
+    },
+    {
+        "type": "pickup",
+        "position": [
+            -10.0,
+            1.2999999523162842,
+            18.0
+        ],
+        "pickup_type": "ammo",
+        "weapon_type": "shotgun",
+        "amount": 8
+    },
+    {
+        "type": "pickup",
+        "position": [
+            45.0,
+            1.2999999523162842,
+            41.0
+        ],
+        "pickup_type": "weapon",
+        "weapon_type": "rifle",
+        "amount": 0
+    },
+    {
+        "type": "pickup",
+        "position": [
+            43.0,
+            1.2999999523162842,
+            41.0
+        ],
+        "pickup_type": "ammo",
+        "weapon_type": "rifle",
+        "amount": 24
+    }
 ]

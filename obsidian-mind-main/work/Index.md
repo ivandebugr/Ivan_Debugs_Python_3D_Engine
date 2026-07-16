@@ -19,6 +19,7 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 
 ## Active Projects
 
+- [[work/active/v1.7-lighting-scoping]] — TF2-style lighting/shadows under the GLSL 1.20 hard constraint: four candidates (L1 stylized sun, L2 blobs+baked AO, L3 shadow map, L4 point/spot lights) with cost/risk/perf on M3 | Scoped 2026-07-16, awaiting Ivan's pick
 - [[work/active/v2.0-release]] — Modding, packaged runtime, gamepad input, procedural level gen — PUBLIC RELEASE | Planned | Blocked on: v1.5
 - [[work/active/v1.7-fix-backlog]] — Open loose ends from the v1.7 cycle: ambient/music track (v1.3 remainder), C4/C5 layout decision, two stray unstaged working-tree changes. Editor-interaction fixes (drag-lock, convert-entity-type, inspector layout, smoke harness) shipped this cycle and are tracked closed in this doc.
 
