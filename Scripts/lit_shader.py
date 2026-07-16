@@ -44,6 +44,10 @@ albedo stays black no matter how bright the light. An additive lobe puts light
 *on top of* a black surface, which is how dark gunmetal reads as metal rather
 than as a silhouette.
 
+The flip side of additive: the lobe lands on matte surfaces just as hard as on
+metal, since nothing about a low albedo damps it. That is what forced
+spec_strength down to 0.05 — see its default_input note below.
+
 - Ambient comes from Panda3D's `p3d_LightModel.ambient` (set via
   `scene.ambient_color` / Ursina's ambient, or defaults to a small lift).
 - The single light is Panda3D's `p3d_LightSource[0]`: add a `DirectionalLight`
@@ -214,10 +218,25 @@ lit_shader = Shader(
         'rim_color': (0.55, 0.62, 0.75, 1.0),
         'rim_power': 3.0,
         'rim_strength': 0.05,
-        # Phong lobe. Tight and weak: level blocks and ground are matte, so this is
-        # mostly for the gun/enemy metals. The MTLs' own Ns (~96) informed the
-        # shininess; strength retuned via dev_shader_tuning.py, v1.7.
+        # Phong lobe. Tight and weak: mostly for the gun/enemy metals. The MTLs'
+        # own Ns (~96) informed the shininess.
+        #
+        # Retuned 0.35 -> 0.05 (v1.7): 0.35 put a visible specular sheen on the
+        # GROUND. The lobe is view-dependent (H = normalize(L + V)), and the
+        # ground is one 100x100 plane with a single constant normal, so unlike
+        # the curved metals it lights up coherently across the whole floor and
+        # slides with the camera. Measured by differencing real-scene frames at
+        # 0.35 vs 0.05 (the additive `+ highlight` term means the difference IS
+        # the lobe, with albedo cancelled): the sheen peaks at 71/255 luminance
+        # looking down ~35deg toward the sun, and falls to <1/255 looking away —
+        # i.e. it is strongly orientation-dependent, which is why a single
+        # head-on sample reads as "no highlight at all" and hides the bug.
+        #
+        # Kept global rather than a ground-only override: the near-black gun MTLs
+        # (Kd ~0.011-0.09) are the reason the lobe exists, but verified in-game
+        # that they still read as metal at 0.05 — texture and geometry carry them,
+        # so the lobe does not need to.
         'spec_shininess': 32.0,
-        'spec_strength': 0.35,
+        'spec_strength': 0.05,
     },
 )
