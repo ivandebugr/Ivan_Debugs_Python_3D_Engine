@@ -999,6 +999,23 @@ class LevelEditor(Entity):
         self.lights.append(e)
         return e
 
+    def _sync_light_proxy(self, light):
+        """Re-tint the sun proxy from its light_config after a colour edit.
+
+        Selection tinting complicates this: _select sets entity.color = orange and
+        _deselect_all restores from _original_color — so while the sun is selected
+        (which it always is when its inspector rows are visible), writing the new
+        colour to entity.color would be reverted on deselect. Update BOTH: the live
+        colour only when not selected, and _original_color always, so the change
+        survives the selection round-trip and the hierarchy swatch (which reads
+        _original_color) stays honest either way.
+        """
+        tint = self._light_proxy_color(getattr(light, 'light_config', {}))
+        light._original_color = tint
+        if light not in self.selected:
+            light.color = tint
+        self._refresh_hierarchy()
+
     @staticmethod
     def _light_proxy_color(light_config):
         """Viewport tint for the sun proxy: its own colour, floored so a black or very
@@ -1148,6 +1165,9 @@ class LevelEditor(Entity):
     def _refresh_pickup_ui(self):
         self.inspector._refresh_pickup_ui()
 
+    def _refresh_light_ui(self):
+        self.inspector._refresh_light_ui()
+
     def _behaviour_typing(self):
         return self.inspector._behaviour_typing()
 
@@ -1160,15 +1180,18 @@ class LevelEditor(Entity):
     def _pickup_typing(self):
         return self.inspector._pickup_typing()
 
+    def _light_typing(self):
+        return self.inspector._light_typing()
+
     def _any_field_typing(self):
         """True if any editor text field (inspector numeric/behaviour/door/trigger/
-        pickup, or hierarchy search) is focused. Bare-letter shortcuts (T/R gizmo
-        mode) must not fire while typing. Mirrors the inline typing checks the
+        pickup/light, or hierarchy search) is focused. Bare-letter shortcuts (T/R
+        gizmo mode) must not fire while typing. Mirrors the inline typing checks the
         delete and bookmark-recall paths already use."""
         return (any(f.active for f in self.inspector._insp_fields.values())
                 or self._hier_typing() or self._behaviour_typing()
                 or self._door_name_typing() or self._trigger_typing()
-                or self._pickup_typing())
+                or self._pickup_typing() or self._light_typing())
 
     # -------------------------------------------------------------------------
     # Asset picker overlay / asset browser (v1.6 split)
@@ -1653,7 +1676,7 @@ class LevelEditor(Entity):
             typing = (any(f.active for f in self.inspector._insp_fields.values())
                       or self._hier_typing() or self._behaviour_typing()
                       or self._door_name_typing() or self._trigger_typing()
-                      or self._pickup_typing())
+                      or self._pickup_typing() or self._light_typing())
             mid_drag = (self.gizmo.drag_axis is not None or self.gizmo.rotate_axis is not None
                         or self._box_selecting or self.browser._dragging)
             if self.selected and not typing and not mid_drag:

@@ -2,9 +2,10 @@
 editor_inspector.py — Inspector panel collaborator for the level editor (v1.6 split).
 
 Owns the right-hand inspector: the Pos/Scale field grid, texture swatch, model
-field, door-name field (v1.5 Step 4), and the three mutually-exclusive lower-band
+field, door-name field (v1.5 Step 4), and the four mutually-exclusive lower-band
 sections — behaviour-tree config (enemies, v1.4 Step 9), trigger action editor
-(v1.5 Step 6), and pickup config editor (v1.5 Step 13). Each section keeps its
+(v1.5 Step 6), pickup config editor (v1.5 Step 13), and the sun light's
+colour/intensity/direction rows (v1.7 Step 4). Each section keeps its
 single refresh path by design.
 
 Selection, entity lists, undo history and the gizmo stay core-owned and are
@@ -22,9 +23,10 @@ from Scripts.session_logger import get_editor_logger
 from Scripts.asset_registry import asset_registry
 from Scripts.behaviour_tree_factory import BehaviourTreeFactory
 from Scripts.weapon import WEAPON_TYPES
+from Scripts import level_io
 from Scripts.undo_redo import (
     ChangePropertyCommand, ChangeBehaviourCommand, ChangeTriggerActionsCommand,
-    ChangePickupConfigCommand,
+    ChangePickupConfigCommand, ChangeLightConfigCommand, RotateEntityCommand,
 )
 
 logger = get_editor_logger()
@@ -293,6 +295,7 @@ class InspectorPanel:
         self._build_behaviour_ui()
         self._build_trigger_ui()
         self._build_pickup_ui()
+        self._build_light_section()
         self._build_convert_ui()
 
     def _update_inspector_door_field(self):
@@ -413,6 +416,7 @@ class InspectorPanel:
             self._refresh_behaviour_ui()
             self._refresh_trigger_ui()
             self._refresh_pickup_ui()
+            self._refresh_light_ui()
             self._refresh_convert_ui()
             return
         entities = list(self.editor.selected)
@@ -439,6 +443,7 @@ class InspectorPanel:
         self._refresh_behaviour_ui()
         self._refresh_trigger_ui()
         self._refresh_pickup_ui()
+        self._refresh_light_ui()
         self._refresh_convert_ui()
 
     def _entity_texture_name(self, e):
@@ -988,6 +993,188 @@ class InspectorPanel:
         # Transient row widgets, rebuilt each refresh; tracked so input()'s focus
         # check can see the target InputFields (NOT eternal — they must destroy()).
         self._trig_rows = []   # list of {'type': Button, 'target': InputField|None, 'del': Button}
+
+    # ------------------------------------------------------------------------
+    # Light section (v1.7 Step 4) — the scene's directional sun
+    # ------------------------------------------------------------------------
+    # Fourth member of the mutually-exclusive lower band (behaviour / trigger /
+    # pickup / light): a selection is never both a light and another type, so
+    # these reuse the same y range rather than needing new panel real estate.
+    _LIGHT_COLOUR_LABEL_Y = -0.265   # "Sun Colour" header y
+    _LIGHT_COLOUR_ROW_Y   = -0.325   # R/G/B field row
+    _LIGHT_INTENSITY_Y    = -0.395   # intensity label + field
+    _LIGHT_DIR_LABEL_Y    = -0.455   # "Direction" header y
+    _LIGHT_DIR_ROW_Y      = -0.515   # X/Y/Z direction field row
+
+    def _build_light_section(self):
+        """Build the sun's inspector rows: colour (R/G/B), intensity, direction (X/Y/Z).
+
+        Numeric rows follow the same label-over-field + submit_on=['enter'] +
+        no-arg-lambda-reading-field.text pattern as the Pos/Scale/Rot grid
+        (B2-field) — including the two footguns that pattern encodes: Ursina's
+        InputField never fires on_submit unless submit_on is set, and it calls
+        on_submit() with NO arguments (a `lambda val:` raises TypeError the instant
+        it fires). Labels need world_scale, not scale, or they render microscopically.
+
+        Direction is shown as the raw vector rather than pitch/yaw because that is
+        what level.json stores and what p3d_LightSource[0] consumes — typing a
+        direction here and reading it back from the file should match exactly.
+        """
+        self._insp_light_fields = {}
+
+        def _label(text, x, y, width_ws=None):
+            t = Text(parent=self.panel, text=text, position=(x, y),
+                     color=color.light_gray, origin=(0, 0), z=-1, eternal=True)
+            t.world_scale = Vec3(width_ws or self._INSP_LABEL_WS,
+                                 width_ws or self._INSP_LABEL_WS, 1)
+            try:
+                t.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_light_section setBin label {type(e).__name__}: {e}")
+            return t
+
+        def _field(key, x, y, scale=(.27, .055)):
+            f = InputField(parent=self.panel, position=(x, y), scale=scale,
+                           default_value='0', z=-1, eternal=True)
+            try:
+                f.setBin('fixed', 41)
+            except Exception as e:
+                logger.log('ERROR', f"_build_light_section setBin field {type(e).__name__}: {e}")
+            f.submit_on = ['enter']
+            f.on_submit = lambda k=key, ff=f: self._apply_light_value(k, ff.text)
+            self._insp_light_fields[key] = f
+            return f
+
+        col_x = (-.33, 0.0, .33)   # same three column centres as the transform grid
+
+        self._insp_light_colour_label = _label('Sun Colour', -.44, self._LIGHT_COLOUR_LABEL_Y)
+        self._insp_light_colour_label.origin = (-0.5, 0)
+        # Live colour preview chip — shows the sun's actual colour next to the fields.
+        self._insp_light_swatch = Entity(
+            parent=self.panel, model='quad', color=color.white,
+            scale=(.10, .045), position=(.30, self._LIGHT_COLOUR_LABEL_Y),
+            z=-1, eternal=True,
+        )
+        try:
+            self._insp_light_swatch.setBin('fixed', 41)
+        except Exception as e:
+            logger.log('ERROR', f"_build_light_section setBin swatch {type(e).__name__}: {e}")
+        for i, key in enumerate(('light_r', 'light_g', 'light_b')):
+            _field(key, col_x[i], self._LIGHT_COLOUR_ROW_Y)
+
+        self._insp_light_intensity_label = _label('Intensity', -.44, self._LIGHT_INTENSITY_Y)
+        self._insp_light_intensity_label.origin = (-0.5, 0)
+        _field('light_intensity', .12, self._LIGHT_INTENSITY_Y, scale=(.30, .055))
+
+        self._insp_light_dir_label = _label('Direction (sun -> scene)', -.44, self._LIGHT_DIR_LABEL_Y)
+        self._insp_light_dir_label.origin = (-0.5, 0)
+        for i, key in enumerate(('light_dir_x', 'light_dir_y', 'light_dir_z')):
+            _field(key, col_x[i], self._LIGHT_DIR_ROW_Y)
+
+        self._set_light_section_visible(False)
+
+    def _light_section_widgets(self):
+        return [self._insp_light_colour_label, self._insp_light_swatch,
+                self._insp_light_intensity_label, self._insp_light_dir_label] + \
+               list(self._insp_light_fields.values())
+
+    def _set_light_section_visible(self, visible):
+        for w in self._light_section_widgets():
+            if w and getattr(w, 'destroy_source', None) is None:
+                w.enabled = visible
+
+    def _selected_light(self):
+        """The single selected light, or None. Same single-selection rule as
+        _selected_trigger: multi-edit of light config has no clear semantics."""
+        lights = [e for e in self.editor.selected if e in self.editor.lights]
+        return lights[0] if len(lights) == 1 else None
+
+    def _light_typing(self):
+        """True while any light field is focused — aggregated into core's typing guard
+        so Delete/bookmark keys edit text instead of firing editor actions."""
+        return any(f.active for f in getattr(self, '_insp_light_fields', {}).values())
+
+    def _refresh_light_ui(self):
+        """Show/hide + repopulate the light section for the current selection.
+        Single refresh path: called from _update_inspector AND from undo/redo via
+        core's _refresh_light_ui delegator (same contract as _refresh_trigger_ui)."""
+        if getattr(self, '_insp_light_fields', None) is None:
+            return
+        light = self._selected_light()
+        show = light is not None
+        self._set_light_section_visible(show)
+        if not show:
+            return
+        cfg = getattr(light, 'light_config', {})
+        colour = (list(cfg.get('colour', (1, 1, 1))) + [1, 1, 1])[:3]
+        for key, val in zip(('light_r', 'light_g', 'light_b'), colour):
+            self._insp_light_fields[key].text = str(round(float(val), 3))
+        self._insp_light_fields['light_intensity'].text = str(round(float(cfg.get('intensity', 1.0)), 3))
+        # Direction is derived from the proxy's LIVE rotation, not from a stored
+        # vector — so after a ring drag these fields show the aim the gizmo just
+        # set, matching exactly what _build_level_data will write on save.
+        direction = level_io.rotation_to_direction(
+            [light.rotation_x, light.rotation_y, light.rotation_z])
+        for key, val in zip(('light_dir_x', 'light_dir_y', 'light_dir_z'), direction):
+            self._insp_light_fields[key].text = str(round(val, 3))
+        self._insp_light_swatch.color = self.editor._light_proxy_color(cfg)
+
+    def _apply_light_value(self, key, value_str):
+        """Commit one light field. Colour/intensity write through to light_config
+        (and the proxy tint); direction writes the proxy's ROTATION via the shared
+        conversion, because rotation is what the gizmo and the serializer both read
+        — storing a direction vector here as well would give two sources of truth
+        that drift the moment someone drags a ring."""
+        light = self._selected_light()
+        if light is None or value_str in ('---', ''):
+            return
+        try:
+            value = float(value_str)
+        except (ValueError, TypeError):
+            return
+        cfg = dict(getattr(light, 'light_config', {}))
+
+        if key in ('light_r', 'light_g', 'light_b'):
+            idx = ('light_r', 'light_g', 'light_b').index(key)
+            colour = (list(cfg.get('colour', (1, 1, 1))) + [1, 1, 1])[:3]
+            # Clamp to 0-1: these are 0-1 floats (level_io's schema and Panda3D's
+            # light colour both), and color.rgb() silently clamps >1 to white — a
+            # typo'd 255 would look like it worked and save as pure white.
+            colour[idx] = max(0.0, min(1.0, value))
+            cfg['colour'] = colour
+        elif key == 'light_intensity':
+            # Intensity multiplies into the light colour at build time (the shader
+            # reads p3d_LightSource[0].color.rgb directly — no separate uniform), so
+            # it only needs to be non-negative; a negative sun would subtract light.
+            cfg['intensity'] = max(0.0, value)
+        elif key.startswith('light_dir_'):
+            idx = ('light_dir_x', 'light_dir_y', 'light_dir_z').index(key)
+            direction = level_io.rotation_to_direction(
+                [light.rotation_x, light.rotation_y, light.rotation_z])
+            direction[idx] = value
+            rotation = level_io.sync_light_rotation(direction)
+            old_rot = Vec3(light.rotation)
+            new_rot = Vec3(*rotation)
+            if old_rot != new_rot:
+                # RotateEntityCommand, not ChangePropertyCommand: rotation IS the
+                # sun's aim, so a direction edit and a ring drag land in the undo
+                # history as the same kind of operation.
+                cmd = RotateEntityCommand(light, old_rot, new_rot)
+                cmd.execute()
+                self.editor._history.push(cmd)
+            logger.log('INFO', f"Sun direction changed: field={key} -> {value}")
+            self._refresh_light_ui()
+            return
+        else:
+            return
+
+        logger.log('INFO', f"Sun light changed: field={key} -> {value}")
+        # ChangeLightConfigCommand (not ChangePropertyCommand): it re-tints the
+        # viewport proxy and refreshes these rows inside _apply, so undo restores the
+        # visual state too rather than just the attribute.
+        cmd = ChangeLightConfigCommand(self.editor, light, cfg)
+        cmd.execute()
+        self.editor._history.push(cmd)
 
     def _selected_trigger(self):
         """The single selected trigger, or None (editor shows the action list only
