@@ -964,5 +964,25 @@
         "pickup_type": "ammo",
         "weapon_type": "rifle",
         "amount": 24
+    },
+    {
+        "type": "light",
+        "light_type": "directional",
+        "position": [
+            0.0,
+            10.0,
+            30.86313247680664
+        ],
+        "direction": [
+            -0.4867,
+            -0.8111,
+            -0.3244
+        ],
+        "colour": [
+            1.0,
+            1.0,
+            1.0
+        ],
+        "intensity": 1.0
     }
 ]
