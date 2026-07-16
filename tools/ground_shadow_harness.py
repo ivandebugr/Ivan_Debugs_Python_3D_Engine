@@ -30,8 +30,8 @@ from ursina import Ursina, Entity, camera, scene, color, Vec3, window, destroy
 from panda3d.core import PNMImage, Filename
 from Scripts.asset_resolve import resolve_texture as _resolve_texture
 
-CURRENT_ALPHA = 0.4   # Scripts/ground_shadow.py current value
-OLD_ALPHA = 1.0        # previous value
+CURRENT_ALPHA = 0.22   # Scripts/ground_shadow.py current value
+OLD_ALPHA = 0.4         # previous value
 
 
 def _clear_scene():
