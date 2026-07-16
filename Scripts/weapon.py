@@ -1,5 +1,5 @@
 from ursina import *
-from ursina.shaders.unlit_shader import unlit_shader
+from Scripts.lit_shader import lit_shader
 from panda3d.core import BitMask32, Camera as PandaCamera, NodePath, Quat
 from Scripts.collision_system import (
     AliveEntity, Layers, can_hit, collision_manager
@@ -416,7 +416,16 @@ class Weapon(Entity):
         # depth wiped for this pass) regardless of how close a wall is.
         self.setDepthTest(True)
         self.setDepthWrite(True)
-        self.shader = unlit_shader  # vertex colors from MTL; no scene lighting on viewmodel
+        # Lit path (v1.7 L1). The gun is parent=camera, and main_menu() sets
+        # camera.parent = scene — so the viewmodel sits UNDER scene and inherits the
+        # sun's LightAttrib exactly like world geometry (verified: net LightAttrib on
+        # a camera-parented entity reports the directional_light). Light math is in
+        # eye space, so Panda re-expresses the sun direction per frame and the gun's
+        # shading swings as the player turns, instead of being welded to the
+        # viewmodel. The MTL diffuse here is near-black (Kd ~0.011-0.09) — it is
+        # lit_shader's additive rim/spec, not the multiplied diffuse, that makes
+        # these read as metal rather than as a black silhouette.
+        self.shader = lit_shader
         self.player       = player
         self.original_pos = Vec3(self.position)
         self.original_rotation_x = self.rotation_x

@@ -3,6 +3,7 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import AliveEntity, Layers, collision_manager, swept_move_blocked
 from Scripts.ground_shadow import GroundShadow
 from Scripts.asset_resolve import resolve_model as _resolve_model
+from Scripts.lit_shader import lit_shader
 
 # TUNE: balance / experiment variables — label kept so grep finds them fast during playtesting
 ENEMY_HP_DEFAULT         = 100    # TUNE: try 50 for a 2-shot kill at 25 dmg/bullet
@@ -73,6 +74,11 @@ class Enemy(AliveEntity):
             position=ENEMY_VISUAL_POSITION,
             rotation_y=180,   # enemy-flying.glb's forward axis is reversed vs. the collider's — relative offset, stays correct as the parent turns
             scale=ENEMY_VISUAL_SCALE,
+            # Lit path (v1.7 L1) — on the visual mesh, not the parent: the parent is
+            # the invisible collision proxy (visible_self=False), so shading it would
+            # be a no-op. The drone now takes the sun's Half-Lambert falloff plus a
+            # rim edge, which is what separates it from the level blocks behind it.
+            shader=lit_shader,
         )
         # panda3d-gltf imports enemy-flying.glb with TransparencyAttrib:dual on its
         # ModelRoot (the glTF material's alpha handling), which routes the mesh into
