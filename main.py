@@ -21,6 +21,7 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.lit_shader import lit_shader
+from Scripts import level_io
 from Scripts.level_io import load_level_data
 from Scripts.asset_resolve import (
     resolve_model as _resolve_model, resolve_texture as _resolve_texture,
@@ -322,6 +323,51 @@ class EndScreen(Entity):
         )
 
 
+def _apply_level_lighting():
+    """Create the scene's directional sun from level.json's 'light' entry.
+
+    Called from main_menu() AFTER its scene sweep (which destroys every non-camera
+    entity, a DirectionalLight included) — that ordering is why the sun is built
+    here rather than once at app init, and it is unchanged from when these values
+    were hardcoded.
+
+    Falls back to level_io.default_light_entry() when the level has no light entry
+    or cannot be read, so a pre-v1.7 level.json — and a missing/corrupt one — lights
+    exactly as it did before the sun became editable.
+
+    Intensity multiplies into the light colour: the shader reads
+    p3d_LightSource[0].color.rgb directly (Scripts/lit_shader.py), so scaling the
+    colour IS the intensity control — no extra uniform or per-entity plumbing.
+    """
+    entry = None
+    try:
+        for e in load_level_data('level.json'):
+            if e['type'] == 'light':
+                entry = e
+                break
+    except FileNotFoundError:
+        pass
+    except Exception as e:
+        print(f"Error reading level lighting, using defaults: {e}")
+    if entry is None:
+        entry = level_io.default_light_entry()
+
+    intensity = max(0.0, float(entry['intensity']))
+    r, g, b = (list(entry['colour']) + [1, 1, 1])[:3]
+    sun = DirectionalLight()
+    sun.color = color.rgb(
+        min(1.0, r * intensity),
+        min(1.0, g * intensity),
+        min(1.0, b * intensity),
+    )
+    # look_at consumes the direction vector the same way the pre-v1.7 hardcoded
+    # call did. The editor stores that vector; its proxy's rotation is derived
+    # from it through the same level_io conversion, so the editor's preview and
+    # this light are aimed by one shared definition.
+    sun.look_at(Vec3(*entry['direction']))
+    return sun
+
+
 def load_level():
     try:
         entities = load_level_data('level.json')
@@ -339,6 +385,13 @@ def load_level():
             destroy(e)
 
     for entry in entities:
+        if entry['type'] == 'light':
+            # v1.7 Step 4: lighting is applied by _apply_level_lighting() (called
+            # from main_menu before this) — there is no geometry to build for a
+            # light. MUST be skipped explicitly: the final branch below is an
+            # unconditional `else`, so a light entry would otherwise fall through
+            # and spawn a collidable phantom block at the sun's editor position.
+            continue
         if entry['type'] == 'enemy':
             enemy_placeholder = Entity(
                 position=tuple(entry['position']),
@@ -499,9 +552,13 @@ def main_menu():
     # not survive the first menu rebuild. One directional "sun" fills
     # p3d_LightSource[0]; scene.ambient_color fills p3d_LightModel.ambient. Both
     # are read by lit_shader; unlit geometry (HUD, gun viewmodel) ignores them.
+    #
+    # Ambient stays hardcoded (still scene config, not level data). The sun's
+    # colour/intensity/direction now come from level.json's 'light' entry so the
+    # editor can author them (v1.7 Step 4); a level with no entry yields exactly
+    # the values this code used to hardcode, so pre-v1.7 levels are unchanged.
     scene.ambient_color = color.rgb(0.35, 0.35, 0.40)
-    sun = DirectionalLight()
-    sun.look_at(Vec3(-0.6, -1, -0.4))
+    _apply_level_lighting()
 
     ground = Entity(
         model='cube',
