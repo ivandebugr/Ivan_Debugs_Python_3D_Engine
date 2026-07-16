@@ -33,9 +33,9 @@ Ambient + one directional/point light, stylized (v1.7 Candidate L1):
 Half-Lambert (Valve's warped diffuse, used across the Source engine and TF2)
 remaps N·L from [-1,1] to [0,1] and squares it, so surfaces facing away from
 the sun land near 0.25 instead of hard 0. That is what kills the black-backside
-problem at the source — and it is why `ambient_boost` was retuned down from
-0.18 (see the default_input note below): the old floor existed to rescue
-exactly the case Half-Lambert now handles, so keeping both double-lifts.
+problem at the source — and it is why `ambient_boost` was retuned 0.18 -> 0.06
+(see the default_input note below): the old floor existed to rescue exactly the
+case Half-Lambert now handles, so keeping both double-lifts the shadow side.
 
 Specular and rim are ADDITIVE and deliberately do NOT multiply albedo — that
 is the whole point for this project. The gun MTLs ship near-black diffuse
@@ -185,10 +185,24 @@ lit_shader = Shader(
     default_input={
         'texture_scale': Vec2(1, 1),
         'texture_offset': Vec2(0, 0),
-        # Small ambient floor (0.18 grey). Keeps back-facing / shadowed surfaces
-        # legible without a second light, and stops near-black MTL diffuse from
-        # rendering as pure black even when no scene light is present.
-        'ambient_boost': (0.18, 0.18, 0.18, 1.0),
+        # Ambient floor, retuned 0.18 -> 0.06 when Half-Lambert landed.
+        #
+        # 0.18 existed to rescue dark backsides under flat Lambert, where N·L
+        # clamps to 0 and the shadow side got ambient only. Half-Lambert now
+        # contributes ~0.25 there on its own, so the old floor double-lifts:
+        # measured against the real level lighting (scene ambient 0.35, sun
+        # intensity 1.0 from level_io.default_light_entry), the darkest surface
+        # sits at 0.526 with boost 0.18 vs 0.530 under the old flat model — i.e.
+        # the shadow side stayed as washed out as before and the soft terminator
+        # bought nothing. At 0.06 it drops to 0.407, so shadows read as shadows
+        # again while staying well clear of black.
+        #
+        # NOT dropped to 0, though the backside no longer needs it: the floor has
+        # a second job the retune must not throw away — it is the only lift when
+        # there is NO scene light at all (an entity rendered before main_menu()
+        # builds the sun). At 0.0 that case renders pure black for every material,
+        # not merely dark. 0.06 keeps the safety net at a sixth of its old weight.
+        'ambient_boost': (0.06, 0.06, 0.06, 1.0),
         # Warm/cool grade. Sun-side diffuse skews warm, ambient/shadow side skews
         # cool — the classic TF2 read. Both are gentle (±8%): the sun colour itself
         # is authored per-level in level.json, so heavy tinting here would fight
