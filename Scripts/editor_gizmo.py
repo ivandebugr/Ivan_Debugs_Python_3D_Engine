@@ -8,6 +8,13 @@ Selection, undo history and grid snap remain core-owned shared state, reached
 through the editor back-reference (`self.editor.selected` / `_history` /
 `_snap_1d`).
 
+The rotation rings double as the sun light's orientation gizmo (v1.7 Step 4)
+with no light-specific code here, by design: refresh() gates only on
+`ed.selected`, and handle_rotate_drag() writes rotation_x/y/z — which IS the
+sun's aim (editor_core serializes 'direction' from the proxy's live rotation via
+level_io.rotation_to_direction). Nothing in this module should ever need to know
+a light from a block; if it does, the abstraction has sprung a leak.
+
 Core's input() keeps the dispatch order (v1.2.4 priority chain) and calls
 try_begin_drag() as its Step 1; core's update() drives handle_drag()/refresh().
 """
@@ -481,9 +488,7 @@ class GizmoController:
                 old_pos = self.drag_start_pos[e]
                 new_pos = Vec3(e.position)
                 if old_pos != new_pos:
-                    etype = ('enemy' if e in ed.enemies else
-                             'trigger' if e in ed.triggers else
-                             'pickup' if e in ed.pickups else 'block')
+                    etype = ed._entity_type_name(e)
                     logger.log('INFO', f"Entity moved: type={etype} {[round(p,3) for p in old_pos]} -> {[round(p,3) for p in new_pos]}")
                     ed._history.push(MoveEntityCommand(e, old_pos, new_pos))
             self.drag_axis = None
@@ -526,9 +531,7 @@ class GizmoController:
                 old_rot = self.rotate_start_rot[e]
                 new_rot = Vec3(e.rotation)
                 if old_rot != new_rot:
-                    etype = ('enemy' if e in ed.enemies else
-                             'trigger' if e in ed.triggers else
-                             'pickup' if e in ed.pickups else 'block')
+                    etype = ed._entity_type_name(e)
                     logger.log('INFO', f"Entity rotated: type={etype} {[round(r,3) for r in old_rot]} -> {[round(r,3) for r in new_rot]}")
                     ed._history.push(RotateEntityCommand(e, old_rot, new_rot))
             ed._update_inspector()
