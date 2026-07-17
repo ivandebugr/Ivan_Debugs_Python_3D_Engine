@@ -363,7 +363,63 @@ def _apply_level_lighting():
     # call did. The editor stores that vector; its proxy's rotation is derived
     # from it through the same level_io conversion, so the editor's preview and
     # this light are aimed by one shared definition.
-    sun.look_at(Vec3(*entry['direction']))
+    direction = Vec3(*entry['direction'])
+    sun.look_at(direction)
+    _apply_sun_shadows(sun, direction)
+    return sun
+
+
+# Shadow-map coverage for the sun's depth camera. The play area is the 100x100
+# ground plane (main_menu()); SHADOW_FILM covers a generous slice of it centred on
+# the origin. A directional shadow camera is orthographic, so this is world-units
+# square, NOT an FoV — too small and geometry outside it casts no shadow; too large
+# and every shadow-map texel covers more world and edges coarsen. 60 units frames
+# the near play field crisply at 1024^2 (~0.06 world-units/texel).
+SHADOW_FILM = 60.0
+SHADOW_MAP_SIZE = 1024
+# How far back along -direction to place the light node so the whole scene sits in
+# front of the depth camera's near plane, plus the near/far that bracket it.
+SHADOW_PULLBACK = 60.0
+SHADOW_NEAR, SHADOW_FAR = 1.0, 160.0
+
+
+def _apply_sun_shadows(sun, direction):
+    """Turn the sun into a PCF shadow caster and arm lit_shader's shadow path.
+
+    The L3 probe (tools/shadow_fbo_probe.py) established every step here on the
+    real GL 2.1 driver: the depth FBO allocates, the shadow uniforms reach the
+    #version 120 shader, and — the trap — a DirectionalLight left at the origin
+    has the scene BEHIND its near plane, so the depth map comes back empty and
+    every fragment trivially reads "lit". Pulling the node back along -direction
+    and setting an orthographic film that covers the play area fixes that.
+
+    Teardown is already handled: destroy_light() (Scripts/light_lifecycle.py)
+    calls set_shadow_caster(False) to release the buffer, so the per-menu recreate
+    does not accumulate FBOs (verified flat across 6 cycles once a caster is live —
+    tests/test_light_lifecycle.py).
+    """
+    d = direction.normalized() if direction.length() > 1e-6 else Vec3(0, -1, 0)
+    # Position only moves the depth camera's viewpoint; a DirectionalLight's
+    # rotation (set by look_at above) is what drives p3d_LightSource[0].position's
+    # direction, so pulling back does NOT change how the scene is lit — only what
+    # the shadow camera can see.
+    sun.position = -d * SHADOW_PULLBACK
+
+    light = sun._light
+    light.set_shadow_caster(True, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
+    lens = light.get_lens()
+    lens.set_film_size(SHADOW_FILM, SHADOW_FILM)
+    lens.set_near_far(SHADOW_NEAR, SHADOW_FAR)
+
+    # NOTE: the shader's PCF path is armed by lit_shader's shadow_enabled=1.0
+    # DEFAULT, NOT by a live mutation here. Flipping it per menu-cycle via
+    # `lit_shader.shadow_enabled = 1.0` walks every entity using the shader through
+    # Ursina's Shader.__setattr__ — including entities the menu sweep emptied but
+    # has not yet flushed — and set_shader_input on an empty NodePath crashes
+    # (!is_empty() at nodePath.I:228). So the flag lives in default_input and every
+    # new lit entity inherits it; the shadow map + shadowViewMatrix are supplied
+    # per-light by the GSG once the caster above is set. See the lit_shader
+    # shadow_enabled note for the unbound-sampler-reads-lit safety argument.
     return sun
 
 
