@@ -150,7 +150,7 @@ See: [[work/archive/2026/v1.7-editor-ux-bundle]].
 
 _What am I working toward right now?_
 
-- **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, ~~1 shot SFX~~ (closed 2026-07-07, blaster.ogg/blaster_repeater.ogg wired on weapon fire) + 1 ambient track (CC-0, still open — no source pulled yet), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
+- **v1.3 remainder / itch.io ship prep** — PyInstaller macOS `.app` build, 1 shot SFX (blaster.ogg/blaster_repeater.ogg wired on weapon fire, closed 2026-07-07 — but currently **INAUDIBLE**: the 2026-07-12 OpenAL crash fix forces `NullAudioManager` on this Mac, which postdates and silently undercuts the wiring work; needs re-scoping, not re-closing) + 1 ambient track (CC-0, still open — no source pulled yet), itch.io page with screenshots + clip. See CLAUDE.md Roadmap.
 - **Hands-on playtest of `levels/v1.json`** — mechanics are harness-verified; game-feel is not.
 - **Small editor-UI widget leak** (inspector/browser swatch, 2 entities per F5 cycle) — spun off from the fix-backlog close-out, not yet scheduled.
 - **v1.7 deferred tier, if there's appetite** — rotation ring gizmo, resizable panels, dock-style layout. Not scheduled; see [[v1.7-editor-ux-scoping]].
