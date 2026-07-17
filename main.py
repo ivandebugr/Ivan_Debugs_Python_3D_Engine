@@ -15,6 +15,8 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.lit_shader import lit_shader
+from Scripts.light_lifecycle import destroy_light, is_light
+from Scripts.bloom import BloomPipeline
 from Scripts import dev_shader_tuning  # TEMPORARY dev-only lit_shader live-tuning; see module docstring
 from Scripts import level_io
 from Scripts.level_io import load_level_data
@@ -324,7 +326,9 @@ def _apply_level_lighting():
     Called from main_menu() AFTER its scene sweep (which destroys every non-camera
     entity, a DirectionalLight included) — that ordering is why the sun is built
     here rather than once at app init, and it is unchanged from when these values
-    were hardcoded.
+    were hardcoded. The sweep releases the old sun via destroy_light(), so the
+    per-menu recreate does not accumulate lights or shadow buffers
+    (Scripts/light_lifecycle.py).
 
     Falls back to level_io.default_light_entry() when the level has no light entry
     or cannot be read, so a pre-v1.7 level.json — and a missing/corrupt one — lights
@@ -359,7 +363,63 @@ def _apply_level_lighting():
     # call did. The editor stores that vector; its proxy's rotation is derived
     # from it through the same level_io conversion, so the editor's preview and
     # this light are aimed by one shared definition.
-    sun.look_at(Vec3(*entry['direction']))
+    direction = Vec3(*entry['direction'])
+    sun.look_at(direction)
+    _apply_sun_shadows(sun, direction)
+    return sun
+
+
+# Shadow-map coverage for the sun's depth camera. The play area is the 100x100
+# ground plane (main_menu()); SHADOW_FILM covers a generous slice of it centred on
+# the origin. A directional shadow camera is orthographic, so this is world-units
+# square, NOT an FoV — too small and geometry outside it casts no shadow; too large
+# and every shadow-map texel covers more world and edges coarsen. 60 units frames
+# the near play field crisply at 1024^2 (~0.06 world-units/texel).
+SHADOW_FILM = 60.0
+SHADOW_MAP_SIZE = 1024
+# How far back along -direction to place the light node so the whole scene sits in
+# front of the depth camera's near plane, plus the near/far that bracket it.
+SHADOW_PULLBACK = 60.0
+SHADOW_NEAR, SHADOW_FAR = 1.0, 160.0
+
+
+def _apply_sun_shadows(sun, direction):
+    """Turn the sun into a PCF shadow caster and arm lit_shader's shadow path.
+
+    The L3 probe (tools/shadow_fbo_probe.py) established every step here on the
+    real GL 2.1 driver: the depth FBO allocates, the shadow uniforms reach the
+    #version 120 shader, and — the trap — a DirectionalLight left at the origin
+    has the scene BEHIND its near plane, so the depth map comes back empty and
+    every fragment trivially reads "lit". Pulling the node back along -direction
+    and setting an orthographic film that covers the play area fixes that.
+
+    Teardown is already handled: destroy_light() (Scripts/light_lifecycle.py)
+    calls set_shadow_caster(False) to release the buffer, so the per-menu recreate
+    does not accumulate FBOs (verified flat across 6 cycles once a caster is live —
+    tests/test_light_lifecycle.py).
+    """
+    d = direction.normalized() if direction.length() > 1e-6 else Vec3(0, -1, 0)
+    # Position only moves the depth camera's viewpoint; a DirectionalLight's
+    # rotation (set by look_at above) is what drives p3d_LightSource[0].position's
+    # direction, so pulling back does NOT change how the scene is lit — only what
+    # the shadow camera can see.
+    sun.position = -d * SHADOW_PULLBACK
+
+    light = sun._light
+    light.set_shadow_caster(True, SHADOW_MAP_SIZE, SHADOW_MAP_SIZE)
+    lens = light.get_lens()
+    lens.set_film_size(SHADOW_FILM, SHADOW_FILM)
+    lens.set_near_far(SHADOW_NEAR, SHADOW_FAR)
+
+    # NOTE: the shader's PCF path is armed by lit_shader's shadow_enabled=1.0
+    # DEFAULT, NOT by a live mutation here. Flipping it per menu-cycle via
+    # `lit_shader.shadow_enabled = 1.0` walks every entity using the shader through
+    # Ursina's Shader.__setattr__ — including entities the menu sweep emptied but
+    # has not yet flushed — and set_shader_input on an empty NodePath crashes
+    # (!is_empty() at nodePath.I:228). So the flag lives in default_input and every
+    # new lit entity inherits it; the shadow map + shadowViewMatrix are supplied
+    # per-light by the GSG once the caster above is set. See the lit_shader
+    # shadow_enabled note for the unbound-sampler-reads-lit safety argument.
     return sun
 
 
@@ -532,7 +592,14 @@ def main_menu():
         if not _is_live(e):
             continue
         if e.name not in ['main_camera']:
-            destroy(e)
+            # Lights need destroy_light(), not destroy(): destroy() detaches the
+            # entity but leaves the light on render's LightAttrib and keeps its
+            # shadow FBO, so every menu rebuild leaked one more lit orphan
+            # (on_lights 1->2->3->4 across cycles). See Scripts/light_lifecycle.py.
+            if is_light(e):
+                destroy_light(e)
+            else:
+                destroy(e)
     logger.log('INFO', 'main_menu: old scene swept')
 
     sky = Sky(texture='sky_textures/sky_0.png')
@@ -973,6 +1040,17 @@ if __name__ == '__main__':
     window.resizable = True
     window.fullscreen = False
     window.size = RESOLUTIONS[game_settings['resolution_index']]
+    # FRAME-1 UI FIX: window.size's setter only *requests* the resize (Cocoa
+    # applies it async) — base.win.getSize() still reports the pre-resize size
+    # until a frame is pumped, so update_aspect_ratio() alone would rescale
+    # camera.ui_lens against stale data. renderFrame() forces Panda to process
+    # the pending WindowProperties synchronously so getSize() reflects reality;
+    # update_aspect_ratio() then rescales ui_lens correctly before any frame-1
+    # UI (IntroScreen/main_menu buttons) is built below, regardless of whether
+    # Panda's own 'aspectRatioChanged' event coalesces/delays, and regardless
+    # of whether this resolution triggers a resize at all.
+    base.graphicsEngine.renderFrame()
+    window.update_aspect_ratio()
     window.multisamples = 16
 
     window.position = (
@@ -987,6 +1065,19 @@ if __name__ == '__main__':
     # compiled during main_menu() entity creation use GLSL 1.20.
     print("[main] shader patch 2/2 — post-window-setup")
     _patch_shaders_to_glsl120()
+
+    # v1.7 bloom (Candidate B2). Built ONCE, here, and never again: the chain owns
+    # 4 offscreen buffers, and this project has twice shipped a leak by allocating
+    # GPU resources on a path that main_menu()/return_to_menu() re-runs (shadow
+    # FBOs, LightAttrib entries — see Scripts/light_lifecycle.py). Nothing in
+    # teardown touches it; the quads are raw NodePaths, not scene entities, so
+    # main_menu()'s sweep cannot reach them. Toggle via game.bloom.set_enabled().
+    #
+    # After window setup on purpose: FilterManager sizes its buffers off the
+    # current window, and window.size is set above. It re-sizes them itself on
+    # Panda's window-event afterwards.
+    game.bloom = BloomPipeline()
+    print("[main] bloom pipeline built (4 offscreen buffers, once, at init)")
 
     def _deferred_antialias(task):
         # BUG 1 FIX cont.: run after first frame so render/render2d NodePaths exist.
