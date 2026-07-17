@@ -117,13 +117,28 @@ import main as M  # noqa: E402 — after Ursina() so main_menu()'s entities can 
 M.app = app
 
 CYCLES = 6
-buffers = []
+# Count only BLOOM's own buffers, not the raw offscreen total. Since v1.7 L3 the
+# sun is a shadow caster, so main_menu() also holds one shadow-map FBO
+# ('directional_light') — a real, correctly-released buffer (test_light_lifecycle.py
+# proves it stays flat, not leaking). The bloom invariant this test pins is "bloom's
+# 4 buffers survive the sweep and never re-allocate", which is independent of that
+# shadow FBO. Filtering to the named bloom buffers keeps this test measuring exactly
+# bloom, so a future shadow/other-buffer change can't make it flap.
+bloom_buffers, total_buffers = [], []
 for i in range(CYCLES):
     M.main_menu()
     settle()
-    buffers.append(len(offscreen_buffers()))
-print(f'  offscreen buffers across cycles: {buffers}')
-check('buffers flat at 4 across cycles', buffers, [4] * CYCLES)
+    live = offscreen_buffers()
+    total_buffers.append(len(live))
+    bloom_buffers.append(sorted(b for b in live if b in BLOOM_BUFFERS))
+print(f'  offscreen buffers (total) across cycles: {total_buffers}')
+print(f'  bloom buffers across cycles: {bloom_buffers}')
+check('bloom 4 buffers present + flat across cycles',
+      bloom_buffers, [sorted(BLOOM_BUFFERS)] * CYCLES)
+# The total must also stay FLAT (any value) — a climbing total is a leak somewhere,
+# even if it isn't bloom's. Pin flatness without hardcoding the count.
+check('total offscreen buffer count is flat (no leak from any source)',
+      len(set(total_buffers)), 1)
 
 print('\n[4] the bloom quads survive main_menu()\'s sweep')
 # The sweep destroys every scene entity not named 'main_camera'. The composite quad
