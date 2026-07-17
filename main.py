@@ -1040,6 +1040,17 @@ if __name__ == '__main__':
     window.resizable = True
     window.fullscreen = False
     window.size = RESOLUTIONS[game_settings['resolution_index']]
+    # FRAME-1 UI FIX: window.size's setter only *requests* the resize (Cocoa
+    # applies it async) — base.win.getSize() still reports the pre-resize size
+    # until a frame is pumped, so update_aspect_ratio() alone would rescale
+    # camera.ui_lens against stale data. renderFrame() forces Panda to process
+    # the pending WindowProperties synchronously so getSize() reflects reality;
+    # update_aspect_ratio() then rescales ui_lens correctly before any frame-1
+    # UI (IntroScreen/main_menu buttons) is built below, regardless of whether
+    # Panda's own 'aspectRatioChanged' event coalesces/delays, and regardless
+    # of whether this resolution triggers a resize at all.
+    base.graphicsEngine.renderFrame()
+    window.update_aspect_ratio()
     window.multisamples = 16
 
     window.position = (

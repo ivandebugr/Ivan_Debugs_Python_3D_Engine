@@ -69,6 +69,12 @@ def _launch():
         logger.log('WARN', f'reposition fps_counter failed: {type(e).__name__}: {e}')
     window.borderless = False
     window.size = (1280, 720)
+    # FRAME-1 UI FIX: base.win.getSize() stays stale until Panda processes the
+    # pending resize — force it with renderFrame(), then rescale ui_lens now,
+    # instead of waiting on the async 'aspectRatioChanged' event. LevelEditor()
+    # and the hint Text below build UI (world_scale) before that event could fire.
+    base.graphicsEngine.renderFrame()
+    window.update_aspect_ratio()
 
     Entity(
         model='plane',
