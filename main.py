@@ -16,6 +16,7 @@ from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.lit_shader import lit_shader
 from Scripts.light_lifecycle import destroy_light, is_light
+from Scripts.bloom import BloomPipeline
 from Scripts import dev_shader_tuning  # TEMPORARY dev-only lit_shader live-tuning; see module docstring
 from Scripts import level_io
 from Scripts.level_io import load_level_data
@@ -997,6 +998,19 @@ if __name__ == '__main__':
     # compiled during main_menu() entity creation use GLSL 1.20.
     print("[main] shader patch 2/2 — post-window-setup")
     _patch_shaders_to_glsl120()
+
+    # v1.7 bloom (Candidate B2). Built ONCE, here, and never again: the chain owns
+    # 4 offscreen buffers, and this project has twice shipped a leak by allocating
+    # GPU resources on a path that main_menu()/return_to_menu() re-runs (shadow
+    # FBOs, LightAttrib entries — see Scripts/light_lifecycle.py). Nothing in
+    # teardown touches it; the quads are raw NodePaths, not scene entities, so
+    # main_menu()'s sweep cannot reach them. Toggle via game.bloom.set_enabled().
+    #
+    # After window setup on purpose: FilterManager sizes its buffers off the
+    # current window, and window.size is set above. It re-sizes them itself on
+    # Panda's window-event afterwards.
+    game.bloom = BloomPipeline()
+    print("[main] bloom pipeline built (4 offscreen buffers, once, at init)")
 
     def _deferred_antialias(task):
         # BUG 1 FIX cont.: run after first frame so render/render2d NodePaths exist.

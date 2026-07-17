@@ -24,6 +24,13 @@ class Game:
         # a kill plane teleports the player back here at a health cost instead of
         # zeroing health outright. Reset in return_to_menu() so it never leaks.
         self.respawn_point    = None
+        # v1.7 bloom post-process (Scripts/bloom.py), assigned once by main.py at
+        # app init. UNLIKE every other attribute here, this is NOT session state and
+        # is deliberately absent from return_to_menu()'s reset list: it owns 4
+        # offscreen GPU buffers that must outlive every menu round-trip. Nulling it
+        # on teardown would orphan those buffers and rebuilding it per session is
+        # exactly the leak this project has already shipped twice.
+        self.bloom            = None
 
     def __repr__(self):
         return f"Game(state={self.state!r})"
