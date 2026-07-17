@@ -15,6 +15,7 @@ from Scripts.health_bar import HealthBar
 from Scripts.collision_system import collision_manager, Layers
 from Scripts.game import game, Game
 from Scripts.lit_shader import lit_shader
+from Scripts.light_lifecycle import destroy_light, is_light
 from Scripts import dev_shader_tuning  # TEMPORARY dev-only lit_shader live-tuning; see module docstring
 from Scripts import level_io
 from Scripts.level_io import load_level_data
@@ -324,7 +325,9 @@ def _apply_level_lighting():
     Called from main_menu() AFTER its scene sweep (which destroys every non-camera
     entity, a DirectionalLight included) — that ordering is why the sun is built
     here rather than once at app init, and it is unchanged from when these values
-    were hardcoded.
+    were hardcoded. The sweep releases the old sun via destroy_light(), so the
+    per-menu recreate does not accumulate lights or shadow buffers
+    (Scripts/light_lifecycle.py).
 
     Falls back to level_io.default_light_entry() when the level has no light entry
     or cannot be read, so a pre-v1.7 level.json — and a missing/corrupt one — lights
@@ -532,7 +535,14 @@ def main_menu():
         if not _is_live(e):
             continue
         if e.name not in ['main_camera']:
-            destroy(e)
+            # Lights need destroy_light(), not destroy(): destroy() detaches the
+            # entity but leaves the light on render's LightAttrib and keeps its
+            # shadow FBO, so every menu rebuild leaked one more lit orphan
+            # (on_lights 1->2->3->4 across cycles). See Scripts/light_lifecycle.py.
+            if is_light(e):
+                destroy_light(e)
+            else:
+                destroy(e)
     logger.log('INFO', 'main_menu: old scene swept')
 
     sky = Sky(texture='sky_textures/sky_0.png')

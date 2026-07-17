@@ -24,21 +24,31 @@ FINDINGS (2026-07-17, Apple M3 / "2.1 Metal - 89.4"):
        - shadowViewMatrix expects EYE-space input (p3d_ModelViewMatrix * vertex).
          World space (p3d_ModelMatrix) yields a degenerate all-zero depth.
 
-  3. TEARDOWN LEAKS — THE ACTUAL BLOCKER. Each main_menu()-shaped
-     sweep+rebuild leaks one 1024x1024 depth buffer AND one LightAttrib entry:
-     after 4 cycles, on_lights=4 and the orphans show as "-PandaNode/
-     directional_light" (detached from render/scene, still lit). destroy() does
-     not clear the light from render or release its buffer. Setting
-     shadows=False + render.clear_light() before destroy() releases buffers but
-     on_lights STILL climbs 1->2->3->4 — so the naive fix is insufficient and the
-     real teardown contract is unresolved. NOTE: Ursina's DirectionalLight
-     already sets shadows=True and calls set_shadow_caster() in __init__, and it
-     keeps no handle to the light's NodePath (it is a local in __init__), which
-     is why detaching cleanly is awkward.
+  3. TEARDOWN LEAKS — THE ACTUAL BLOCKER. [RESOLVED 2026-07-17 — see below.]
+     Each main_menu()-shaped sweep+rebuild leaks one 1024x1024 depth buffer AND
+     one LightAttrib entry: after 4 cycles, on_lights=4 and the orphans show as
+     "-PandaNode/directional_light" (detached from render/scene, still lit).
+     destroy() does not clear the light from render or release its buffer.
+     Setting shadows=False + render.clear_light() before destroy() releases
+     buffers but on_lights STILL climbs 1->2->3->4. NOTE: Ursina's
+     DirectionalLight already sets shadows=True and calls set_shadow_caster() in
+     __init__, and it keeps no handle to the light's NodePath (it is a local in
+     __init__), which is why detaching cleanly is awkward.
 
-VERDICT: the driver risk L3 was gated on is retired; the lifecycle risk the
-scoping doc flagged as "where the bodies are buried" is REAL and is the thing to
-solve before any PCF shader work.
+     RESOLUTION: Scripts/light_lifecycle.py:destroy_light(). The reason the
+     "naive fix" above still climbed is that argument-less render.clear_light()
+     clears the whole LightAttrib rather than releasing a specific light, and
+     re-wrapping self._light does not give you the NodePath Panda actually holds
+     (get_on_light(i).node() is light._light == False). Recovering the NodePath
+     from the Entity's own children — light.find_all_matches('**/+Light') — and
+     passing THAT to clear_light(), then remove_node() + set_shadow_caster(False),
+     releases the light completely and order-independently. main_menu()'s sweep
+     now routes lights there; on_lights holds flat at 1 across cycles.
+     Regression test: tests/test_light_lifecycle.py.
+
+VERDICT: the driver risk L3 was gated on is retired, and the lifecycle risk the
+scoping doc flagged as "where the bodies are buried" is fixed. Both blockers to
+PCF shader work are cleared.
 
 Run:  python3 tools/shadow_fbo_probe.py
 Artifacts: tools/shader_out/shadow_probe_*.png, tools/shader_out/shadow_gsg.log
