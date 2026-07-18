@@ -11,6 +11,7 @@ from Scripts.game import game, Game
 SWEPT_OFFSETS = (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
                  Vec3(0, 1.5, 0), Vec3(0, 1.9, 0))
 
+from Scripts.collision_system import Layers, register  # IMPROVED: step-1
 
 class Player(FirstPersonController):
     def __init__(self, position=(0, 0, 0), **kwargs):
@@ -37,6 +38,11 @@ class Player(FirstPersonController):
         # weapon); Shotgun/Rifle are granted by level-placed weapon pickups.
         self.inventory.give(Pistol(self), slot=0)
         self.inventory.switch_to(0)
+        # center=(0,0.75,0) keeps feet at entity.y-0.5 (unchanged) and raises top to entity.y+2.0
+        self.collider = BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))
+        self.skin_width = 0.1
+        register(self, Layers.PLAYER)  # IMPROVED: step-1
+        self.weapon = Weapon(self)
 
         self.debug_lines = []
         self.create_collider_visualization()
@@ -67,6 +73,9 @@ class Player(FirstPersonController):
             Vec3(-0.4, -0.5, -0.4), Vec3(0.4, -0.5, -0.4),
             Vec3(0.4, -0.5,  0.4), Vec3(-0.4, -0.5,  0.4),
             Vec3(-0.4,  2.0, -0.4), Vec3(0.4,  2.0, -0.4),
+            Vec3(-0.4, -0.5, -0.4), Vec3(0.4, -0.5, -0.4),  # bottom (feet)
+            Vec3(0.4, -0.5,  0.4), Vec3(-0.4, -0.5,  0.4),
+            Vec3(-0.4,  2.0, -0.4), Vec3(0.4,  2.0, -0.4),  # top (above camera)
             Vec3(0.4,  2.0,  0.4), Vec3(-0.4,  2.0,  0.4),
         ]
         edges = [
@@ -82,6 +91,82 @@ class Player(FirstPersonController):
                 enabled=False
             )
             self.debug_lines.append(line)
+
+    def generate_raycast_points(self):
+        collider_half_width = 0.5
+        collider_bottom = 0
+        collider_top = 2.0  # top of collider in local space (entity.y + 2.0)
+        rows = 5
+        columns = 5
+
+        self.raycast_start_positions = []
+        self.raycast_directions = []
+
+        main_sides = [
+            ("front", Vec3(0, 0, collider_half_width), Vec3(0, 0, 1)),
+            ("back", Vec3(0, 0, -collider_half_width), Vec3(0, 0, -1)),
+            ("left", Vec3(-collider_half_width, 0, 0), Vec3(-1, 0, 0)),
+            ("right", Vec3(collider_half_width, 0, 0), Vec3(1, 0, 0))
+        ]
+
+        diagonal_sides = [
+            ("front_right", Vec3(collider_half_width, 0, collider_half_width), Vec3(1, 0, 1).normalized()),
+            ("front_left", Vec3(-collider_half_width, 0, collider_half_width), Vec3(-1, 0, 1).normalized()),
+            ("back_right", Vec3(collider_half_width, 0, -collider_half_width), Vec3(1, 0, -1).normalized()),
+            ("back_left", Vec3(-collider_half_width, 0, -collider_half_width), Vec3(-1, 0, -1).normalized()),
+        ]
+
+        for side_name, offset, direction in main_sides + diagonal_sides:
+            for row in range(rows):
+                y = collider_bottom + (collider_top - collider_bottom) * (row / (rows - 1))
+                
+                if "diagonal" in side_name:
+                    local_pos = Vec3(offset.x, y, offset.z)
+                    self.raycast_start_positions.append(local_pos)
+                    self.raycast_directions.append(direction)
+                else:
+                    for col in range(columns):
+                        if "front" in side_name or "back" in side_name:
+                            x = -collider_half_width + (2 * collider_half_width) * (col / (columns - 1))
+                            local_pos = Vec3(x, y, offset.z)
+                        else:
+                            z = -collider_half_width + (2 * collider_half_width) * (col / (columns - 1))
+                            local_pos = Vec3(offset.x, y, z)
+                        
+                        self.raycast_start_positions.append(local_pos)
+                        self.raycast_directions.append(direction)
+
+        self.ceiling_raycast_position = Vec3(0, collider_top, 0)
+        self.ceiling_raycast_direction = Vec3(0, 1, 0)
+
+    def draw_raycast_visuals(self):
+        if self.draw_raycasts:
+            for local_pos, direction in zip(self.raycast_start_positions, self.raycast_directions):
+                line = Entity(
+                    parent=self,
+                    model=Mesh(
+                        vertices=[local_pos, local_pos + direction * 0.6],
+                        mode='line',
+                        static=False
+                    ),
+                    color=color.cyan,
+                    eternal=True,
+                    enabled=self.show_colliders
+                )
+                self.debug_rays.append(line)
+
+            ceiling_line = Entity(
+                parent=self,
+                model=Mesh(
+                    vertices=[self.ceiling_raycast_position, self.ceiling_raycast_position + self.ceiling_raycast_direction * 0.6],
+                    mode='line',
+                    static=False
+                ),
+                color=color.yellow,
+                eternal=True,
+                enabled=self.show_colliders
+            )
+            self.debug_rays.append(ceiling_line)
 
     def update(self):
         """Per-frame: mouse look, gravity, ceiling, horizontal movement, health sync."""
@@ -117,6 +202,7 @@ class Player(FirstPersonController):
             if ground_hit.hit:
                 ground_top = ground_hit.world_point.y
                 player_bottom = self.y - 0.5
+                player_bottom = self.y - 0.5  # FIXED: lower character — half-height collider
                 if player_bottom < ground_top:
                     self.y += ground_top - player_bottom
 
@@ -136,6 +222,14 @@ class Player(FirstPersonController):
 
         self.handle_horizontal_movement()
 
+        if ceiling_hit.hit:
+            if self.vertical_speed > 0:
+                penetration = 0.3 - ceiling_hit.distance
+                self.vertical_speed = 0
+                self.y -= penetration 
+
+        self.handle_horizontal_movement()  # FIXED: bug-2, bug-3 - use swept collision check
+                    
         self.health_bar.value = self.health
         # Single death authority: kill planes / bullets only modify health;
         # this check alone decides game over. A post-checkpoint kill-plane
@@ -196,6 +290,21 @@ class Player(FirstPersonController):
                                   SWEPT_OFFSETS, self.skin_width)
 
     def handle_horizontal_movement(self):
+        # Ignore self and all bullets (identified by layer, not isinstance)
+        ignore = [self] + [
+            e for e in scene.entities
+            if getattr(e, '_collision_layer', 0) in (Layers.PLAYER_BULLET, Layers.ENEMY_BULLET)
+        ]
+        # 5 heights: feet → knee → waist → shoulder → forehead — covers entity.y-0.4 to entity.y+1.9
+        for offset in (Vec3(0, -0.4, 0), Vec3(0, 0.3, 0), Vec3(0, 0.9, 0),
+                       Vec3(0, 1.5, 0), Vec3(0, 1.9, 0)):
+            if raycast(origin + offset, direction,
+                       distance=distance + self.skin_width,
+                       ignore=ignore, debug=False).hit:
+                return True
+        return False
+
+    def handle_horizontal_movement(self):  # FIXED: bug-3 - check before move, axis separation on block
         raw = Vec3(self.forward * (held_keys['w'] - held_keys['s']) +
                    self.right * (held_keys['d'] - held_keys['a']))
         if not raw.length_squared():
@@ -215,3 +324,4 @@ class Player(FirstPersonController):
     def on_destroy(self):
         """Unregister from collision_manager when Ursina destroys this entity."""
         collision_manager.remove(self)
+            self.position += z

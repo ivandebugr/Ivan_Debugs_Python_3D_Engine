@@ -16,6 +16,9 @@ from Scripts.ui_theme import (
     ACCENT_WIN, ACCENT_LOSE, CROSSHAIR_COLOR,
 )
 import pyglet
+from Scripts.health_bar import HealthBar
+from Scripts.collision_system import collision_manager  # IMPROVED: step-5
+import json, pyglet
 
 # Shared game-session logger. Writes logs/session_*.log on exit (atexit).
 # get_game_logger() returns a single cached instance even though main.py is loaded
@@ -41,6 +44,15 @@ def _is_live(entity) -> bool:
         return not entity.is_empty()
     except Exception:
         return False
+        with open('level.json', 'r') as f:
+            entities = json.load(f)
+        
+        for e in scene.entities[:]:  # copy to avoid mid-loop mutation
+            try:
+                if e.name in ['level_block', 'level_enemy']:
+                    destroy(e)
+            except Exception:
+                pass
 
 
 def _themed_button(**kwargs):
@@ -371,6 +383,14 @@ def main_menu():
     logger.log('INFO', 'main_menu: old scene swept')
 
     sky = Sky(texture='sky_textures/sky_0.png')
+    for e in scene.entities[:]:  # copy to avoid mid-loop mutation leaving dead NodePaths
+        try:
+            if e.name not in ['main_camera']:
+                destroy(e)
+        except Exception:
+            pass
+
+    sky = Sky()  # FIX-1d: 'sky_default' texture absent in Ursina 8.3.0; use built-in gradient
     sky.name = 'main_sky'
 
     camera.name = 'main_camera'
@@ -488,6 +508,8 @@ def main_menu():
         mouse.visible = False
         mouse.locked = True
         game.start()
+        if hasattr(player, 'weapon') and player.weapon.crosshair:  # FIX-3
+            player.weapon.crosshair.visible = True  # FIX-3: show crosshair when gameplay starts
 
     play_button.on_click = start_game
     quit_button.on_click = application.quit
@@ -575,6 +597,91 @@ if __name__ == '__main__':
     # BUG 1 FIX: render/render2d NodePaths are not fully initialized during the
     # window-setup resize sequence; defer setAntialias to the first frame.
     camera.clip_plane_near = 0.01
+    from panda3d.core import AntialiasAttrib, loadPrcFileData  # FIX-2
+    loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')  # FIX-2: request MSAA framebuffer before window opens
+    app = Ursina(title="Ivan's 3D Engine")
+    # FIX-1b: Ursina 8.3.0 made unlit_with_fog_shader the default for every Entity, and Sky()
+    # hardcodes shader=unlit_shader. Both shaders use GLSL #version 130/140, but macOS OpenGL 2.1
+    # (the only context available on this machine) only supports GLSL 1.20. Patch both shader objects
+    # to GLSL 1.20 syntax *before* any entity is created so the first compile succeeds.
+    def _patch_shaders_to_glsl120():  # FIX-1b
+        from ursina.shaders.unlit_shader import unlit_shader as _us
+        from ursina.shaders.unlit_with_fog_shader import unlit_with_fog_shader as _ufs
+        _us.vertex = (
+            '#version 120\n'
+            'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+            'uniform mat4 p3d_ModelViewMatrix;\n'
+            'uniform mat4 p3d_ModelMatrix;\n'
+            'attribute vec4 p3d_Vertex;\n'
+            'attribute vec2 p3d_MultiTexCoord0;\n'
+            'varying vec2 uvs;\n'
+            'uniform vec2 texture_scale;\n'
+            'uniform vec2 texture_offset;\n'
+            'attribute vec4 p3d_Color;\n'
+            'varying vec4 vertex_color;\n'
+            'void main() {\n'
+            '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+            '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
+            '    vertex_color = p3d_Color;\n'
+            '}\n'
+        )
+        _us.fragment = (
+            '#version 120\n'
+            'uniform sampler2D p3d_Texture0;\n'
+            'uniform vec4 p3d_ColorScale;\n'
+            'varying vec2 uvs;\n'
+            'varying vec4 vertex_color;\n'
+            'void main() {\n'
+            '    gl_FragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
+            '}\n'
+        )
+        _us.compiled = False
+        _ufs.vertex = (
+            '#version 120\n'
+            'uniform mat4 p3d_ModelViewProjectionMatrix;\n'
+            'uniform mat4 p3d_ModelViewMatrix;\n'
+            'uniform mat4 p3d_ModelMatrix;\n'
+            'attribute vec4 p3d_Vertex;\n'
+            'attribute vec2 p3d_MultiTexCoord0;\n'
+            'varying vec2 uvs;\n'
+            'uniform vec2 texture_scale;\n'
+            'uniform vec2 texture_offset;\n'
+            'attribute vec4 p3d_Color;\n'
+            'varying vec4 vertex_color;\n'
+            'varying vec3 vertex_world_position;\n'
+            'void main() {\n'
+            '    gl_Position = p3d_ModelViewProjectionMatrix * p3d_Vertex;\n'
+            '    uvs = (p3d_MultiTexCoord0 * texture_scale) + texture_offset;\n'
+            '    vertex_color = p3d_Color;\n'
+            '    vertex_world_position = (p3d_ModelMatrix * p3d_Vertex).xyz;\n'
+            '}\n'
+        )
+        _ufs.fragment = (
+            '#version 120\n'
+            'uniform sampler2D p3d_Texture0;\n'
+            'uniform vec4 p3d_ColorScale;\n'
+            'varying vec2 uvs;\n'
+            'varying vec4 vertex_color;\n'
+            'varying vec3 vertex_world_position;\n'
+            'uniform vec3 camera_world_position;\n'
+            'uniform vec4 fog_color;\n'
+            'uniform float fog_start;\n'
+            'uniform float fog_end;\n'
+            'void main() {\n'
+            '    vec4 fragColor = texture2D(p3d_Texture0, uvs) * p3d_ColorScale * vertex_color;\n'
+            '    float distance_to_camera = length(vertex_world_position.xyz - camera_world_position);\n'
+            '    float fog_length = fog_end - fog_start;\n'
+            '    float t = clamp(distance_to_camera / fog_length, 0.0, 1.0);\n'
+            '    fragColor.rgb = mix(fragColor.rgb, fog_color.rgb, t * fog_color.a);\n'
+            '    gl_FragColor = fragColor;\n'
+            '}\n'
+        )
+        _ufs.compiled = False
+    _patch_shaders_to_glsl120()  # FIX-1b
+    window.color = color.rgb(50, 50, 60)  # FIX-1a: Ursina 8.3.0 changed default window background to black
+    render.setAntialias(AntialiasAttrib.MAuto)   # FIX-2: enable AA on 3D scene
+    render2d.setAntialias(AntialiasAttrib.MAuto)  # FIX-2: enable AA on UI / camera.ui
+    camera.clip_plane_near = 0.01  # default ~0.1 matches skin_width — geometry at arm's length disappears when looking down at walls
     window.title = "Ivan's 3D Engine"
     window.exit_button.visible = False
     window.fps_counter.enabled = True
@@ -621,6 +728,12 @@ if __name__ == '__main__':
             game.trigger_win()
         if game.state == Game.PLAYING and game.hud:
             game.hud.update_ammo()
+        collision_manager.update()  # IMPROVED: step-5 — per-frame spatial grid update  # VERIFIED: step-5
+
+        for e in scene.entities:
+            if isinstance(e, HealthBar) and e.is_3d:
+                e.world_scale = (1, 1, 1)
+                e.always_on_top = True
 
     def input(key):
         if key == 'f':
@@ -658,6 +771,27 @@ if __name__ == '__main__':
             mouse.locked = False
 
         if key == 'left mouse' and not window.fullscreen and game.state == Game.PLAYING:
+            if player and hasattr(player, 'enabled'):
+                game_paused = not game_paused
+                if game_paused:
+                    pause_menu = PauseMenu()
+                    pause_menu.visible = True
+                    mouse.visible = True
+                    mouse.locked = False
+                    application.time_scale = 0
+                    if hasattr(player, 'weapon') and player.weapon.crosshair:  # FIX-3
+                        player.weapon.crosshair.visible = False  # FIX-3: hide crosshair while paused
+                else:
+                    if pause_menu:
+                        destroy(pause_menu)
+                        pause_menu = None
+                    mouse.visible = False
+                    mouse.locked = True
+                    application.time_scale = 1
+                    if hasattr(player, 'weapon') and player.weapon.crosshair:  # FIX-3
+                        player.weapon.crosshair.visible = True  # FIX-3: restore crosshair on resume
+
+        if key == 'left mouse' and not window.fullscreen and not game_paused:
             mouse.locked = True
             mouse.visible = False
 

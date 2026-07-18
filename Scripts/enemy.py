@@ -25,6 +25,11 @@ class Enemy(AliveEntity):
         if enemy_type not in VALID_ENEMY_TYPES:
             raise ValueError(f"Unknown enemy_type {enemy_type!r}; valid: {VALID_ENEMY_TYPES}")
 
+from Scripts.collision_system import AliveEntity, Layers, register  # IMPROVED: step-1
+
+
+class Enemy(AliveEntity):  # IMPROVED: step-2 — AliveEntity for frame-safe destroy
+    def __init__(self, spawn_position, player):
         super().__init__(
             model='cube',
 
@@ -63,6 +68,14 @@ class Enemy(AliveEntity):
 
         self._occluded        = False   # cached result — updated on throttle interval
         self._occlusion_timer = 0.0     # counts down; raycast fires when <= 0
+        register(self, Layers.ENEMY)  # IMPROVED: step-1
+        self.health     = 100
+        self.max_health = 100
+        self.player     = player
+        self.shoot_cooldown  = 1.0
+        self.can_shoot  = True
+        self.attack_range    = 30
+        self.detection_range = 100
 
         self.health_bar = HealthBar(
             parent=self,
@@ -70,6 +83,8 @@ class Enemy(AliveEntity):
             value=self.health,
             position=(10, 10, 0),
             scale=(0.5, 0.1),
+            position=(0, 2, 0),
+            scale=(2, 0.3),
             is_3d=True,
             bar_origin=(0, 0),
         )
@@ -77,6 +92,7 @@ class Enemy(AliveEntity):
     def update(self):
         """Per-frame: rotate toward player, throttled occlusion check, tick the tree."""
         if not self.alive or not self.player:
+        if not self.alive or not self.player:  # IMPROVED: step-2 — guard  # VERIFIED: step-2
             return
 
         player_dist = distance(self.position, self.player.position)
@@ -163,6 +179,17 @@ class Enemy(AliveEntity):
 
     def _is_occluded(self) -> bool:
         """Raycast from self toward player; True if a non-player entity blocks the line of sight."""
+            if player_dist <= self.attack_range and self.can_shoot:
+                self.shoot()
+
+        self.health_bar.world_position = self.world_position + Vec3(0, 2, 0)
+        self.health_bar.value = self.health
+        self.health_bar.enabled = player_dist < 150 and not self._is_occluded()
+
+        if self.health <= 0:
+            self.die()
+
+    def _is_occluded(self) -> bool:
         hit = raycast(
             self.position + Vec3(0, 1, 0),
             (self.player.position - self.position).normalized(),
@@ -177,6 +204,7 @@ class Enemy(AliveEntity):
         if not self.can_shoot:
             return
         from Scripts.weapon import get_enemy_bullet_pool  # lazy — breaks weapon↔enemy circular import
+        from Scripts.weapon import get_enemy_bullet_pool  # IMPROVED: step-1 — lazy import breaks cycle
         pool = get_enemy_bullet_pool()
         pool.acquire(
             position=self.position + Vec3(0, 1.5, 0),
@@ -184,6 +212,7 @@ class Enemy(AliveEntity):
             player=self.player,
             enemy=self,
             speed=10,
+            speed=10
         )
         self.can_shoot = False
         invoke(setattr, self, 'can_shoot', True, delay=self.shoot_cooldown)
@@ -191,4 +220,6 @@ class Enemy(AliveEntity):
     def on_die(self):
         """Destroy health bar before super().on_die() destroys self."""
         if hasattr(self, 'health_bar') and self.health_bar:
+    def on_die(self):  # IMPROVED: step-2 — cleanup before destroy()
+        if hasattr(self, 'health_bar'):
             destroy(self.health_bar)

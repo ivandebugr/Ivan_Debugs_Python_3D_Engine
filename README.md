@@ -64,6 +64,41 @@ if can_hit(self, hit.entity):
 
 ### Player collider
 
+```
+
+---
+
+## Collision design
+
+Three authorities. Never add a fourth.
+
+| Authority | Where | What it covers |
+|---|---|---|
+| Swept projectile raycast | `PlayerBullet.update`, `EnemyBullet.update` in `weapon.py` | Bullet hits wall or character — single point where damage is applied |
+| Swept player movement | `Player._swept_blocked` in `player_controller.py` | Wall collision — 5 rays at different heights before moving, falls back to axis slide |
+| Ground / ceiling raycast | `Player.update` in `player_controller.py` | Gravity, landing, head bumps |
+
+### Bitmask layer registry (`collision_system.py`)
+
+Entities declare what they are and what they hit. No `isinstance` needed outside `collision_system.py`.
+
+```python
+from Scripts.collision_system import Layers, register, can_hit
+
+register(self, Layers.ENEMY)          # in Enemy.__init__
+register(self, Layers.PLAYER_BULLET)  # in PlayerBullet.__init__ (via pool)
+
+# In PlayerBullet.update — replaces isinstance(hit.entity, Enemy):
+if can_hit(self, hit.entity):
+    hit.entity.health -= self.damage
+```
+
+`can_hit(a, b)` checks `a._collision_layer & b._collision_mask` against the `COLLISION_MATRIX` without importing any entity types.
+
+**Important:** wall entities are plain Ursina `Entity` objects and are **not** registered. `_swept_blocked` therefore does raw `raycast().hit` — it does **not** filter through `can_hit`. `swept_cast` (the version in `collision_system.py`) is for bullets only.
+
+### Player collider
+
 `BoxCollider(self, center=(0, 0.75, 0), size=(0.8, 2.5, 0.8))`
 
 - Bottom: `entity.y − 0.5` (feet). Ground snap uses `player_bottom = self.y − 0.5`.
@@ -75,6 +110,24 @@ if can_hit(self, hit.entity):
 ## Entity lifecycle — `AliveEntity`
 
 All entities that can die mid-frame inherit `AliveEntity` from `collision_system.py`. Use `die()`, never `destroy()` directly.
+
+```python
+class MyEntity(AliveEntity):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        register(self, Layers.ENEMY)
+
+    def update(self):
+        if not self.alive:   # guard — update() fires after die() this frame
+            return
+        ...
+        if should_die:
+            self.die()
+
+    def on_die(self):
+        destroy(self.health_bar)   # sub-entities first; super().die() calls destroy(self)
+```
+
 
 ```python
 class MyEntity(AliveEntity):
@@ -128,6 +181,54 @@ Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/e
 - **M** `_spawn_gameplay_from_snapshot()` now passes `rotation=` to block `Entity` constructor so rotated blocks appear correctly in play-in-editor
 
 ---
+
+### v6 — Level editor Ursina 8.3.0 compatibility
+
+Applied the same fixes from `main.py` to `Scripts/level_editor.py` so it renders correctly when run standalone (`python Scripts/level_editor.py`).
+
+- **GLSL 1.20 shader patch** — `_patch_shaders_to_glsl120()` defined and called immediately after `Ursina()`, before any entity is created. Same fix as `main.py`: rewrites `unlit_shader` and `unlit_with_fog_shader` to use `attribute`/`varying`, `texture2D()`, and `gl_FragColor` instead of GLSL 1.30+ syntax. Root cause and mechanism identical to the v5 black screen fix.
+- **MSAA 4×** — `loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')` added before `Ursina()` + `render.setAntialias` / `render2d.setAntialias` after.
+- **Window background** — `window.color = color.rgb(50, 50, 60)` to match the game's grey instead of Ursina 8.3.0's black default.
+- **`AntialiasAttrib` import** — added to the existing `from panda3d.core import ...` line at the top of the file.
+
+---
+
+### v5 — Ursina 8.3.0 compatibility, anti-aliasing, crosshair polish
+
+#### Black screen fix (root cause)
+
+Ursina 8.3.0 changed `Entity.default_shader` from `None` to `unlit_with_fog_shader`, and `Sky()` hardcodes `shader=unlit_shader`. Both shaders use GLSL `#version 130` / `#version 140`, but macOS OpenGL 2.1 (the only context available on Apple Silicon via Panda3D's CocoaGraphicsPipe) supports GLSL 1.20 at most. Every shader compilation failed silently → all geometry rendered as opaque black.
+
+**Fix:** `_patch_shaders_to_glsl120()` in `main.py` rewrites both shader objects to GLSL 1.20 syntax (`attribute`/`varying`, `texture2D()`, `gl_FragColor`) before the first entity is created.
+
+Additional fixes applied alongside:
+- `window.color = color.rgb(50, 50, 60)` — Ursina 8.3.0 changed the default window background to black.
+- `Sky()` instead of `Sky(texture='sky_default')` — the `sky_default` texture asset was removed in 8.3.0.
+
+#### Anti-aliasing (MSAA 4×)
+
+- `loadPrcFileData('', 'framebuffer-multisample 1\nmultisamples 4')` called before `App()` so the OS-level MSAA framebuffer is requested before the window opens.
+- `render.setAntialias(AntialiasAttrib.MAuto)` + `render2d.setAntialias(AntialiasAttrib.MAuto)` enable AA on the 3D scene and all UI.
+
+
+`PlayerBullet` and `EnemyBullet` live in `weapon.py` and are rented from module-level pools. After the pool is warm, no new `Entity` objects are allocated per shot.
+
+```python
+# Weapon.shoot():
+bullet = _player_bullet_pool.acquire(position=..., direction=..., speed=50, damage=25, player=self.player)
+if bullet is None:
+    return   # pool exhausted (>30 simultaneous player bullets)
+
+# Enemy.shoot():
+from Scripts.weapon import get_enemy_bullet_pool
+get_enemy_bullet_pool().acquire(position=..., target=..., player=self.player, enemy=self, speed=10)
+```
+
+Inactive bullets are teleported to `(0, −10000, 0)` instead of being stashed/enabled-toggled — Panda3D's `unstash()` asserts on re-enable of a previously disabled `NodePath`.
+
+---
+
+## Changelog
 
 ### v6 — Level editor Ursina 8.3.0 compatibility
 

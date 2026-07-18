@@ -7,3 +7,8 @@ logs/
 assets/manifest.json
 .DS_Store
 .worktrees/
+__pycache__/
+*.pyc
+*.pyo
+.vscode/
+claude-skills-main 2 copy/
