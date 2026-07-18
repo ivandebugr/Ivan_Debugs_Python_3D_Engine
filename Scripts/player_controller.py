@@ -118,23 +118,34 @@ class Player(FirstPersonController):
                            + collision_manager.query_layer(Layers.TRIGGER)
                            + collision_manager.query_layer(Layers.PICKUP))
 
+        # Ground ray is anchored ABOVE the feet (feet at self.y-0.5) and cast down,
+        # so it always meets a floor's top face from above — even when the feet
+        # start buried in it. The old ray at self.y-0.1 sat INSIDE the floor block
+        # at spawn (base FirstPersonController.__init__ snaps origin to floor top
+        # -> feet 0.5u buried) and read a garbage hit point, and it registered
+        # grounded up to ~1u above the feet, so a landing halted with the feet
+        # floating ~0.55u above the floor. Both symptoms were the same mis-anchored
+        # ray + up-only snap; the fix anchors at the feet and snaps BOTH ways.
+        GROUND_PROBE_UP = 0.6   # ray starts this far above the feet
+        GROUND_TOL      = 0.3   # grounded when a floor is within this below the feet
+        feet = self.y - 0.5
         ground_hit = raycast(
-            self.position + (0, -0.1, 0),
+            self.position + Vec3(0, GROUND_PROBE_UP - 0.5, 0),  # 0.5 above = feet+PROBE_UP
             (0, -1),
-            distance=1,
+            distance=GROUND_PROBE_UP + GROUND_TOL,
             ignore=vertical_ignore
         )
-        self.grounded = ground_hit.hit
+        # Only ground/snap while descending or at rest — never mid-jump-ascent,
+        # or the ray would re-detect the floor just left and clip the jump short.
+        self.grounded = ground_hit.hit and self.vertical_speed <= 0
 
         if not self.grounded:
             self.vertical_speed -= self.gravity * time.dt
         else:
             self.vertical_speed = 0
-            if ground_hit.hit:
-                ground_top = ground_hit.world_point.y
-                player_bottom = self.y - 0.5
-                if player_bottom < ground_top:
-                    self.y += ground_top - player_bottom
+            # Snap feet to the floor top in BOTH directions: up if buried,
+            # down if floating. Removes the half-buried spawn and the post-land float.
+            self.y += ground_hit.world_point.y - feet
 
         self.y += self.vertical_speed * time.dt
 
@@ -195,7 +206,12 @@ class Player(FirstPersonController):
             self.show_colliders = not self.show_colliders
             self.toggle_collider_visualization()
             self.toggle_raycast_visualization()
-        super().input(key)
+        # NOT calling super().input(key): FirstPersonController.input() ONLY maps
+        # space -> self.jump() (base has no other keys), and base jump() runs an
+        # animate_y tween that writes self.y directly, fighting our physics jump
+        # (vertical_speed integrated in update()). Two systems moving y on the
+        # same frame clamped the apex to ~1.6u vs the tuned 3.6u (jump_force=18,
+        # gravity=45 -> v²/2g = 3.6). Physics owns jumping; base trigger removed.
 
     def toggle_collider_visualization(self):
         for line in self.debug_lines:

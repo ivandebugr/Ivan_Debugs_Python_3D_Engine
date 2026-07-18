@@ -1,8 +1,8 @@
 {
-    "resolution_index": 2,
+    "resolution_index": 0,
     "sfx_volume": 0.2345356047153473,
     "music_volume": 1.0,
-    "show_debug_stats": false,
+    "show_debug_stats": true,
     "show_hints": false,
     "weapon_sway_enabled": true,
     "camera_bob_enabled": true

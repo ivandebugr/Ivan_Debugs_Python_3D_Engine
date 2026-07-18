@@ -59,6 +59,22 @@ class HealthBar(Entity):
                 color=TEXT_PRIMARY,
                 billboard=True,
             )
+            # A WORLD-space bar must be occluded by the viewmodel gun, which draws
+            # in the later sort-15 VM display region (weapon.py). always_on_top
+            # (set above) turns depth-test/write OFF, so the bar composited straight
+            # OVER the gun. Restore real depth so the gun occludes it — wall-
+            # occlusion is already handled by Enemy._is_occluded(), and the bar
+            # floats in open air above the enemy, so it needs no depth trick.
+            #
+            # bg/bar/text are billboarded and near-coplanar, so under depth-testing
+            # their 0.01 z-offsets z-fight and the dark bg can win, hiding the
+            # coloured fill. Order them explicitly by cull-bin draw order (bg behind
+            # bar behind text) instead of by z: give bg depth-write OFF so it can't
+            # occlude the bar drawn after it, and bar/text depth-write ON so the gun
+            # still occludes the whole thing. All depth-TEST ON.
+            self.bg.setBin('fixed', 0);  self.bg.setDepthTest(True);  self.bg.setDepthWrite(False)
+            self.bar.setBin('fixed', 1); self.bar.setDepthTest(True); self.bar.setDepthWrite(True)
+            self.text.setBin('fixed', 2); self.text.setDepthTest(True); self.text.setDepthWrite(True)
         else:
             text_pos   = kwargs.get('text_position', (0, 0))
             text_scale = kwargs.get('text_scale', 2)

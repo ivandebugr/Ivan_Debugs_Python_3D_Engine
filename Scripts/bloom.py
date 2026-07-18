@@ -98,6 +98,16 @@ _VERT = (
 
 # Bright-pass: isolate what glows, and by how much.
 #
+# Selection is by LUMINANCE (classic B2, kept — B3 authored glow rides on TOP of
+# this rather than replacing it, see below). A fragment glows in proportion to how
+# far its luminance rises above `threshold`. B3 (v1.7) authors glow by making
+# flagged entities EMISSIVELY BRIGHT enough to cross this threshold — lit_shader's
+# `glow_color * glow_strength` additive term (see Scripts/lit_shader.py). That is
+# why selection stays luminance-based: on this macOS GL 2.1 Metal driver the color
+# buffer's alpha is premultiplied coverage, NOT free data (measured — a fragment
+# with a=0 renders invisible; brain/Gotchas), so glow cannot be smuggled through
+# alpha; brightness IS the selector, and authored glow simply lifts brightness.
+#
 # The subtract-and-renormalise (rather than a hard `if lum > t` cutoff) is what
 # keeps the halo from having a visible hard edge where a surface's luminance
 # crosses the threshold: contribution ramps from 0 at the threshold instead of

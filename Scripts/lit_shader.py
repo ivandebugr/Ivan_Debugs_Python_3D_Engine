@@ -160,6 +160,23 @@ LIT_FRAG = (
     'uniform float shadow_texel;\n'
     'uniform float shadow_strength;\n'
     'uniform float shadow_enabled;\n'
+    # --- Glow-map bloom (v1.7 B3) -----------------------------------------------
+    # Authored glow = an ADDITIVE emissive lift on the final colour, per-entity. A
+    # flagged entity sets glow_strength > 0 (and optionally a glow_color) so its lit
+    # output rises above Scripts/bloom.py's luminance threshold (BLOOM_THRESHOLD
+    # 0.75) and blooms; a plain surface at the same albedo stays below it and does
+    # not. Selection is by BRIGHTNESS, not an alpha channel, because on this macOS
+    # GL 2.1 Metal driver the colour buffer's alpha is premultiplied coverage, not
+    # free data (a fragment with a=0 renders invisible — measured, brain/Gotchas),
+    # so glow cannot be smuggled through gl_FragColor.a. Brightness IS the selector.
+    # Additive (not albedo-multiplied) for the same reason spec/rim are: the near-
+    # black gun/enemy MTLs would swallow any multiplied glow.
+    # Permanent default_input (glow_strength 0.0 = no glow), set PER-ENTITY via
+    # entity.set_shader_input — NEVER live-mutated on this shared Shader singleton
+    # (that walks emptied NodePaths and crashes at nodePath.I:228 — the exact
+    # shadow_enabled gotcha; see its default_input note below).
+    'uniform vec3 glow_color;\n'
+    'uniform float glow_strength;\n'
     'varying vec2 uvs;\n'
     'varying vec4 vertex_color;\n'
     'varying vec3 world_normal;\n'
@@ -252,8 +269,12 @@ LIT_FRAG = (
     '                  + diffuse;\n'
     '    // Spec + rim are ADDITIVE, not albedo-multiplied: near-black gun MTLs\n'
     '    // (Kd ~0.02) would swallow any multiplied highlight and stay black.\n'
-    '    vec3 highlight = sun * spec + rim_color.rgb * rim;\n'
-    '    gl_FragColor = vec4(albedo.rgb * lighting + highlight, albedo.a);\n'
+    # Authored glow (v1.7 B3): additive emissive lift that pushes a flagged entity
+    # over the bloom luminance threshold. glow_strength 0 (default) = no lift.
+    '    vec3 highlight = sun * spec + rim_color.rgb * rim + glow_color * glow_strength;\n'
+    # Opaque output: alpha is premultiplied coverage on this driver (see the
+    # glow_color uniform note), so lit world geometry must stay a=1.0 or it dims.
+    '    gl_FragColor = vec4(albedo.rgb * lighting + highlight, 1.0);\n'
     '}\n'
 )
 
@@ -341,6 +362,23 @@ lit_shader = Shader(
         # How dark a fully-occluded fragment gets on its DIRECT term. 0.85 leaves
         # 15% sun in shadow so cast shadows read deep but not crushed-black — the
         # cool ambient fill still lifts them (that lift is intentional, not a leak).
-        'shadow_strength': 0.85,
+        'shadow_strength': 0.35,
+        # --- Glow-map bloom (v1.7 B3) -----------------------------------------
+        # Authored glow: additive emissive lift that pushes a flagged entity over
+        # the bloom luminance threshold (Scripts/bloom.py BLOOM_THRESHOLD 0.75).
+        # glow_strength 0.0 = no glow, the correct default for every world block /
+        # ground / gun / plain enemy — they must not bloom. A glowing entity sets
+        # glow_strength (and optionally glow_color) per-instance via
+        # entity.set_shader_input. glow_color is white so a bare glow_strength lifts
+        # neutrally; tint it for coloured glow.
+        #
+        # PERMANENT default, set per-entity, NEVER reassigned on this shared Shader
+        # object after entities exist — that is the exact crash class the L3 shadow
+        # work hit (brain/Gotchas: "Toggling a Shader's default_input uniform per
+        # menu-cycle walks emptied-but-unflushed NodePaths ... nodePath.I:228").
+        # set_shader_input on an individual Entity is fine; Shader.__setattr__ on the
+        # module-level singleton is what crashes. Same rule as shadow_enabled above.
+        'glow_color': (1.0, 1.0, 1.0),
+        'glow_strength': 0.0,
     },
 )

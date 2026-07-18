@@ -20,8 +20,13 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 ## Active Projects
 
 - [[work/active/v1.7-lighting-scoping]] — TF2-style lighting/shadows under the GLSL 1.20 hard constraint: four candidates (L1 stylized sun, L2 blobs+baked AO, L3 shadow map, L4 point/spot lights) with cost/risk/perf on M3 | Scoped 2026-07-16, awaiting Ivan's pick
+- [[work/active/v1.7-bloom-scoping]] — Bloom post-process under GLSL 1.20: four candidates (B1 single-quad lite, B2 downsampled chain, B3 glow-map, B4 billboard sprites) with passes/perf/UI-camera answer on M3; CommonFilters bloom measured dead (Cg disabled on arm64) | Scoped 2026-07-17, awaiting Ivan's pick
+- [[work/active/v1.7-particles-scoping]] — General-purpose particle system (weapon FX, death FX, ambient dust) under GLSL 1.20: four candidates (P1 one generalized pool, P2 two systems on shared base, P3 batched GPU quads + debris pool, P4 Panda3D built-in) with reuse/teardown/perf on M3; panda3d.physics verified importable | Scoped 2026-07-17, awaiting Ivan's pick
 - [[work/active/v2.0-release]] — Modding, packaged runtime, gamepad input, procedural level gen — PUBLIC RELEASE | Planned | Blocked on: v1.5
 - [[work/active/v1.7-fix-backlog]] — Open loose ends from the v1.7 cycle: ambient/music track (v1.3 remainder), C4/C5 layout decision, two stray unstaged working-tree changes. Editor-interaction fixes (drag-lock, convert-entity-type, inspector layout, smoke harness) shipped this cycle and are tracked closed in this doc.
+- [[work/active/v1.7-playtest-findings]] — Automated full playthrough at v1.7 HEAD (probes over the smoke harness, screenshots in motion): 8 confirmed bugs (shotgun pellet fratricide, spawn burial, double-driven jump, cadence clamp, level.json damage…) + what still needs Ivan's hands | Audited 2026-07-17, awaiting review
+- [[work/active/v1.7-editor-ux-audit]] — Whole-editor UX audit post-v1.7 bundle: ten verified defects (D1 texture-stripping data loss, sun-inspector overlap, toolbar overflow…) + five improvement bundles E1–E5 with cost/risk, no winner picked | Audited 2026-07-17, awaiting Ivan's pick
+- [[work/active/v1.7-collision-audit]] — Systemic collision audit in the Gotchas families: F1 pellet fratricide + 8 more (confirmed/latent tagged), verified-OK list, recommendations only | Audited 2026-07-17, awaiting review
 
 ## Review Prep
 

@@ -655,7 +655,7 @@
             0.0,
             -1.0
         ],
-        "texture": "floor_tiles_tan_small_damaged.png",
+        "texture": "",
         "colour": [
             0.627,
             0.627,
@@ -983,6 +983,6 @@
             1.0,
             1.0
         ],
-        "intensity": 1.0
+        "intensity": 1.5
     }
 ]

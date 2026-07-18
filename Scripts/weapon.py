@@ -94,12 +94,20 @@ class PlayerBullet(AliveEntity):
     def __init__(self, position=None, direction=None,
                  speed=50, damage=25, player=None):
         """Allocate one pooled player bullet; _reset() sets live state."""
+        # NO collider: a player bullet is a raycast *source* (its update() ray plus
+        # can_hit() is the single damage authority), never a raycast *target*.
+        # A 'box' collider made bullets visible to every ray that didn't ignore
+        # them — so the 5 co-located shotgun pellets raycast-killed each other on
+        # spawn (5 spawned → 1 alive two frames later; shotgun shipped at ~1/5
+        # since v1.5), and stray bullets read as false "ground"/LOS hits. EnemyBullet
+        # already carries no collider for the same reason. See v1.7-collision-audit
+        # F1/F2. Layer-grid membership is via collision_manager.add(), independent
+        # of the Ursina collider, so query_layer() still enumerates bullets.
         super().__init__(
             model='cube',
             color=color.cyan,
             scale=(0.1, 0.1, 0.3),
             position=position,
-            collider='box'
         )
         self._reset(position=position, direction=direction,
                     speed=speed, damage=damage, player=player)
@@ -201,7 +209,17 @@ class EnemyBullet(AliveEntity):
 MUZZLE_FLASH_DURATION = 0.06
 
 class MuzzleFlash(Entity):
-    """Small billboard-style quad flashed at the gun's muzzle on each shot.
+    """Two overlaid billboard quads flashed at the gun's muzzle on each shot.
+
+    The 'burst' texture is a 512x256 two-panel atlas: the orange/yellow gradient
+    RING fills the left half, a white star-BURST the right half (both alpha-cutout
+    on a transparent background). Mapping the whole atlas onto one square quad
+    squished both panels side-by-side with a seam down the middle — so this splits
+    it with UV sub-rects (texture_scale=(0.5,1) + texture_offset) instead of two
+    separate texture files: the root quad samples the LEFT half (ring), a child
+    quad samples the RIGHT half (starburst), overlaid at the same muzzle point so
+    each flash is a richer composite of both elements. The starburst layer is
+    rotated a little so it reads as a distinct burst over the ring, not a copy.
 
     Purely cosmetic (no collider, not registered with collision_manager) — never
     an authority in the raycast damage path. Pooled the same way bullets are:
@@ -213,26 +231,60 @@ class MuzzleFlash(Entity):
     _PARK = Vec3(0, -10000, 0)
 
     def __init__(self):
+        _tex = _resolve_texture('burst')
         super().__init__(
             model='quad',
-            texture=_resolve_texture('burst'),
+            texture=_tex,
+            texture_scale=(0.5, 1),        # left half only...
+            texture_offset=(0, 0),         # ...the ring
             scale=0.3,
             billboard=True,
-            always_on_top=True,
             position=MuzzleFlash._PARK,
         )
-        self.setDepthTest(True)
-        self.setDepthWrite(True)
+        # Second layer: the starburst (right half of the atlas), overlaid at the
+        # SAME muzzle point so each flash composites both elements. Parented to
+        # the ring so it inherits position/scale/billboard.
+        self.burst = Entity(
+            parent=self,
+            model='quad',
+            texture=_tex,
+            texture_scale=(0.5, 1),        # right half only...
+            texture_offset=(0.5, 0),       # ...the starburst
+            # NOT billboarded: it inherits the parent's camera-facing orientation.
+            # A billboard on a child re-solves facing from the child's own world
+            # position and fights the parent transform, which hid it entirely.
+        )
+        # Both layers depth-TEST ON (so world geometry the flash is behind still
+        # occludes it) but depth-WRITE OFF, and ordered by cull bin — ring behind,
+        # burst in front. Two coplanar billboards with depth-write ON z-fight and
+        # the ring's (opaque-depth) center hides the burst; depth-write OFF + fixed
+        # bin order composites them cleanly instead. Same trick as HealthBar's
+        # bg/bar/text near-coplanar quads.
+        self.setBin('fixed', 0);        self.setDepthTest(True);        self.setDepthWrite(False)
+        self.burst.setBin('fixed', 1);  self.burst.setDepthTest(True);  self.burst.setDepthWrite(False)
 
     def play(self, position, scale=0.3):
         self.position = position
         self.scale = scale
         self.alpha = 1
+        self.burst.alpha = 1
         self.animate_scale(scale * 1.6, duration=MUZZLE_FLASH_DURATION, curve=curve.linear)
+        # Fade both layers together — animate('alpha') only touches this entity's
+        # own quad, so the child burst needs its own fade or it would linger opaque.
         self.animate('alpha', 0, duration=MUZZLE_FLASH_DURATION, curve=curve.linear)
+        self.burst.animate('alpha', 0, duration=MUZZLE_FLASH_DURATION, curve=curve.linear)
         invoke(self._park, delay=MUZZLE_FLASH_DURATION)
 
     def _park(self):
+        # Guard against the deferred-callback-vs-teardown race (brain/Gotchas
+        # invoke()/Sequence family): play() schedules this via invoke(delay=...);
+        # if the pool's reset() destroys this flash inside that 0.06s window (a
+        # menu return one frame after a shot), the pending _park would fire on a
+        # destroyed entity and crash in position_setter. is_empty() detects the
+        # dead NodePath. (Latent before the two-layer split too; guarded here while
+        # MuzzleFlash is already being touched.)
+        if self.is_empty():
+            return
         self.position = MuzzleFlash._PARK
 
 
@@ -250,10 +302,16 @@ class MuzzleFlashPool:
             self._flashes = [MuzzleFlash() for _ in range(self._size)]
             self._next = 0
         # Drain a stale (externally-destroyed) quad the same way BulletPool does —
-        # main_menu()'s entity sweep can destroy parked quads between scenes.
-        if self._flashes[self._next].is_empty():
-            self._flashes[self._next] = MuzzleFlash()
+        # main_menu()'s entity sweep can destroy parked quads between scenes. The
+        # sweep can also take the burst child while leaving the root (or vice
+        # versa), so rebuild if EITHER half is a dead NodePath.
         flash = self._flashes[self._next]
+        if flash.is_empty() or flash.burst.is_empty():
+            if not flash.is_empty():
+                destroy(flash.burst)   # root survived, child died — clean rebuild
+                destroy(flash)
+            self._flashes[self._next] = MuzzleFlash()
+            flash = self._flashes[self._next]
         self._next = (self._next + 1) % len(self._flashes)
         flash.play(position, scale=scale)
 
@@ -263,6 +321,10 @@ class MuzzleFlashPool:
         rebuilds from scratch lazily on the next play() call."""
         for flash in self._flashes:
             if not flash.is_empty():
+                # destroy() does NOT cascade to parent= children (brain/Gotchas),
+                # so the burst layer must be destroyed explicitly or it leaks.
+                if not flash.burst.is_empty():
+                    destroy(flash.burst)
                 destroy(flash)
         self._flashes = []
         self._next = 0
@@ -468,9 +530,22 @@ class Weapon(Entity):
         return True
 
     def _spawn_bullet(self, direction):
-        """Acquire one pooled bullet travelling along `direction`."""
+        """Acquire one pooled bullet travelling along `direction`.
+
+        Ballistic origin = the EYE (camera.world_position), NOT the gun muzzle.
+        The old origin was gun.world_position + camera.forward (~1.3u ahead of the
+        eye), which at point-blank spawns PAST the far face of a wall ≲1u thick —
+        the swept ray only protects the path from the spawn point onward, so the
+        shot skipped thin cover the player stood flush against (v1.7-collision-audit
+        F3 / playtest §2.6: measured spawn at x=-9.32, past a wall face at -8.0).
+        Spawning at the eye makes the swept ray cover the whole eye→target segment,
+        so thin cover is respected. The muzzle FLASH stays at the gun (cosmetic,
+        below); visual origin ≠ ballistic origin, same split as the dual-camera
+        viewmodel. The bullet is 0.1u and travels 50u/s, so the ~1.3u it no longer
+        skips ahead is imperceptible.
+        """
         return _player_bullet_pool.acquire(
-            position=self.world_position + camera.forward,
+            position=camera.world_position,
             direction=direction,
             speed=self.bullet_speed,
             damage=self.damage,
