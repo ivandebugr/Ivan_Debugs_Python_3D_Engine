@@ -298,6 +298,17 @@ class InspectorPanel:
         self._build_light_section()
         self._build_convert_ui()
 
+    def _has_nonblock(self, entities):
+        """True if any selected entity is not a block (enemy/trigger/pickup/light).
+
+        The single test the block-only sections (texture/model/door) use to hide
+        themselves. Was three hand-rolled membership OR-chains that had drifted
+        apart — the light case was missing from all of them, so selecting the sun
+        left these rows rendering over the light section (the "jumble" bug). Keyed
+        on `not in blocks` so a new non-block entity type can never re-open the gap.
+        """
+        return any(e not in self.editor.blocks for e in entities)
+
     def _update_inspector_door_field(self):
         """Refresh the door-name field from the current selection. Blocks only —
         hidden for empty / enemy / trigger / mixed selections, exactly like the
@@ -308,7 +319,7 @@ class InspectorPanel:
             return
         entities = list(self.editor.selected)
         # Only blocks are doors — hide for any selection containing a non-block.
-        has_nonblock = any((e in self.editor.enemies or e in self.editor.triggers) for e in entities)
+        has_nonblock = self._has_nonblock(entities)
         if not entities or has_nonblock:
             self._insp_door_label.enabled = False
             self._insp_door_field.enabled = False
@@ -467,9 +478,7 @@ class InspectorPanel:
         # trigger/pickup/behaviour sections that reuse the lower band, which was
         # the bulk of the "cramped, messy" inspector. Mirrors the model field's
         # own hide logic.
-        has_nonblock = any(
-            (e in self.editor.enemies or e in self.editor.triggers
-             or e in self.editor.pickups) for e in entities)
+        has_nonblock = self._has_nonblock(entities)
         tex_visible = bool(entities) and not has_nonblock
         for w in (self._insp_tex_label, self._insp_tex_swatch, self._insp_tex_name):
             w.enabled = tex_visible
@@ -523,13 +532,9 @@ class InspectorPanel:
         if getattr(self, '_insp_model_field', None) is None:
             return
         entities = list(self.editor.selected)
-        # Blocks only — hide for enemy/trigger/pickup/mixed (each reuses the lower
-        # band for its own section; only one is ever enabled). v1.7 Step 3 added
-        # pickups to the exclusion (they were missing, so the Model field showed
-        # over the pickup config).
-        has_nonblock = any(
-            (e in self.editor.enemies or e in self.editor.triggers
-             or e in self.editor.pickups) for e in entities)
+        # Blocks only — hide for enemy/trigger/pickup/light/mixed (each reuses the
+        # lower band for its own section; only one is ever enabled).
+        has_nonblock = self._has_nonblock(entities)
         if not entities or has_nonblock:
             self._insp_model_label.enabled = False
             self._insp_model_field.enabled = False

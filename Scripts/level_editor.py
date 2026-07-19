@@ -97,7 +97,7 @@ def _launch():
              "Ctrl+H/I/B: Toggle hierarchy/inspector/browser panel\n"
              "Ctrl+Alt+1-5: Save layout preset | Alt+1-5: Recall layout preset",
         parent=camera.ui,
-        position=(-.88, .48),
+        position=(-.88, .44),   # _apply_layout re-anchors; matches its 0.44 to avoid a frame-1 flash into the toolbar band
         origin=(-.5, .5),
         scale=0.75,
         z=-1,

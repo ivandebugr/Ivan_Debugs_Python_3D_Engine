@@ -367,8 +367,12 @@ class LevelEditor(Entity):
 
         self._spawn_marker = Entity(
             name='editor_player_spawn',
+            # color.rgba takes 0-1 floats in Ursina 8.3.0 (same footgun as color.rgb,
+            # line 45). The old (0,255,100,160) clamped on the GPU to (0,1,1,1) — an
+            # opaque cyan pillar — losing both the green tint and the intended
+            # translucency. 0-1 form: green-cyan (100/255=0.392) at 160/255=0.627 alpha.
             model='cube',
-            color=color.rgba(0, 255, 100, 160),
+            color=color.rgba(0.0, 1.0, 0.392, 0.627),
             scale=(0.6, 1.8, 0.6),
             position=(0, 1.4, 0),
             collider=None,
@@ -557,7 +561,11 @@ class LevelEditor(Entity):
     _TOOLBAR_BTN_H   = 0.04
     _TOOLBAR_Y       = 0.475          # row centre (band midpoint between 0.45 and 0.50)
     _TOOLBAR_GAP     = 0.008          # gap between buttons
-    _TOOLBAR_RIGHT_PAD = 0.02         # gap from the right screen edge (clears fps counter)
+    # Gap from the right screen edge. window.exit_button is corner-anchored
+    # (origin top-right, x=half_w) and spans ~0.05 leftward at y∈[0.487,0.513];
+    # the old 0.02 let the rightmost toolbar button's top-right corner slide
+    # under it. 0.055 clears the exit button's left edge (0.05) with a small gap.
+    _TOOLBAR_RIGHT_PAD = 0.055
     # Baseline button widths at the reference aspect ratio (16:9). _apply_layout
     # scales these proportionally when the viewport is narrower.
     _TOOLBAR_BTN_W_BASE = {
@@ -691,7 +699,12 @@ class LevelEditor(Entity):
         hint_left = -half_w + hier_w + 0.01
         if self._hint_text is not None:
             self._hint_text.x = hint_left
-            self._hint_text.y = 0.48
+            # Top at 0.44 (was 0.48): the old top line sat at y≈0.475, dead level
+            # with the stats strip and inside the toolbar band [0.455,0.495], so
+            # the wide first line printed under the stats readout. Dropping one
+            # line-height clears the whole band; the block is only 0.15 tall so it
+            # still ends at y≈0.29, well above the browser.
+            self._hint_text.y = 0.44
         if getattr(self, '_hint_bg', None) is not None and self._hint_text is not None:
             self._position_hint_bg()
 
@@ -1359,11 +1372,29 @@ class LevelEditor(Entity):
         Drop dead refs from the live lists too so the editor state stays consistent.
         """
         data = []
-        live_blocks = [b for b in self.blocks if getattr(b, 'destroy_source', None) is None]
-        live_enemies = [e for e in self.enemies if getattr(e, 'destroy_source', None) is None]
-        live_triggers = [t for t in self.triggers if getattr(t, 'destroy_source', None) is None]
-        live_pickups = [p for p in self.pickups if getattr(p, 'destroy_source', None) is None]
-        live_lights = [l for l in self.lights if getattr(l, 'destroy_source', None) is None]
+
+        def _live(entities):
+            # Live (not destroyed) AND unique by object identity. Identity — not
+            # position — is the only correct duplicate test: two distinct entities
+            # may legitimately sit at the same spot (stacked blocks, co-located
+            # enemy+trigger), and the old save_level position-dedup silently dropped
+            # them. The only real duplicate is the same object listed twice; guard
+            # that here so save emits exactly one entry per live entity.
+            out, seen = [], set()
+            for e in entities:
+                if getattr(e, 'destroy_source', None) is not None:
+                    continue
+                if id(e) in seen:
+                    continue
+                seen.add(id(e))
+                out.append(e)
+            return out
+
+        live_blocks = _live(self.blocks)
+        live_enemies = _live(self.enemies)
+        live_triggers = _live(self.triggers)
+        live_pickups = _live(self.pickups)
+        live_lights = _live(self.lights)
         dropped = ((len(self.blocks) - len(live_blocks))
                    + (len(self.enemies) - len(live_enemies))
                    + (len(self.triggers) - len(live_triggers))
@@ -1653,13 +1684,13 @@ class LevelEditor(Entity):
 
         # Camera bookmarks — recall (only when not in a control combo)
         if not held_keys['control']:
-            # FIXED: scene.focused_entity is never set by Ursina — bookmark keys fired
-            # while typing numbers in inspector fields. Check InputField.active instead.
-            # Also skip while typing in the hierarchy search box.
-            if (any(f.active for f in self.inspector._insp_fields.values())
-                    or self._hier_typing() or self._behaviour_typing()
-                    or self._door_name_typing() or self._trigger_typing()
-                    or self._pickup_typing()):
+            # scene.focused_entity is never set by Ursina — bookmark keys fired while
+            # typing numbers in inspector fields. Gate on the shared typing guard
+            # (InputField.active across every field type). This inline check used to
+            # omit _light_typing(), so digits typed into the sun's fields teleported
+            # the camera to a bookmark — route through _any_field_typing() so light
+            # (and any future field type) can never re-open that gap.
+            if self._any_field_typing():
                 return
             for i in range(1, 6):
                 if key == str(i):
@@ -1870,15 +1901,11 @@ class LevelEditor(Entity):
     # -------------------------------------------------------------------------
 
     def save_level(self):
-        data = self._build_level_data()
-
-        seen = set()
-        deduped = []
-        for item in data:
-            key = (item['type'], tuple(round(p, 3) for p in item['position']))
-            if key not in seen:
-                seen.add(key)
-                deduped.append(item)
+        # _build_level_data now emits exactly one entry per live entity (identity-
+        # deduped at the source), so no position-based dedup here — that old pass
+        # keyed on (type, position) and silently dropped legitimately co-located
+        # entities (Phase 5 bug). deduped kept as the write var name for the log.
+        deduped = self._build_level_data()
 
         try:
             with open(self.filename, 'w') as f:
