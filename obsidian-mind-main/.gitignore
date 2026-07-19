@@ -3,6 +3,7 @@
 .obsidian/workspace-mobile.json
 .obsidian/plugins/*/data.json
 .obsidian/graph.json
+.obsidian/appearance.json
 
 # OS
 .DS_Store
