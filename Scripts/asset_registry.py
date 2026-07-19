@@ -64,7 +64,13 @@ class AssetRegistry:
         self._write_manifest()
 
     def get_texture_path(self, name: str) -> str | None:
-        return self.textures.get(name)
+        # Ursina sets Texture.name to the filename *with* extension, so level.json
+        # stores 'texture_orange_test.png' while the manifest keys by stem
+        # ('texture_orange_test'). Look up the name as given first (registry keys,
+        # picker output), then retry on the stem so a saved '.png' name still
+        # resolves on reload instead of falling through to the asset_folder glob
+        # (which misses → texture=None → next save writes '', stripping it).
+        return self.textures.get(name) or self.textures.get(Path(name).stem)
 
     def get_model_path(self, name: str) -> str | None:
         return self.models.get(name)
