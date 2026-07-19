@@ -29,7 +29,7 @@ VALID_ENEMY_TYPES = ('default',)  # extend here as new types are added
 # this file depends on is untouched. Kept centered/scaled to roughly fill
 # that collider footprint; source mesh bounds ~1.2w x 0.875h x 0.76d.
 ENEMY_VISUAL_MODEL    = 'enemy-flying'
-ENEMY_VISUAL_SCALE    = 0.9
+ENEMY_VISUAL_SCALE    = (0.8, 0.9, 0.8)
 # Child position is in the parent's LOCAL (unscaled) space — local Y is
 # multiplied by the collider cube's scale_y=3 to get world offset, and
 # origin_y=-0.5 already makes the cube's own position its feet (verified
@@ -37,7 +37,7 @@ ENEMY_VISUAL_SCALE    = 0.9
 # extra origin term). local_y=0.5 -> world y=1.5, mid-collider height —
 # the drone hovers there rather than sitting on the ground, matching its
 # disc/no-legs shape.
-ENEMY_VISUAL_POSITION = (0, 0.5, 0)
+ENEMY_VISUAL_POSITION = (0, 0.4, 0)
 
 # Walk-bob (v1.7): cheap fake-locomotion — a sine vertical offset added to the
 # cosmetic visual_model's LOCAL y while the enemy is actually translating
@@ -97,8 +97,6 @@ class Enemy(AliveEntity):
         self.max_health  = hp
         self.enemy_type  = enemy_type
         self.player      = player
-        self.shoot_cooldown   = ENEMY_SHOOT_COOLDOWN
-        self.can_shoot   = True
         self.attack_range     = ENEMY_ATTACK_RANGE
         self.detection_range  = ENEMY_DETECTION_RANGE
 
@@ -148,16 +146,27 @@ class Enemy(AliveEntity):
 
         player_dist = distance(self.position, self.player.position)
 
-        if player_dist <= self.detection_range:
-            self.look_at(self.player.position)
-            self.rotation_x = 0
-            self.rotation_z = 0
-
-            # Throttle occlusion raycast — expensive, no need every frame
+        # Throttle occlusion raycast — expensive, no need every frame. Gated on
+        # 200u because that's the widest range anything reads _occluded (the
+        # health-bar line below; the look_at gate reads it only within
+        # detection_range, a subset) — no point casting for an enemy the player
+        # can't even see a health bar on. Was previously nested under the
+        # detection_range gate, so _occluded went stale between 100-200u; casting
+        # here keeps it fresh exactly where it's used.
+        if player_dist < 200:
             self._occlusion_timer -= time.dt
             if self._occlusion_timer <= 0:
                 self._occluded        = self._is_occluded()
                 self._occlusion_timer = ENEMY_OCCLUSION_INTERVAL
+
+        # Only turn to face the player when in range AND with line of sight —
+        # the same range+LOS gate DetectPlayerNode uses for combat. Gating on
+        # bare distance alone made patrollers track the player THROUGH walls
+        # while walking their route (brain/Gotchas: detection was pure distance).
+        if player_dist <= self.detection_range and not self._occluded:
+            self.look_at(self.player.position)
+            self.rotation_x = 0
+            self.rotation_z = 0
 
         # Behaviour tree owns the chase→attack decision (replaces the old
         # `if player_dist <= attack_range and can_shoot: self.shoot()` block).
@@ -284,9 +293,14 @@ class Enemy(AliveEntity):
         return not self._is_occluded()
 
     def shoot(self):
-        """Fire one enemy bullet toward the player via the pool; resets cooldown via invoke."""
-        if not self.can_shoot:
-            return
+        """Fire one enemy bullet toward the player via the pool.
+
+        No self-gate: AttackNode owns fire cadence via its own per-instance
+        wall-clock cooldown (behaviour_nodes.py), which is per-preset
+        (aggressive 0.4s, patrol 0.8s, default 1.0s). The old can_shoot flag
+        here was a second, fixed 1.0s gate that silently overrode any faster
+        preset cadence — removed so the preset's configured cadence governs.
+        """
         from Scripts.weapon import get_enemy_bullet_pool  # lazy — breaks weapon↔enemy circular import
         pool = get_enemy_bullet_pool()
         pool.acquire(
@@ -296,8 +310,6 @@ class Enemy(AliveEntity):
             enemy=self,
             speed=10,
         )
-        self.can_shoot = False
-        invoke(setattr, self, 'can_shoot', True, delay=self.shoot_cooldown)
 
     def on_die(self):
         """Destroy health bar and shadow before super().on_die() destroys self."""
