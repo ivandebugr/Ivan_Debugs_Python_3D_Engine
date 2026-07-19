@@ -29,18 +29,10 @@ Defined in `.claude/commands/`. See [[Skills]] for full documentation.
 | `/om-wrap-up` | Full session review -- verify notes, indexes, links, suggest improvements |
 | `/om-humanize` | Voice-calibrated editing -- make notes sound like you, not AI |
 | `/om-weekly` | Weekly synthesis -- cross-session patterns, North Star alignment, uncaptured wins |
-| `/om-capture-1on1` | Capture 1:1 meeting transcript into structured vault note |
-| `/om-incident-capture` | Capture incident from Slack channels/DMs into structured vault notes |
-| `/om-slack-scan` | Deep scan Slack channels/DMs for evidence |
-| `/om-peer-scan` | Deep scan a peer's GitHub PRs for review prep |
-| `/om-review-brief` | Generate review brief (manager or peer version) |
-| `/om-self-review` | Write self-assessment for review tool -- projects, competencies, principles |
-| `/om-review-peer` | Write peer review -- projects, principles, performance summary |
 | `/om-vault-audit` | Audit indexes, links, orphans, stale context |
 | `/om-vault-upgrade` | Import content from an existing vault into this obsidian-mind instance |
-| `/om-prep-1on1` | Prep for an upcoming 1:1 -- load person context, open items, suggested agenda |
 | `/om-meeting` | Prep for any meeting by topic -- subject-forward briefing with open items and considerations |
-| `/om-intake` | Process meeting notes inbox -- classify and route to the right vault notes |
+| `/om-intake` | Process notes inbox -- classify and route to the right vault notes |
 | `/om-project-archive` | Move completed project from active/ to archive/, update indexes |
 
 ## Vault Structure
@@ -49,28 +41,21 @@ Defined in `.claude/commands/`. See [[Skills]] for full documentation.
 |--------|---------|-----------|
 | `Home.md` | **Vault entry point** -- embedded Base views, quick links | Open this first |
 | `vault-manifest.json` | **Template metadata** -- version, infrastructure vs user content boundaries, frontmatter schemas, version fingerprints | Used by `/om-vault-upgrade` for migration |
-| `CHANGELOG.md` | **Version history** -- tracks template releases (v1--v3.3) with what changed | Reference for upgrade paths |
-| `bases/` | **All Bases centralized** -- dynamic views for navigation | `Work Dashboard`, `Incidents`, `People Directory`, `1-1 History`, `Review Evidence`, `Competency Map`, `Templates` |
+| `CHANGELOG.md` | **Version history** -- tracks template releases | Reference for upgrade paths |
+| `bases/` | **All Bases centralized** -- dynamic views for navigation | `Work Dashboard`, `Templates` |
 | `work/` | Work notes index | `Index.md` (detailed MOC) |
-| `work/active/` | **Current projects only** (1-3 files) | Move here when starting, move to archive when done |
+| `work/active/` | **Current projects only** | Move here when starting, move to archive when done |
 | `work/archive/YYYY/` | Completed work organized by year | Grows over time |
-| `work/incidents/` | Incident docs (main note + RCA + deep dive + drafts) | Per-incident grouping |
-| `work/1-1/` | 1:1 meeting notes (accumulate weekly) | Named `<Person> YYYY-MM-DD.md` |
-| `work/meetings/` | **Meeting notes inbox** -- staging area for raw exports, processed by `/om-intake` | Drop files, run `/om-intake` |
-| `perf/` | Performance framework, brag doc | `Brag Doc.md` (index) |
-| `perf/brag/` | Quarterly brag notes | One per quarter, e.g. `Q1 2025.md` |
-| `perf/competencies/` | Atomic competency notes (link targets) | One note per competency |
-| `perf/evidence/` | PR deep scans, data extracts for reviews | Named `<Person> PRs - <Period>.md` |
-| `perf/<cycle>/` | Review cycle briefs + artifacts | Review briefs (private, manager, peer) |
+| `work/audits/` | Project audits | Named `YYYY-<scope>-audit.md` |
+| `devlog/` | Public devlog / changelog feed | `Devlog.md` (index) |
+| `devlog/entries/` | Longer per-period devlog notes | One note per period |
 | `brain/` | Claude's operational knowledge | `Memories.md`, `Key Decisions.md`, `Patterns.md`, `Gotchas.md`, `Skills.md`, `North Star.md` |
-| `org/` | Organizational knowledge index | `People & Context.md` (MOC) |
-| `org/people/` | Atomic person notes | One note per person |
-| `org/teams/` | Team notes as graph nodes | One note per team |
 | `reference/` | Codebase knowledge, architecture maps | Flow docs, architecture docs |
 | `thinking/` | Scratchpad for drafts and reasoning | Named `YYYY-MM-DD-topic.md` |
 | `templates/` | Obsidian templates | `Work Note.md`, `Decision Record.md`, etc. |
-| `.claude/commands/` | 18 slash commands | See command table above |
-| `.claude/agents/` | 9 subagents | See subagents table below |
+| `_archive-template/` | Stripped stock-template machinery (team/review/meeting features), kept for recoverability | See its `README.md` |
+| `.claude/commands/` | Slash commands | See command table above |
+| `.claude/agents/` | Subagents | See subagents table below |
 | `.claude/scripts/` | Hook scripts | `session-start.ts`, `classify-message.ts`, `validate-write.ts`, `pre-compact.ts`, `stop-checklist.ts`, `charcount.ts` |
 | `.claude/skills/` | Obsidian + QMD skills | Loaded automatically via Skill tool |
 
@@ -118,12 +103,10 @@ If `/om-wrap-up` is not invoked, at minimum do these before wrapping up:
 1. **Archive completed projects**: `git mv` from `work/active/` to `work/archive/YYYY/`, update `status: completed` (or use `/om-project-archive`)
 2. Update `work/Index.md` if new notes or decisions were created
 3. Update the relevant brain topic note (`brain/Key Decisions.md`, `brain/Patterns.md`, `brain/Gotchas.md`) with key learnings
-4. Update `org/People & Context.md` if org knowledge changed
-5. Update `perf/Brag Doc.md` if wins or impact were achieved
-6. Offer to update `brain/North Star.md` if goals shifted or new focus emerged
-7. Verify all new notes link to at least one existing note (orphans are bugs)
-8. If work demonstrates competencies, add competency links to the work note's `## Related`
-9. Run `/om-vault-audit` if the session created many notes
+4. Update `devlog/Devlog.md` if something shipped worth a devlog entry
+5. Offer to update `brain/North Star.md` if goals shifted or new focus emerged
+6. Verify all new notes link to at least one existing note (orphans are bugs)
+7. Run `/om-vault-audit` if the session created many notes
 
 Skip steps that don't apply. The goal is transferring durable knowledge from conversation to vault state.
 
@@ -140,18 +123,13 @@ Use `thinking/` for drafts, reasoning, and analysis before writing final notes. 
 
 ### Creating Notes
 
-1. **Always use YAML frontmatter** with at minimum `date`, `description` (~150 chars), `tags`, and type-specific fields. Work notes and incidents also need `quarter` (e.g., `Q1-2026`). Incidents need `ticket`, `severity`, `role`.
+1. **Always use YAML frontmatter** with at minimum `date`, `description` (~150 chars), `tags`, and type-specific fields. Work notes also need `quarter` (e.g., `Q1-2026`).
 2. **Use templates** from `templates/`. Fill `{{placeholders}}` with real values.
 3. **Place files correctly**:
-   - **Active** work notes, decisions, peer review prep -- `work/active/`
+   - **Active** work notes, decisions -- `work/active/`
    - **Completed** work notes -- `work/archive/YYYY/` (by year)
-   - Incident docs -- `work/incidents/`
-   - 1:1 meeting notes -- `work/1-1/`
-   - Performance content -- `perf/` (cycle subfolder for review briefs)
-   - PR evidence -- `perf/evidence/`
-   - Competency definitions -- `perf/competencies/`
-   - People -- `org/people/`
-   - Teams -- `org/teams/`
+   - Project audits -- `work/audits/`
+   - Devlog entries -- `devlog/` (`Devlog.md` index, longer notes in `devlog/entries/`)
    - Claude operational context -- `brain/`
    - Codebase knowledge -- `reference/`
    - Drafts -- `thinking/`
@@ -163,13 +141,8 @@ Use `thinking/` for drafts, reasoning, and analysis before writing final notes. 
 | Type | Location | Naming | Key Sections |
 |------|----------|--------|--------------|
 | Work note | `work/active/` (then `archive/YYYY/` when done) | Descriptive title | Context, What/Why, Links, Related |
-| Incident | `work/incidents/` | Ticket number or descriptive title | Context, Root Cause, Timeline, Impact, Analysis, Related |
-| 1:1 note | `work/1-1/` | `<Person> YYYY-MM-DD.md` | Key Takeaways, Action Items, Quotes, What to Watch, Related |
-| PR analysis | `perf/evidence/` | `<Person> PRs - <Period>.md` | PR Count, Projects, Quality, Growth, Full Table |
-| Review brief | `perf/<cycle>/` | `<Cycle> Review Brief.md` | Arc, Impact, Competencies, Documentation Trail |
-| Person note | `org/people/` | Full name | Role & Team, Relationship, Key Moments, Notes |
-| Team note | `org/teams/` | Team name | Members, Scope, Interactions |
-| Competency | `perf/competencies/` | Competency name | Definition, level criteria, Evidence (via backlinks) |
+| Audit | `work/audits/` | `YYYY-<scope>-audit.md` | Findings, Severity, Resolution, Related |
+| Devlog entry | `devlog/` (index) / `devlog/entries/` (long form) | Date + shipped feature | What shipped, What it looked like, What's next |
 | Brain note | `brain/` | Topic name | Topic-specific content |
 
 ### Linking -- This Is Critical
@@ -181,10 +154,9 @@ Use `thinking/` for drafts, reasoning, and analysis before writing final notes. 
 **Atomicity rule**: Before writing or appending to any note, ask: "Does this cover multiple distinct concepts that could be separate nodes?" If a note has or would have 3+ independent sections that don't need each other to make sense, split into atomic notes that link to each other.
 
 Note types have graph roles:
-- **Evidence nodes** (work notes, 1:1s, PR analyses): add outbound links to concepts they demonstrate
-- **Concept nodes** (competencies, patterns): stay definitional -- evidence arrives via backlinks
-- **Index nodes** (Index, Brag Doc, Memories, People & Context): actively curate links -- they're navigational
-- **Person nodes** (org/people/): link to projects, teams, evidence. Receive backlinks from work notes.
+- **Evidence nodes** (work notes, audits, devlog entries): add outbound links to concepts they demonstrate
+- **Concept nodes** (patterns, decisions): stay definitional -- evidence arrives via backlinks
+- **Index nodes** (Index, Devlog, Memories): actively curate links -- they're navigational
 
 Link syntax:
 - `[[Note Title]]` -- standard wikilink
@@ -196,11 +168,8 @@ Link syntax:
 #### When to Link
 
 - **Work note <-> Decision**: bidirectional links
-- **Work note -> Competency**: in `## Related`, link to competencies demonstrated
-- **Work note -> Team**: in `## Related`, link to team(s) involved
-- **Work note -> Person**: link people involved (especially in 1:1 notes)
-- **Person -> PR analysis**: link to their evidence file if one exists
-- **Brag Doc -> Work note**: every entry links to evidence
+- **Work note -> Audit**: link the audit that surfaced the work
+- **Devlog -> Work note**: every entry links to the work/archive note behind it
 - **Memories -> Source**: every memory links to where it was learned
 - **Index -> Everything**: `work/Index.md` links to all work notes
 - **North Star -> Projects**: active focus areas link to project work notes
@@ -212,8 +181,7 @@ Update these when creating or archiving notes:
 - **`work/Index.md`** -- add to Active Projects or Recent Notes, move completed to Archive
 - **`brain/Memories.md`** -- index of memory topics. Add new memories to the relevant topic note, not here.
 - **`brain/Skills.md`** -- register vault-specific workflows and slash commands
-- **`org/People & Context.md`** -- update when people, teams, or org structure changes
-- **`perf/Brag Doc.md`** -- log wins with links to evidence, add new quarters as needed
+- **`devlog/Devlog.md`** -- log what shipped with links to the work note, add longer notes in `devlog/entries/` as needed
 
 ### Decision Records
 
@@ -224,7 +192,7 @@ Update these when creating or archiving notes:
 
 ### Wins & Achievements
 
-When significant work is completed, add to `perf/Brag Doc.md` with links to the work note(s). Categorize under Impact, Technical Growth, Collaboration, or Feedback.
+When significant work ships, add an entry to `devlog/Devlog.md` with a link to the work note(s). Frame it for an outside reader: what shipped, what it looks like (link screenshots/clips where they exist), what's next. This is the source feed for public devlog / YouTube content, not an internal review log.
 
 ## North Star
 
@@ -239,26 +207,17 @@ When significant work is completed, add to `perf/Brag Doc.md` with links to the 
 
 Use tags in frontmatter (not inline):
 
-- **Type**: `work-note`, `decision`, `perf`, `thinking`, `north-star`, `competency`, `person`, `team`, `brain`
+- **Type**: `work-note`, `decision`, `audit`, `devlog`, `thinking`, `north-star`, `brain`
 - **Index**: `index`, `moc`
 - **Status** (frontmatter field): `active`, `completed`, `archived`, `proposed`, `accepted`, `deprecated`
-- **Team** (frontmatter field on people + work notes): your team names, e.g. `Backend`, `Platform`, `Mobile`
-- **Cycle** (frontmatter field on review-related notes): `h2-2024`, `h1-2025`, etc.
-- **Person** (frontmatter field on evidence notes): full name of the person
-- **Project**: as needed, e.g. `project/auth-refactor`
+- **Project**: as needed, e.g. `project/level-editor`
 
 ## Properties for Querying
 
 Beyond tags, use these frontmatter properties to enable search and Bases views:
 
-- `cycle: h2-2024` -- find all review material for a cycle
-- `person: "Jane Smith"` -- find all evidence related to a person
-- `team: Backend` -- find all notes related to a team
 - `status: active` -- find active projects
 - `quarter: Q1-2026` -- find all work for a quarter (used by Work Dashboard Base)
-- `ticket: TICKET-123` -- find incident by ticket number
-- `severity: high` -- incident severity
-- `role: incident-lead` -- your role in an incident
 
 ## Memory System
 
@@ -296,24 +255,12 @@ The SessionStart hook injects a **Brain Topics (read on demand)** index listing 
 
 ### Where to Put Things
 
-- **Writing about a person?** -- `org/people/`
-- **Writing about a team?** -- `org/teams/`
 - **Writing about how the codebase works?** -- `brain/` (Patterns, Gotchas, Key Decisions)
 - **Writing about what Claude should remember?** -- `brain/Memories.md` topic notes
-- **Capturing a 1:1 meeting?** -- `work/1-1/`
-- **Deep scanning PRs for review?** -- `perf/evidence/`
-- **Creating review briefs?** -- `perf/<cycle>/`
 - **Tracking active project work?** -- `work/active/`
-- **Capturing an incident?** -- `work/incidents/` (use `/om-incident-capture`)
+- **Auditing the project?** -- `work/audits/`
+- **Logging what shipped?** -- `devlog/` (see [[Devlog]])
 - **Dumping unstructured info?** -- use `/om-dump` to auto-classify and route everything
-
-### Don't Mix Contexts
-
-When capturing data from Slack, DMs, or meetings:
-- **Project evidence** (PRs, technical decisions, delivery) -- goes to the relevant `work/` note
-- **Review prep** (peer selection, manager strategy, brag framing) -- goes to review-related notes in `perf/` or `work/`
-- **People dynamics** (feedback, relationships, career) -- goes to `org/people/` notes
-- **Personal conversations** -- only capture if review-relevant; otherwise skip
 
 ## Subagents
 
@@ -321,14 +268,10 @@ Specialized agents in `.claude/agents/` for heavy operations. They run in isolat
 
 | Agent | Purpose | Invoked by |
 |-------|---------|------------|
-| `brag-spotter` | Finds uncaptured wins and competency gaps | `/om-wrap-up`, `/om-weekly` |
-| `context-loader` | Loads all vault context about a person, project, or concept | Direct |
+| `brag-spotter` | Finds uncaptured wins for the devlog | `/om-wrap-up`, `/om-weekly` |
+| `context-loader` | Loads all vault context about a project or concept | Direct |
 | `cross-linker` | Finds missing wikilinks, orphans, broken backlinks | `/om-vault-audit` |
-| `people-profiler` | Bulk creates/updates person notes from Slack profiles | `/om-incident-capture` |
-| `review-prep` | Aggregates all performance evidence for a review period | `/om-review-brief` |
-| `slack-archaeologist` | Full Slack reconstruction -- every message, thread, profile | `/om-incident-capture` |
 | `vault-librarian` | Deep vault maintenance -- orphans, broken links, stale notes | `/om-vault-audit` |
-| `review-fact-checker` | Verifies every claim in a review draft against vault sources | `/om-self-review`, `/om-review-peer` |
 | `vault-migrator` | Classifies, transforms, and migrates content from a source vault | `/om-vault-upgrade` |
 
 ## Hooks

@@ -9,13 +9,7 @@ tags:
 
 Central map of content. All work notes and decisions link back here. For quick navigation, use [[Home]] or open `bases/Work Dashboard.base`.
 
-**Folder structure**: `active/` = current projects, `archive/` = completed (by year), `incidents/` = incident docs, `1-1/` = meetings.
-
-## Incidents
-
-Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
-
--
+**Folder structure**: `active/` = current projects, `archive/` = completed (by year), `audits/` = project audits.
 
 ## Active Projects
 
@@ -27,10 +21,6 @@ Incident docs live in `work/incidents/`. See `Incidents.base` for overview.
 - [[work/active/v1.7-playtest-findings]] — Automated full playthrough at v1.7 HEAD (probes over the smoke harness, screenshots in motion): 8 confirmed bugs (shotgun pellet fratricide, spawn burial, double-driven jump, cadence clamp, level.json damage…) + what still needs Ivan's hands | Audited 2026-07-17, awaiting review
 - [[work/active/v1.7-editor-ux-audit]] — Whole-editor UX audit post-v1.7 bundle: ten verified defects (D1 texture-stripping data loss, sun-inspector overlap, toolbar overflow…) + five improvement bundles E1–E5 with cost/risk, no winner picked | Audited 2026-07-17, awaiting Ivan's pick
 - [[work/active/v1.7-collision-audit]] — Systemic collision audit in the Gotchas families: F1 pellet fratricide + 8 more (confirmed/latent tagged), verified-OK list, recommendations only | Audited 2026-07-17, awaiting review
-
-## Review Prep
-
--
 
 ## Recently Completed
 
