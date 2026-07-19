@@ -1,6 +1,11 @@
 from ursina import *
 from Scripts.lit_shader import lit_shader
-from panda3d.core import BitMask32, Camera as PandaCamera, NodePath, Quat
+from panda3d.core import (
+    BitMask32, Camera as PandaCamera, NodePath, Quat,
+    FrameBufferProperties, WindowProperties, GraphicsPipe, GraphicsOutput,
+    Texture, CardMaker, TransparencyAttrib, OrthographicLens,
+    DepthTestAttrib, DepthWriteAttrib,
+)
 from Scripts.collision_system import (
     AliveEntity, Layers, can_hit, collision_manager
 )
@@ -340,46 +345,86 @@ _muzzle_flash_pool  = MuzzleFlashPool(size=POOL_SIZE_MUZZLE_FLASH)
 
 
 # ---------------------------------------------------------------------------
-# Viewmodel camera (dual-camera FPS gun rendering)
+# Viewmodel camera (dual-camera FPS gun rendering — private-buffer variant)
 # ---------------------------------------------------------------------------
 #
 # Depth tricks (always_on_top / setBin) only change *draw order* — they cannot
 # stop the gun's geometry from physically intersecting a wall in world space.
 # When the camera is flush against a wall, the gun's far end is literally inside
-# the wall, so the wall is drawn over it.
+# the wall, so the wall is drawn over it. So the gun needs its own pass.
 #
-# The fix is the standard Unity/Unreal approach: render the gun with a SECOND
-# camera in its own later pass that clears ONLY the depth buffer, with depth-test
-# ON on the gun, so the viewmodel composites on top of the world regardless of
-# world depth AND the gun's own geometry sorts correctly against itself.
-# (Clearing *colour* for that pass was an early misstep — it blanked the whole
-# world underneath on macOS GL 2.1. Depth-only clear is safe: the world colour is
-# already in the shared framebuffer and untouched. See _setup_viewmodel_camera().)
+# HISTORY / WHY A PRIVATE BUFFER (not a display region):
+# The v1.5-v1.7 design rendered the gun with a second camera into its own sort-15
+# display region on the WINDOW, relying on `dr.set_clear_depth_active(True)` to
+# give that pass a fresh depth buffer. That was proven WRONG on this macOS GL 2.1
+# driver (v1.7 frame-dump investigation): a DISPLAY-REGION depth clear does NOT
+# actually clear the shared window depth buffer before the VM camera draws, so the
+# world's depth (from the sort-0 world pass) survives and the gun depth-tests
+# against it — any wall <~0.9u in front of the gun occludes it (the point-blank
+# gun-clip bug). Turning the gun's depth-test OFF fixes the world-clip but breaks
+# the gun's own sub-part self-sorting (the mesh is one merged Geom; rear faces
+# paint over front). The two constraints are irreconcilable on a SHARED depth
+# buffer — so the gun gets its OWN.
 #
-# Mechanism (Panda3D camera bitmasks + a dedicated display region):
-#   - VIEWMODEL_MASK is a single dedicated draw bit.
-#   - The main camera's mask has that bit cleared → it renders everything EXCEPT
-#     the gun.
-#   - The gun's draw mask is set to ONLY that bit → only the viewmodel camera
-#     sees it.
-#   - The viewmodel camera shares the main camera's transform (parented to
-#     base.cam) and draws in a display region sorted after the world (0) but
-#     before the UI (20). The region clears depth first; depth-test/write ON on
-#     the gun (Weapon.__init__) then sorts its own overlapping parts and lands the
-#     whole gun on top of the world (whose depth was wiped for this pass).
+# THE FIX (standard offscreen-viewmodel compositing):
+#   1. Render the gun into a PRIVATE offscreen buffer with its own colour+alpha+
+#      depth. A buffer's own depth clear IS honoured, so the gun self-sorts
+#      correctly against a fresh depth buffer, on a transparent background.
+#   2. Composite that buffer's colour over the window via a fullscreen card with
+#      DepthTestAttrib.M_always (glDepthFunc(GL_ALWAYS) — genuinely ignores the
+#      window depth buffer, unlike a region depth clear or plain depth-off), in a
+#      display region sorted after the world (0) / render2d (10) but before the UI
+#      (20). Alpha-blended, so the transparent background shows the world and only
+#      the gun lands on top.
+#
+# Mechanism (Panda3D camera bitmasks + an offscreen buffer + a composite region):
+#   - VIEWMODEL_MASK is a single dedicated draw bit; the gun uses show_through() it.
+#   - base.render.hide(VIEWMODEL_MASK) clears the bit from ALL world geometry in
+#     one call (Panda ancestor-hide), so the buffer camera — which renders only
+#     VIEWMODEL_MASK — sees the gun and NOT the world. show_through() on the gun
+#     (not show()) is required: show() cannot override an ancestor's hide, but
+#     show_through() can. Without this the world fills the gun buffer opaque.
+#   - The buffer camera shares the main camera's transform (parented to base.cam).
+#
+# LIFECYCLE (this is the risk surface — see bloom.py / light_lifecycle.py history):
+#   - The buffer + composite region + card are built EXACTLY ONCE (idempotent
+#     guard). They are raw NodePaths / GraphicsOutputs, NOT scene entities, so
+#     main_menu()'s entity sweep cannot destroy them and return_to_menu() teardown
+#     never touches them — same discipline as bloom's buffers. base.render.hide()
+#     is on the world root, which is never swept, so it persists across menus.
+#   - Each new game builds a fresh Weapon; its __init__ re-asserts show_through()
+#     on the new gun (cheap) and _setup_viewmodel_camera() early-returns.
+#   - Resize: a BF_resizeable buffer does NOT auto-track the window on this stack
+#     (measured), so a 'window-event' handler resizes it to match — same event
+#     bloom/FilterManager use (Hard Constraint 13: window.on_resize is never called
+#     by Ursina; Panda's window-event is the correct hook).
 
 VIEWMODEL_MASK = BitMask32.bit(7)   # dedicated draw bit for viewmodel geometry
 
 _viewmodel_camera = None            # singleton NodePath(PandaCamera); reused across Weapon instances
+_viewmodel_buffer = None            # the private offscreen GraphicsBuffer (built once)
+
+
+def _resize_viewmodel_buffer(*_):
+    """Match the offscreen buffer's resolution to the window (window-event hook)."""
+    if _viewmodel_buffer is None or _viewmodel_buffer.is_valid() is False:
+        return
+    base = getattr(application, 'base', None)
+    if base is None or base.win is None:
+        return
+    w, h = base.win.get_x_size(), base.win.get_y_size()
+    if w > 0 and h > 0 and (_viewmodel_buffer.get_x_size() != w
+                            or _viewmodel_buffer.get_y_size() != h):
+        _viewmodel_buffer.set_size(w, h)
 
 
 def _setup_viewmodel_camera():
-    """Create (once) the second camera + display region that renders the gun on top.
+    """Build (once) the offscreen viewmodel buffer + composite, returns the VM camera.
 
     Idempotent — safe to call on every Weapon construction (each new game spawns a
     fresh Player → fresh Weapon). Returns the viewmodel camera NodePath, or None if
     the Panda3D window/camera are not ready yet (callers fall back gracefully)."""
-    global _viewmodel_camera
+    global _viewmodel_camera, _viewmodel_buffer
     if _viewmodel_camera is not None and not _viewmodel_camera.is_empty():
         return _viewmodel_camera
 
@@ -387,32 +432,73 @@ def _setup_viewmodel_camera():
     if base is None or not hasattr(base, 'win') or base.win is None:
         return None
 
-    # Main camera stops drawing viewmodel geometry.
+    win = base.win
+    # Main camera stops drawing viewmodel geometry, and the whole world root drops
+    # the VIEWMODEL bit so it never enters the gun-only buffer (the gun re-asserts
+    # the bit with show_through() in Weapon.__init__).
     main_cam_node = base.camNode
     main_cam_node.set_camera_mask(main_cam_node.get_camera_mask() & ~VIEWMODEL_MASK)
+    base.render.hide(VIEWMODEL_MASK)
 
-    # Second camera that renders ONLY the viewmodel layer. Reuse the main lens so
-    # fov + aspect ratio always match the world view (and auto-track window resize).
+    # --- private offscreen buffer: colour+alpha+depth, rendered BEFORE the window
+    fb = FrameBufferProperties()
+    fb.set_rgba_bits(8, 8, 8, 8)      # alpha needed for the transparent-bg composite
+    fb.set_depth_bits(24)
+    vm_tex = Texture('viewmodel-colour')
+    buf = base.graphicsEngine.make_output(
+        win.get_pipe(), 'viewmodel-buffer', -1, fb,
+        WindowProperties.size(win.get_x_size(), win.get_y_size()),
+        GraphicsPipe.BF_refuse_window | GraphicsPipe.BF_resizeable,
+        win.get_gsg(), win)
+    if buf is None:
+        return None   # driver refused the FBO — caller falls back gracefully
+    buf.add_render_texture(vm_tex, GraphicsOutput.RTM_copy_texture, GraphicsOutput.RTP_color)
+    buf.set_clear_color_active(True)
+    buf.set_clear_color((0, 0, 0, 0))   # transparent — only the gun writes colour
+    buf.set_clear_depth_active(True)     # a BUFFER's depth clear IS honoured here
+    buf.set_clear_depth(1.0)
+    _viewmodel_buffer = buf
+
+    # VM camera: renders ONLY the viewmodel layer, into the buffer. Reuse the main
+    # lens so fov + aspect always match the world view.
     vm_cam = PandaCamera('viewmodel_camera')
     vm_cam.set_camera_mask(VIEWMODEL_MASK)
     vm_cam.set_lens(base.camLens)
-
     vm_np = NodePath(vm_cam)
     vm_np.reparent_to(base.cam)   # share the main camera's world transform exactly
+    buf.make_display_region().set_camera(vm_np)
 
-    # Dedicated display region, drawn AFTER the world (sort 0) and Ursina's render2d
-    # (sort 10) but BEFORE the UI region (sort 20). Clear ONLY the depth buffer for
-    # this region (colour clear stays OFF): the gun runs with depth-test ON (set in
-    # Weapon.__init__), so a fresh per-pass depth buffer is what lets the gun's own
-    # overlapping sub-parts sort correctly AND still land on top of the world (whose
-    # colour was already drawn into the shared framebuffer and is NOT touched by a
-    # depth-only clear). The earlier "clearing depth blanks the world" finding was a
-    # misdiagnosis — clearing *colour* is what blanked it; depth-only is safe.
-    dr = base.win.make_display_region()
-    dr.set_sort(15)
-    dr.set_clear_depth_active(True)   # depth-only — colour clear stays OFF (default)
-    dr.set_clear_depth(1.0)
-    dr.set_camera(vm_np)
+    # --- composite: draw the buffer's colour over the window, on top of the world.
+    # A fullscreen card with M_always ignores the window depth buffer entirely (the
+    # one primitive that reliably beats world depth on this driver), alpha-blended
+    # so the transparent background lets the world through. Its own OrthographicLens
+    # camera in a sort-16 region (after world 0 / render2d 10, before UI 20).
+    cm = CardMaker('viewmodel-composite')
+    cm.set_frame(-1, 1, -1, 1)
+    card = NodePath(cm.generate())
+    card.set_texture(vm_tex)
+    card.set_transparency(TransparencyAttrib.M_alpha)
+    card.set_attrib(DepthTestAttrib.make(DepthTestAttrib.M_always), 1000)
+    card.set_attrib(DepthWriteAttrib.make(DepthWriteAttrib.M_off), 1000)
+    card.set_bin('fixed', 0)
+
+    comp_root = NodePath('viewmodel-composite-root')
+    card.reparent_to(comp_root)
+    comp_cam = PandaCamera('viewmodel_composite_camera')
+    comp_lens = OrthographicLens()
+    comp_lens.set_film_size(2, 2)
+    comp_lens.set_near_far(-10, 10)
+    comp_cam.set_lens(comp_lens)
+    comp_np = comp_root.attach_new_node(comp_cam)
+
+    comp_dr = win.make_display_region()
+    comp_dr.set_sort(16)
+    comp_dr.set_clear_depth_active(False)
+    comp_dr.set_clear_color_active(False)   # never wipe the world already drawn
+    comp_dr.set_camera(comp_np)
+
+    # Resize the buffer with the window (BF_resizeable does not auto-track here).
+    base.accept('window-event', _resize_viewmodel_buffer)
 
     _viewmodel_camera = vm_np
     return vm_np
@@ -463,19 +549,24 @@ class Weapon(Entity):
             rotation=rotation or self.view_rotation,
             **kwargs
         )
-        # Dual-camera viewmodel: route the gun onto the dedicated viewmodel draw
-        # layer so only the second camera (a later pass) renders it. Depth state
-        # alone could not fix the clipping in the single-camera setup, because the
-        # gun shared the world pass; isolating it in a later pass is what works.
+        # Offscreen-buffer viewmodel: route the gun onto the dedicated viewmodel
+        # draw layer so only the buffer camera renders it into a private buffer,
+        # composited on top of the world. Depth state alone could not fix the
+        # clipping (the gun shared the window depth buffer); a private buffer is
+        # what works. See _setup_viewmodel_camera() for the full why.
         _setup_viewmodel_camera()
-        self.hide(BitMask32.all_on())   # invisible to the main camera...
-        self.show(VIEWMODEL_MASK)       # ...visible only to the viewmodel camera
+        self.hide(BitMask32.all_on())      # invisible to the main camera...
+        # show_through (NOT show): base.render.hide(VIEWMODEL_MASK) drops the bit
+        # from all world geometry so it stays out of the gun buffer; show() cannot
+        # override that ancestor hide, but show_through() can. This is what keeps
+        # the buffer gun-only while the gun stays visible to the buffer camera.
+        self.show_through(VIEWMODEL_MASK)
         # Depth test/write ON: the gun mesh is a single merged Geom (all material
         # groups in one node), so its overlapping sub-parts can only sort correctly
         # via the depth buffer — there are no separable child nodes to setBin. The
-        # VM display region clears depth first (see _setup_viewmodel_camera), so the
-        # gun still lands on top of the world (world colour already drawn, world
-        # depth wiped for this pass) regardless of how close a wall is.
+        # private buffer's own depth clear (see _setup_viewmodel_camera) gives this
+        # pass a fresh depth buffer, so the gun's parts self-sort AND the whole gun
+        # composites on top of the world regardless of how close a wall is.
         self.setDepthTest(True)
         self.setDepthWrite(True)
         # Lit path (v1.7 L1). The gun is parent=camera, and main_menu() sets
