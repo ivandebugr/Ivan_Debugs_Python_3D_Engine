@@ -13,7 +13,7 @@ index of hard invariants plus trigger-based pointers into that detail.
 
 | Field            | Value                                                                 |
 |------------------|-----------------------------------------------------------------------|
-| Version          | 1.6 (see `CHANGELOG.md`)                                              |
+| Version          | 1.7 (see `CHANGELOG.md`)                                              |
 | Engine           | Ursina 8.3.0 (Panda3D 1.10.16)                                        |
 | Language         | Python 3.10+                                                          |
 | Genre            | First-person shooter                                                  |
@@ -26,7 +26,7 @@ index of hard invariants plus trigger-based pointers into that detail.
 ## Active Persona
 
 ### `solo-founder`
-Read `/.claude/agents/solo-founder.md` at session start.
+Read `.claude/agents/solo-founder.md` at session start.
 This is a solo indie game project. Think in terms of a single developer who designs, codes,
 and ships everything. Prioritize:
 - Playability and game-feel over perfect architecture
@@ -34,32 +34,19 @@ and ships everything. Prioritize:
 - Highest-impact fixes first (RICE score thinking)
 - Honest tech-debt tracking so decisions are made consciously, not by accident
 
-Switch to `/.claude/agents/startup-cto.md` for architecture, performance, and collision audit tasks.
+Switch to `.claude/agents/startup-cto.md` for architecture, performance, and collision audit tasks.
 
 ---
 
-## Active Skills Stack
+## Skills
 
-### Always Load
-| Skill               | Path                                                                                             |
-|----------------------|---------------------------------------------------------------------------------------------------|
-| `karpathy-coder`    | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/karpathy-coder/SKILL.md`        |
-| `senior-architect`  | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/senior-architect/SKILL.md` |
-| `code-reviewer`     | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/code-reviewer/SKILL.md`    |
-| `tech-debt-tracker` | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/tech-debt-tracker/SKILL.md`     |
-
-### Load When Relevant
-| Task                                | Skill                     | Path                                                                                                    |
-|--------------------------------------|---------------------------|----------------------------------------------------------------------------------------------------------|
-| New feature design / roadmap        | `product-manager-toolkit` | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/product-team/product-manager-toolkit/SKILL.md` |
-| Level design, balance experiments   | `experiment-designer`     | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/product-team/experiment-designer/SKILL.md`     |
-| Writing changelogs / release notes  | `changelog-generator`     | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/changelog-generator/SKILL.md`      |
-| Cutting a release / version bump    | `release-manager`         | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/release-manager/SKILL.md`          |
-| Scoping a fix to minimum change     | `focused-fix`             | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/focused-fix/SKILL.md`              |
-| Performance profiling / FPS drops   | `performance-profiler`    | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering/performance-profiler/SKILL.md`     |
-| Scope / cut / ship decisions        | `founder-coach`           | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/c-level-advisor/founder-coach/SKILL.md`        |
-| Brain dump → roadmap / tasks        | `capture`                 | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/productivity/capture/SKILL.md`                 |
-| Prompt engineering for tooling      | `senior-prompt-engineer`  | `/Users/ivanrybak/Documents/python_projects/Sky_Jumper/ivans_3d_engine/engineering-team/senior-prompt-engineer/SKILL.md` |
+The skill library lives in `~/.claude/skills/` (personal scope) and is auto-discovered — no
+paths listed here. Invoke via the Skill tool by name. Relevant to this project:
+`karpathy-coder`, `senior-architect`, `code-reviewer`, `tech-debt-tracker` (general coding);
+`product-manager-toolkit`, `experiment-designer`, `changelog-generator`, `release-manager`,
+`focused-fix`, `performance-profiler`, `founder-coach`, `capture`, `senior-prompt-engineer`
+(task-specific). `karpathy-guidelines` (project scope, `.claude/skills/`) is `@`-imported at the
+top of this file and always active.
 
 ---
 
@@ -68,9 +55,10 @@ Switch to `/.claude/agents/startup-cto.md` for architecture, performance, and co
 - **Touch collision, pools, or `AliveEntity` lifecycle** → read [Core Architecture](#core-architecture) below, then `brain/Patterns.md` + `brain/Gotchas.md` in the vault
 - **Touch any `editor_*.py` module** → read `reference/module-map.md` in the vault (editor section)
 - **Touch any other module** (`game.py`, `weapon.py`, `enemy.py`, etc.) → read `reference/module-map.md`
+- **Touch graphics** (`lit_shader.py`, `bloom.py`, `light_lifecycle.py`, `ground_shadow.py`) → read `brain/Gotchas.md` (shader/`default_input`/premultiplied-alpha footguns) + `brain/Key Decisions.md` (why 2.1/GLSL 1.20, why blob shadows kept alongside real ones)
 - **Add a new enemy / weapon / level-feature type, or use the level editor** → read `reference/workflows.md`
-- **Hit an Ursina/Panda3D API surprise** (colors, InputField, pick rays, resize, `Text`, NodePath teardown) → check `brain/Gotchas.md` before debugging from scratch
-- **Check what's still open** → read `work/active/v1.6-fix-backlog.md` (do not re-list items here)
+- **Hit an Ursina/Panda3D API surprise** (colors, InputField, pick rays, resize, `Text`, NodePath teardown, shader uniform mutation on menu sweep) → check `brain/Gotchas.md` before debugging from scratch
+- **Check what's still open** → read `work/active/v1.7-fix-backlog.md` (do not re-list items here)
 - **Check the roadmap / what shipped** → read `brain/North Star.md` (do not duplicate the roadmap here)
 - **Wonder why something was built a certain way** → check `brain/Key Decisions.md`
 
@@ -106,7 +94,9 @@ if can_hit(self, hit.entity):
 `can_hit(a, b)` → `a._collision_layer & b._collision_mask`. Returns `False` for
 unregistered entities (walls). **Never** use `can_hit` inside `_swept_blocked`.
 
-`Layers.PICKUP` (bitmask 32) is a forward declaration — no entity registers it yet.
+`Layers.PICKUP` (bitmask 32) and `Layers.TRIGGER` (64) are enter/exit detection volumes, not
+damage paths — both are skipped by the swept-move and ground/ceiling rays so they never block
+movement. `AmmoPickup` registers `PICKUP`; `TriggerZone` registers `TRIGGER` (v1.5).
 
 ### AliveEntity Lifecycle (replaces `_destroyed` bool)
 ```python
@@ -180,6 +170,10 @@ Rationale and repro detail for most of these live in `brain/Gotchas.md` — this
 12. Camera lens aspect ratio must be explicitly refreshed on window resize — `_apply_layout()` calls `set_aspect_ratio` every time it runs; all dynamic UI sizing must be relative, never hardcoded.
 13. `window.on_resize` is never called by Ursina — don't set it. Wrap `window.update_aspect_ratio` instead.
 14. **Never** set a `Text` entity's `.text` to `''` or a bare `'<'`/`'>'` with tag parsing on — both crash `Text.align()`. Use `enabled=False/True` to hide/show; pass `use_tags=False` for literal angle-bracket glyphs.
+15. `Scripts/audio_workaround.py` (`audio-library-name null`) must be imported before `from ursina import *` in every entry point — ursina's import-time `create_AudioManager()` crashes libp3openal on this Mac otherwise.
+16. **Never** live-mutate a shared `Shader` `default_input` uniform (`shadow_enabled`, `glow_strength`) via `Shader.__setattr__` on the module-level singleton — it walks emptied NodePaths and crashes during a menu sweep. Set gate uniforms as a permanent `default_input`; drive per-entity values via `entity.set_shader_input`.
+17. On macOS, call `base.graphicsEngine.renderFrame()` before `window.update_aspect_ratio()` at app init — the framebuffer size is stale until a frame is pumped, so the UI lens rescales against wrong data otherwise.
+18. `gl_FragColor.a` is premultiplied coverage on this driver — never repurpose it as a free data channel (e.g. smuggling a bloom/glow selector). Always write `1.0`; select bloom by brightness.
 
 ### Conventions
 - Use `except Exception:`, not bare `except:`.
@@ -190,7 +184,7 @@ Rationale and repro detail for most of these live in `brain/Gotchas.md` — this
 
 ## Known Tech Debt
 
-Tracked exclusively in `work/active/v1.6-fix-backlog.md` (vault) — do not duplicate items here.
+Tracked exclusively in `work/active/v1.7-fix-backlog.md` (vault) — do not duplicate items here.
 Log new footguns to `brain/Gotchas.md` in the vault.
 
 ---
